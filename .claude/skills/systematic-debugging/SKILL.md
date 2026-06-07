@@ -193,7 +193,7 @@ You MUST complete each phase before proceeding to the next.
    - Automated test if possible
    - One-off test script if no framework
    - MUST have before fixing
-   - See /home/amol/code/games/backrooms/.worktrees/cool-yak-20260607-051832/.claude/skills/test-driven-development for writing proper failing tests
+   - See /home/amol/code/games/backrooms/.worktrees/loop/.claude/skills/test-driven-development for writing proper failing tests
 
 2. **Implement Single Fix**
 
