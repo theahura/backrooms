@@ -124,3 +124,47 @@ project/
 - Start with generating entire level at init (5-8 rooms) — simpler than on-demand
 - On-demand generation (infinite levels) is a future optimization
 - Seeded RNG (room seed derived from grid coordinates) for deterministic layouts
+
+## Enemy / Zombie AI Research
+
+### Line-of-Sight Detection
+- Reuse existing `raySegmentIntersection(ray, segment)` from `src/systems/visibility.js`
+- To check LOS from enemy to player: construct ray `{x: enemy.x, y: enemy.y, dx: player.x - enemy.x, dy: player.y - enemy.y}`
+- Iterate all wall segments; if any hit has `0 < t < 1`, a wall is between enemy and player → LOS blocked
+- Single ray per enemy per frame — very cheap
+- `castClosestRay(ray, segments)` helper already exists in visibility.js but is not exported — export it for reuse
+
+### Zombie State Machine
+- Three states: **IDLE** (wander randomly), **CHASE** (pursue player), **SEARCH** (go to last known position)
+- Transitions: IDLE → CHASE when LOS acquired within detection range. CHASE → SEARCH when LOS lost. SEARCH → IDLE after timeout. SEARCH → CHASE if LOS reacquired.
+- Simple `switch(state)` in update — no FSM library needed for three states
+- Detection range check first (cheap distance calc), then LOS check only if in range
+
+### Enemy Movement in Phaser 3
+- Velocity-based: compute angle to target, set `body.setVelocity(cos*speed, sin*speed)`
+- `this.physics.moveTo(enemy, targetX, targetY, speed)` also works but must be called each frame
+- Wall collision handled by Arcade physics `collider(enemies, walls)` — enemies slide along walls
+- Wander: pick random direction, move at slow speed for 1-3 seconds, pause, repeat
+
+### Phaser 3 Enemy Group Patterns
+- Dynamic physics group: `this.physics.add.group()` for moving enemies
+- Colliders: `collider(enemies, walls)`, `collider(enemies, furnitureGroup)`, `collider(enemies, enemies)`, `overlap(player, enemies, damageCallback)`
+- Use `generateTexture()` to create enemy texture once, then use real sprites — avoids per-frame Graphics redraw
+- Alternative: invisible physics sprite + Graphics object (matches existing player pattern)
+
+### Enemy Spawning in Procedural Rooms
+- Follow furniture.js pattern: `generateRoomEnemies(roomX, roomY, ...)` pure function
+- Skip room 0 (player start room)
+- Use seeded PRNG with different seed offset (e.g., `room.seed + 10000`) to avoid correlation with furniture
+- Spawn 1-2 enemies per room, placed avoiding furniture and doorway zones
+- Inner bounds same as furniture: room bounds minus wall thickness minus margin
+
+### Rendering Considerations
+- Enemy graphics must be below darkness layer (depth < 100) so enemies are hidden in darkness
+- Enemies should only be visible when illuminated by the player's flashlight — this is automatically handled by the mask system if enemies render at depth < 100
+- Player renders at depth 200 (above darkness) — enemies should NOT render above darkness
+
+### Known Limitations for MVP
+- No pathfinding — enemies chase in a direct line, may get stuck on furniture corners (thematically appropriate for zombies)
+- No damage/health system yet — will need at least basic player HP and damage on contact
+- No enemy death/combat — shooting mechanics are a separate future feature

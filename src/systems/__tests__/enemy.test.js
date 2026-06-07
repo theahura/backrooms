@@ -1,0 +1,253 @@
+import { describe, it, expect } from 'vitest';
+import { hasLineOfSight, generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_WANDER } from '../enemy.js';
+
+describe('hasLineOfSight', () => {
+  it('returns true when no walls between enemy and player', () => {
+    const enemy = { x: 50, y: 50 };
+    const player = { x: 150, y: 50 };
+    const segments = [];
+
+    expect(hasLineOfSight(enemy, player, segments, 300)).toBe(true);
+  });
+
+  it('returns false when a wall segment blocks the path', () => {
+    const enemy = { x: 50, y: 50 };
+    const player = { x: 150, y: 50 };
+    const segments = [
+      { x1: 100, y1: 0, x2: 100, y2: 100 },
+    ];
+
+    expect(hasLineOfSight(enemy, player, segments, 300)).toBe(false);
+  });
+
+  it('returns false when player is beyond detection range', () => {
+    const enemy = { x: 0, y: 0 };
+    const player = { x: 500, y: 0 };
+    const segments = [];
+
+    expect(hasLineOfSight(enemy, player, segments, 300)).toBe(false);
+  });
+
+  it('returns true when wall exists but does not block the direct path', () => {
+    const enemy = { x: 50, y: 50 };
+    const player = { x: 150, y: 50 };
+    const segments = [
+      { x1: 100, y1: 200, x2: 100, y2: 300 },
+    ];
+
+    expect(hasLineOfSight(enemy, player, segments, 300)).toBe(true);
+  });
+
+  it('returns true when player is exactly at detection range', () => {
+    const enemy = { x: 0, y: 0 };
+    const player = { x: 300, y: 0 };
+    const segments = [];
+
+    expect(hasLineOfSight(enemy, player, segments, 300)).toBe(true);
+  });
+});
+
+describe('generateRoomEnemies', () => {
+  const ROOM_X = 0;
+  const ROOM_Y = 0;
+  const ROOM_WIDTH = 1200;
+  const ROOM_HEIGHT = 1000;
+  const WALL_THICKNESS = 16;
+
+  it('returns no enemies for room 0 (starting room)', () => {
+    const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42, [], 0);
+    expect(enemies).toEqual([]);
+  });
+
+  it('returns 1-2 enemies for non-starting rooms', () => {
+    const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42, [], 1);
+    expect(enemies.length).toBeGreaterThanOrEqual(1);
+    expect(enemies.length).toBeLessThanOrEqual(2);
+  });
+
+  it('places enemies within room bounds', () => {
+    const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42, [], 1);
+
+    for (const e of enemies) {
+      expect(e.x).toBeGreaterThan(ROOM_X + WALL_THICKNESS);
+      expect(e.y).toBeGreaterThan(ROOM_Y + WALL_THICKNESS);
+      expect(e.x).toBeLessThan(ROOM_X + ROOM_WIDTH - WALL_THICKNESS);
+      expect(e.y).toBeLessThan(ROOM_Y + ROOM_HEIGHT - WALL_THICKNESS);
+    }
+  });
+
+  it('produces deterministic output for the same seed', () => {
+    const first = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 99, [], 1);
+    const second = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 99, [], 1);
+    expect(first.length).toBeGreaterThanOrEqual(1);
+    expect(first).toEqual(second);
+  });
+
+  it('does not place enemies overlapping furniture', () => {
+    const furniture = [
+      { x: 500, y: 400, width: 200, height: 200 },
+      { x: 100, y: 100, width: 300, height: 300 },
+    ];
+
+    for (let seed = 0; seed < 20; seed++) {
+      const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, furniture, 1);
+
+      for (const e of enemies) {
+        for (const f of furniture) {
+          const insideFurniture =
+            e.x >= f.x && e.x <= f.x + f.width &&
+            e.y >= f.y && e.y <= f.y + f.height;
+          expect(insideFurniture).toBe(false);
+        }
+      }
+    }
+  });
+});
+
+describe('updateEnemyAI', () => {
+  function createEnemy(overrides = {}) {
+    return {
+      x: 100,
+      y: 100,
+      state: 'idle',
+      velocityX: 0,
+      velocityY: 0,
+      wanderTimer: 0,
+      wanderAngle: 0,
+      lastKnownX: 0,
+      lastKnownY: 0,
+      searchTimer: 0,
+      ...overrides,
+    };
+  }
+
+  it('transitions from idle to chase when player is visible', () => {
+    const enemy = createEnemy({ state: 'idle' });
+    const player = { x: 200, y: 100 };
+    const segments = [];
+
+    const updated = updateEnemyAI(enemy, player, segments, 16);
+
+    expect(updated.state).toBe('chase');
+    expect(updated.velocityX).toBeGreaterThan(0);
+  });
+
+  it('transitions from chase to search when LOS is lost', () => {
+    const enemy = createEnemy({ state: 'chase' });
+    const player = { x: 200, y: 100 };
+    const segments = [
+      { x1: 150, y1: 0, x2: 150, y2: 200 },
+    ];
+
+    const updated = updateEnemyAI(enemy, player, segments, 16);
+
+    expect(updated.state).toBe('search');
+    expect(updated.lastKnownX).toBe(200);
+    expect(updated.lastKnownY).toBe(100);
+  });
+
+  it('in search state moves toward last known position', () => {
+    const enemy = createEnemy({
+      state: 'search',
+      lastKnownX: 300,
+      lastKnownY: 100,
+      searchTimer: 1000,
+    });
+    const player = { x: 500, y: 500 };
+    const segments = [
+      { x1: 150, y1: 0, x2: 150, y2: 200 },
+    ];
+
+    const updated = updateEnemyAI(enemy, player, segments, 16);
+
+    expect(updated.velocityX).toBeGreaterThan(0);
+    expect(Math.abs(updated.velocityY)).toBeLessThan(1);
+  });
+
+  it('transitions from search to idle when search timer expires', () => {
+    const enemy = createEnemy({
+      state: 'search',
+      lastKnownX: 300,
+      lastKnownY: 100,
+      searchTimer: 10,
+    });
+    const player = { x: 500, y: 500 };
+    const segments = [
+      { x1: 150, y1: 0, x2: 150, y2: 200 },
+    ];
+
+    const updated = updateEnemyAI(enemy, player, segments, 16);
+
+    expect(updated.state).toBe('idle');
+    expect(updated.velocityX).toBe(0);
+    expect(updated.velocityY).toBe(0);
+  });
+
+  it('stays in chase state when LOS is maintained', () => {
+    const enemy = createEnemy({ state: 'chase', x: 100, y: 100 });
+    const player = { x: 200, y: 100 };
+    const segments = [];
+
+    const updated = updateEnemyAI(enemy, player, segments, 16);
+
+    expect(updated.state).toBe('chase');
+    expect(updated.velocityX).toBeGreaterThan(0);
+  });
+
+  it('transitions from search to idle after reaching last known position', () => {
+    const enemy = createEnemy({
+      state: 'search',
+      x: 299,
+      y: 100,
+      lastKnownX: 300,
+      lastKnownY: 100,
+      searchTimer: 1000,
+    });
+    const player = { x: 500, y: 500 };
+    const segments = [
+      { x1: 400, y1: 0, x2: 400, y2: 600 },
+    ];
+
+    const updated = updateEnemyAI(enemy, player, segments, 16);
+
+    expect(updated.state).toBe('idle');
+  });
+
+  it('in idle state produces wander movement when timer expires', () => {
+    const enemy = createEnemy({ state: 'idle', wanderTimer: 0 });
+    const player = { x: 9999, y: 9999 };
+    const segments = [];
+
+    const updated = updateEnemyAI(enemy, player, segments, 16);
+
+    const speed = Math.sqrt(updated.velocityX ** 2 + updated.velocityY ** 2);
+    expect(speed).toBeCloseTo(ENEMY_SPEED_WANDER, 0);
+  });
+
+  it('chase velocity aims toward the player', () => {
+    const enemy = createEnemy({ state: 'idle', x: 100, y: 100 });
+    const player = { x: 100, y: 300 };
+    const segments = [];
+
+    const updated = updateEnemyAI(enemy, player, segments, 16);
+
+    expect(updated.state).toBe('chase');
+    expect(updated.velocityY).toBeGreaterThan(0);
+    expect(Math.abs(updated.velocityX)).toBeLessThan(1);
+  });
+
+  it('search to chase if LOS reacquired during search', () => {
+    const enemy = createEnemy({
+      state: 'search',
+      lastKnownX: 300,
+      lastKnownY: 100,
+      searchTimer: 1000,
+    });
+    const player = { x: 200, y: 100 };
+    const segments = [];
+
+    const updated = updateEnemyAI(enemy, player, segments, 16);
+
+    expect(updated.state).toBe('chase');
+  });
+});

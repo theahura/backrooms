@@ -3,6 +3,7 @@ import { calculateVelocity } from '../systems/movement.js';
 import { createFurnitureSegments, generateRoomFurniture } from '../systems/furniture.js';
 import { getFlashlightPolygon } from '../systems/visibility.js';
 import { generateLevel } from '../systems/level.js';
+import { generateRoomEnemies, updateEnemyAI } from '../systems/enemy.js';
 
 const PLAYER_SPEED = 200;
 const WALL_THICKNESS = 16;
@@ -21,8 +22,12 @@ export class GameScene extends Phaser.Scene {
     this.furnitureGroup = this.physics.add.staticGroup();
     this.wallSegments = [...this.level.wallSegments];
 
+    this.roomFurniture = new Map();
+    this.contactCooldown = 0;
+
     this.createRooms();
     this.createPlayer();
+    this.createEnemies();
     this.setupInput();
     this.setupCamera();
     this.createDarknessOverlay();
@@ -118,6 +123,7 @@ export class GameScene extends Phaser.Scene {
     const furniture = generateRoomFurniture(
       room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed
     );
+    this.roomFurniture.set(room.id, furniture);
 
     for (const item of furniture) {
       gfx.fillStyle(item.color, 1);
@@ -150,6 +156,82 @@ export class GameScene extends Phaser.Scene {
 
     this.physics.add.collider(this.player, this.walls);
     this.physics.add.collider(this.player, this.furnitureGroup);
+  }
+
+  createEnemies() {
+    this.enemyGroup = this.physics.add.group();
+    this.enemyStates = [];
+
+    const gfx = this.make.graphics({ add: false });
+    gfx.fillStyle(0xcc3333, 1);
+    gfx.fillCircle(10, 10, 10);
+    gfx.fillStyle(0x992222, 1);
+    gfx.fillCircle(7, 7, 3);
+    gfx.fillCircle(13, 7, 3);
+    gfx.generateTexture('enemy', 20, 20);
+    gfx.destroy();
+
+    for (const room of this.level.rooms) {
+      const furniture = this.roomFurniture.get(room.id) || [];
+      const spawnPoints = generateRoomEnemies(
+        room.x, room.y, room.width, room.height,
+        WALL_THICKNESS, room.seed, furniture, room.id
+      );
+
+      for (const spawn of spawnPoints) {
+        const enemy = this.enemyGroup.create(spawn.x, spawn.y, 'enemy');
+        enemy.body.setSize(16, 16, true);
+        enemy.body.setCollideWorldBounds(true);
+        enemy.setDepth(60);
+
+        this.enemyStates.push({
+          sprite: enemy,
+          x: spawn.x,
+          y: spawn.y,
+          state: 'idle',
+          velocityX: 0,
+          velocityY: 0,
+          wanderTimer: 0,
+          wanderAngle: spawn.wanderAngle,
+          lastKnownX: 0,
+          lastKnownY: 0,
+          searchTimer: 0,
+        });
+      }
+    }
+
+    this.physics.add.collider(this.enemyGroup, this.walls);
+    this.physics.add.collider(this.enemyGroup, this.furnitureGroup);
+    this.physics.add.collider(this.enemyGroup, this.enemyGroup);
+    this.physics.add.overlap(this.player, this.enemyGroup, this.onEnemyContact, null, this);
+  }
+
+  onEnemyContact() {
+    if (this.contactCooldown > 0) return;
+    this.contactCooldown = 500;
+    this.cameras.main.shake(100, 0.01);
+  }
+
+  updateEnemies(delta) {
+    const playerPos = { x: this.player.x, y: this.player.y };
+
+    for (const es of this.enemyStates) {
+      es.x = es.sprite.x;
+      es.y = es.sprite.y;
+
+      const updated = updateEnemyAI(es, playerPos, this.wallSegments, delta);
+
+      es.state = updated.state;
+      es.velocityX = updated.velocityX;
+      es.velocityY = updated.velocityY;
+      es.wanderTimer = updated.wanderTimer;
+      es.wanderAngle = updated.wanderAngle;
+      es.lastKnownX = updated.lastKnownX;
+      es.lastKnownY = updated.lastKnownY;
+      es.searchTimer = updated.searchTimer;
+
+      es.sprite.setVelocity(updated.velocityX, updated.velocityY);
+    }
   }
 
   drawPlayer() {
@@ -237,7 +319,7 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  update() {
+  update(_time, delta) {
     const keyState = {
       up: this.keys.W.isDown,
       down: this.keys.S.isDown,
@@ -256,6 +338,8 @@ export class GameScene extends Phaser.Scene {
       pointer.worldY
     );
 
+    if (this.contactCooldown > 0) this.contactCooldown -= delta;
+    this.updateEnemies(delta);
     this.drawPlayer();
     this.updateDarkness();
   }

@@ -21,12 +21,13 @@ Path: @/
 - **Phaser config**: 1024x768 canvas, Arcade physics with zero gravity (top-down game), auto-renderer selection
 - **Controls**: WASD movement, mouse aim, left-click shoot, right-click use items, Q/E weapon switch (movement and aiming implemented; shooting/items/weapons not yet)
 - **Level generation**: a seeded procedural level generator (`@/src/systems/level.js`) produces multiple connected rooms with doorways. `GameScene` renders and wires physics for the entire level at startup
+- **Enemy system**: zombie enemies spawn in every room except the starting room, using a pure-function AI state machine (`@/src/systems/enemy.js`) with idle/chase/search states. Enemies detect the player via line-of-sight raycasting against the same wall segment array used by the flashlight system
 
 ### Things to Know
 - The project uses Phaser 3 (~3.90.x) deliberately over Phaser 4, because Phaser 4's BitmapMask API changed with incomplete docs -- and the flashlight system is the core visual mechanic (see `@/RESEARCH-NOTES.md`)
 - Systems in `@/src/systems/` are designed as pure functions with no Phaser dependency, so they can be tested with `vitest run` in a Node environment
 - The `vite.config.js` test environment is set to `node`, not `jsdom`, because the testable code has no DOM dependencies
 - `package.json` uses `"type": "module"` -- all imports use ES module syntax throughout
-- All procedural generation (level layout, furniture placement) uses a shared seeded PRNG (`@/src/systems/random.js`) so levels are deterministic for a given seed
+- All procedural generation (level layout, furniture placement, enemy spawning) uses a shared seeded PRNG (`@/src/systems/random.js`) so levels are deterministic for a given seed
 
 Created and maintained by Nori.
