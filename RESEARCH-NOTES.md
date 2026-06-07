@@ -65,3 +65,30 @@ project/
 - `startFollow(target, roundPixels, lerpX, lerpY)` — lerp of 0.1 for smooth camera
 - Normalize velocity to prevent faster diagonal movement
 - No gravity needed for top-down (gravity: { x: 0, y: 0 })
+
+## Furniture/Obstacles Research
+
+### Architecture Pattern
+- Furniture items are rectangles that generate `{x1, y1, x2, y2}` wall segments (same format as room walls)
+- These segments are concatenated into `wallSegments` — the visibility/raycasting system needs zero changes
+- Physics uses the same zone + staticGroup pattern as existing walls
+- Visual rendering uses Graphics.fillRect — same as room floor/walls
+
+### Furniture System Design
+- Pure function in `src/systems/furniture.js` — takes room dimensions, returns furniture placement data
+- Each furniture type defined as: `{type, x, y, width, height, color, canHide}`
+- `createFurnitureSegments(x, y, width, height)` returns 4 segments (identical to `createRoomWalls`)
+- GameScene calls furniture system, draws visuals, adds physics zones, concats segments
+
+### Hiding Mechanics
+- Hiding spots are overlap zones (no physics collision for the hiding zone itself)
+- Player overlaps + presses interact key → `player.isHidden = true`
+- Enemy AI checks `isHidden` before detection (future feature)
+- Simplest: any furniture with `canHide: true` creates a slightly-larger overlap zone
+- For now, just mark furniture as hideable — actual hiding interaction comes with enemy AI
+
+### Furniture Types (for initial implementation)
+- Table: 80x50, dark brown, can hide under
+- Shelf: 100x20, medium brown, blocks rays (tall), cannot hide
+- Desk: 60x40, dark gray, can hide under
+- Bookcase: 30x80, dark brown, blocks rays, cannot hide

@@ -1,8 +1,8 @@
 # Current Progress
 
-## Status: Core Foundation Complete
+## Status: Furniture/Obstacles Complete
 
-The project scaffolding and core gameplay loop are implemented. A player can walk around a dark room with a flashlight as their only light source.
+The room now contains furniture (tables, shelves, desks, bookcases) that cast shadows in the flashlight and block player movement. The player navigates around obstacles in a dark room.
 
 ## Completed
 - Application spec written
@@ -15,16 +15,19 @@ The project scaffolding and core gameplay loop are implemented. A player can wal
 - Flashlight cone (90-degree cone clipped from visibility polygon)
 - Darkness overlay with BitmapMask (only flashlight area is visible)
 - Player rendered above darkness layer (always visible)
-- 17 unit tests covering movement, raycasting, visibility polygon, and room generation
+- Room furniture/obstacles (tables, shelves, desks, bookcases) that block flashlight rays and provide physics collision
+- Seeded PRNG for deterministic furniture placement (4-8 items per room, no overlaps)
+- Furniture marked with `canHide` flag for future hiding mechanics
+- 25 unit tests covering movement, raycasting, visibility, room generation, and furniture system
 - Documentation (docs.md files for root, src, systems, scenes)
 
 ## Architecture
-- `src/systems/` — Pure functions (movement, visibility/raycasting, room) — testable without Phaser
+- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture) — testable without Phaser
 - `src/scenes/` — Phaser scene classes that wire systems together for rendering
 - Darkness uses BitmapMask with invertAlpha on a Graphics overlay
+- Furniture segments use the same `{x1,y1,x2,y2}` format as walls — concatenated into `wallSegments` for raycasting with zero visibility code changes
 
 ## Next Steps
-- Add room furniture/obstacles (tables, shelves) that block flashlight rays and provide hiding spots
 - Implement multiple connected rooms with doorways
 - Add enemies (zombies with line-of-sight AI)
 - Implement flashlight battery drain and day/exit cycle

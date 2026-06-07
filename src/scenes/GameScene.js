@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { calculateVelocity } from '../systems/movement.js';
 import { createRoomWalls } from '../systems/room.js';
+import { createFurnitureSegments, generateRoomFurniture } from '../systems/furniture.js';
 import { getFlashlightPolygon } from '../systems/visibility.js';
 
 const PLAYER_SPEED = 200;
@@ -18,6 +19,7 @@ export class GameScene extends Phaser.Scene {
 
   create() {
     this.createRoom();
+    this.createFurniture();
     this.createPlayer();
     this.setupInput();
     this.setupCamera();
@@ -58,6 +60,30 @@ export class GameScene extends Phaser.Scene {
     );
   }
 
+  createFurniture() {
+    const furniture = generateRoomFurniture(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42);
+    const gfx = this.add.graphics();
+    gfx.setDepth(50);
+
+    this.furnitureGroup = this.physics.add.staticGroup();
+
+    for (const item of furniture) {
+      gfx.fillStyle(item.color, 1);
+      gfx.fillRect(item.x, item.y, item.width, item.height);
+
+      const zone = this.add.zone(
+        item.x + item.width / 2,
+        item.y + item.height / 2,
+        item.width,
+        item.height
+      );
+      this.furnitureGroup.add(zone);
+
+      const segments = createFurnitureSegments(item.x, item.y, item.width, item.height);
+      this.wallSegments.push(...segments);
+    }
+  }
+
   createPlayer() {
     const playerX = ROOM_X + ROOM_WIDTH / 2;
     const playerY = ROOM_Y + ROOM_HEIGHT / 2;
@@ -70,6 +96,7 @@ export class GameScene extends Phaser.Scene {
     this.player.body.setSize(20, 20, true);
 
     this.physics.add.collider(this.player, this.walls);
+    this.physics.add.collider(this.player, this.furnitureGroup);
   }
 
   drawPlayer() {

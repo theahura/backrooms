@@ -10,7 +10,7 @@ Path: @/src
 - `@/index.html` loads `@/src/main.js` as an ES module via `<script type="module">`
 - `@/src/main.js` wires Phaser config (resolution, physics, renderer) and passes scene classes to the engine
 - `@/src/scenes/` contains Phaser Scene subclasses that orchestrate rendering, input, and physics each frame
-- `@/src/systems/` contains pure functions that scenes call for game math (movement, visibility, room geometry)
+- `@/src/systems/` contains pure functions that scenes call for game math (movement, visibility, room geometry, furniture placement)
 - The architecture enforces a one-way dependency: scenes import from systems, but systems never import from scenes or Phaser
 
 ### Core Implementation
@@ -24,6 +24,7 @@ index.html
             -> src/systems/movement.js   (velocity math)
             -> src/systems/visibility.js (raycasting)
             -> src/systems/room.js       (wall segments)
+            -> src/systems/furniture.js  (obstacle segments + placement)
 ```
 
 ### Things to Know
