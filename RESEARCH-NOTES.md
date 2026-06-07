@@ -1088,3 +1088,109 @@ Key notes:
 - Stairs always auto-teleport on overlap (no confirmation prompt needed — simpler interaction)
 - Enemies do not follow player between floors (they stay on their floor)
 - Battery continues draining during stair transition (intentional tension)
+
+## Weapon Switching System Research
+
+### Design Decisions
+
+**Slot System**: 2 weapon slots (Nuclear Throne pattern)
+- Slot 0: always has pistol (default weapon)
+- Slot 1: empty at start, filled by picking up weapons found in rooms
+- Simple cycling with Q key (wraps around)
+- Spec says "q/e to switch weapons" but E is already bound to interactions (doors/switches/hiding). Using Q alone for cycling is sufficient with only 2 slots.
+
+**Weapon Types (3 types for MVP)**:
+| Stat | Pistol | Shotgun | Rifle |
+|------|--------|---------|-------|
+| Damage | 25 | 10 (per pellet) | 50 |
+| Fire Rate (ms) | 200 | 800 | 600 |
+| Bullet Count | 1 | 4 | 1 |
+| Spread Angle | 0 | PI/5 (36°) | 0 |
+| Bullet Speed | 500 | 400 | 600 |
+| Range | 600 | 350 | 900 |
+| Color | 0xffdd44 (yellow) | 0xff8844 (orange) | 0x44ddff (cyan) |
+
+**Design rationale**: Pistol is balanced all-rounder. Shotgun is high burst at close range (rewards risky play in a horror game). Rifle is long range precision (lets player engage from safety but slow fire rate means missed shots are costly).
+
+**Pickup Mechanism**: E-key interaction (same system as doors/switches/hiding)
+- Weapon pickups are added as a 4th candidate type in `updateInteractPrompt()`
+- "Press E to pick up [weapon name]" prompt when near
+- If slot 1 is empty: add weapon to slot 1
+- If slot 1 is full: swap current slot 1 weapon — drop the old one on the ground at that position
+- Prevents accidental weapon swaps (unlike auto-pickup items)
+
+**Upgrade Interaction**: Upgrades apply as flat bonuses to current weapon's base stats
+- `weaponDamage` upgrade: adds +10/level to current weapon's base damage
+- `fireRate` upgrade: subtracts 30ms/level from current weapon's base fire rate
+- `bulletRange` upgrade: adds +100/level to current weapon's base range
+- This means upgrades improve ALL weapons equally (not just pistol)
+
+**Persistence**: Weapons do NOT persist between runs
+- Player always starts with pistol each run
+- Weapons found in rooms are ephemeral (same as battery/treasure items)
+- Fitting for horror: player is always somewhat underpowered
+
+### Architecture: Pure Module `weapons.js`
+
+- `src/systems/weapons.js` — pure functions for weapon definitions and state
+- `WEAPON_TYPES` array: `{ id, name, damage, fireRate, speed, range, bulletCount, spreadAngle, color, pickupColor }`
+- `createWeaponState()` returns `{ slots: [pistolWeapon, null], activeSlot: 0 }`
+- `switchWeapon(state)` returns state with `activeSlot` toggled (wraps, skips null slots)
+- `pickupWeapon(state, weaponType)` returns `{ state, droppedWeapon }` — adds to empty slot or swaps
+- `getActiveWeapon(state)` returns current weapon definition
+- `getEffectiveStats(weapon, upgradeBonuses)` returns stats with upgrade bonuses applied
+
+### Weapon Spawning
+
+- Follow items.js pattern: seeded PRNG placement in rooms
+- Seed offset: +60000 (next in sequence after stairs +50000)
+- 1 weapon per level (rare, meaningful find) — spawns in a random non-room-0 room
+- Weapon type selection: seeded random from shotgun/rifle (pistol is never a floor drop)
+- Visual: colored rectangle pickup sprite (larger than coins, weapon-shaped) at depth 5
+
+### Shotgun Spread Implementation
+
+```javascript
+function calculateShotgunSpread(originX, originY, targetX, targetY, speed, bulletCount, spreadAngle) {
+  const baseAngle = Math.atan2(targetY - originY, targetX - originX);
+  const halfSpread = spreadAngle / 2;
+  const pellets = [];
+  for (let i = 0; i < bulletCount; i++) {
+    const offset = -halfSpread + (spreadAngle * i / (bulletCount - 1));
+    const angle = baseAngle + offset;
+    pellets.push({ vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed });
+  }
+  return pellets;
+}
+```
+
+### HUD Changes
+
+- Add weapon name text below battery/treasure text (y ~86)
+- Format: "PISTOL" / "SHOTGUN" / "RIFLE" in weapon color
+- When 2 weapons held, show both with active one highlighted
+
+### Input Changes
+
+- Register Q key in `setupInput()`
+- On Q JustDown: cycle weapon forward (wraps around non-null slots)
+- Fire logic modified: read stats from `getActiveWeapon(state)` instead of flat `this.bulletDamage` etc.
+- Shotgun fire: loop over pellets from `calculateShotgunSpread()`
+
+### Bullet Pool Sizing
+
+- Current pool: maxSize 20
+- Shotgun fires 4 pellets per shot → need larger pool
+- Increase to maxSize 30 (accounts for shotgun bursts)
+
+### Integration Points
+
+- `GameScene.init()`: create weapon state, compute effective stats from active weapon + upgrades
+- `GameScene.create()`: generate weapon pickup textures, spawn weapon in level
+- `GameScene.setupInput()`: add Q key binding
+- `GameScene.fireBullet()`: read from active weapon stats (damage, speed, count, spread)
+- `GameScene.updateBullets()`: per-bullet range check (store weapon range on bullet data)
+- `GameScene.onBulletHitEnemy()`: per-bullet damage (store damage on bullet data)
+- `GameScene.updateInteractPrompt()`: add weapon pickup as candidate type
+- `GameScene.drawHUD()`: add weapon indicator text
+- `shooting.js`: add `calculateShotgunSpread()` export

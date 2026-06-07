@@ -5,7 +5,8 @@ import { getFlashlightPolygon } from '../systems/visibility.js';
 import { generateMultiFloorLevel, getFloorBounds, FLOOR_ROOM_COUNTS, STAIR_SIZE } from '../systems/stairs.js';
 import { generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_CHASE, CRAWLER_CHASE_SPEED, SPITTER_CHASE_SPEED } from '../systems/enemy.js';
 import { createCombatState, applyDamage, updateCombat, getHealthFraction, isInvulnerable, applyEnemyDamage, isEnemyDead, ENEMY_CONTACT_DAMAGE, ENEMY_MAX_HP, CRAWLER_MAX_HP, SPITTER_MAX_HP, CRAWLER_CONTACT_DAMAGE, SPITTER_CONTACT_DAMAGE, SPITTER_PROJECTILE_DAMAGE } from '../systems/combat.js';
-import { calculateBulletVelocity, canFire, updateFireCooldown, isBulletExpired, BULLET_SPEED, SPITTER_PROJECTILE_SPEED, SPITTER_PROJECTILE_RANGE } from '../systems/shooting.js';
+import { calculateBulletVelocity, calculateShotgunSpread, canFire, updateFireCooldown, isBulletExpired, SPITTER_PROJECTILE_SPEED, SPITTER_PROJECTILE_RANGE } from '../systems/shooting.js';
+import { WEAPON_TYPES, createWeaponState, switchWeapon, pickupWeapon, getActiveWeapon, getEffectiveStats, generateLevelWeapon } from '../systems/weapons.js';
 import { getEnemyHP, getEnemyCount, getEnemyChaseSpeed, getEnemyDamage } from '../systems/scaling.js';
 import { createBatteryState, updateBattery, getBatteryFraction, getFlashlightConeAngle, shouldFlicker, rechargeBattery, BATTERY_RECHARGE_AMOUNT } from '../systems/battery.js';
 import { generateRoomItems, ITEM_TYPES } from '../systems/items.js';
@@ -33,9 +34,13 @@ export class GameScene extends Phaser.Scene {
     this.flashlightAngle = getUpgradeValue('flashlight', levels.flashlight);
     this.maxHp = getUpgradeValue('health', levels.health);
     this.playerSpeed = getUpgradeValue('speed', levels.speed);
-    this.bulletDamage = getUpgradeValue('weaponDamage', levels.weaponDamage);
-    this.fireRate = getUpgradeValue('fireRate', levels.fireRate);
-    this.bulletRange = getUpgradeValue('bulletRange', levels.bulletRange);
+    this.upgradeBonuses = {
+      damage: getUpgradeValue('weaponDamage', levels.weaponDamage) - 25,
+      fireRate: getUpgradeValue('fireRate', levels.fireRate) - 200,
+      range: getUpgradeValue('bulletRange', levels.bulletRange) - 600,
+    };
+    this.weaponState = createWeaponState();
+    this.updateWeaponStats();
 
     const runCount = this.registry.get('runCount') ?? 0;
     this.registry.set('runCount', runCount + 1);
@@ -52,6 +57,18 @@ export class GameScene extends Phaser.Scene {
     this.scaledSpitterDamage = getEnemyDamage(SPITTER_CONTACT_DAMAGE, runCount);
     this.extraEnemyCount = getEnemyCount(runCount);
     saveGame(shopState || createShopState(), runCount + 1);
+  }
+
+  updateWeaponStats() {
+    const weapon = getActiveWeapon(this.weaponState);
+    const stats = getEffectiveStats(weapon, this.upgradeBonuses);
+    this.bulletDamage = stats.damage;
+    this.fireRate = stats.fireRate;
+    this.bulletRange = stats.range;
+    this.bulletSpeed = stats.speed;
+    this.bulletCount = stats.bulletCount;
+    this.bulletSpreadAngle = stats.spreadAngle;
+    this.bulletColor = stats.color;
   }
 
   create() {
@@ -80,6 +97,7 @@ export class GameScene extends Phaser.Scene {
     this.createItems();
     this.createBullets();
     this.createEnemyBullets();
+    this.createWeaponPickups();
     this.createExitZone();
     this.createStairs();
     this.createCrackVisual();
@@ -354,6 +372,20 @@ export class GameScene extends Phaser.Scene {
       });
     }
 
+    const WEAPON_PICKUP_RANGE = 80;
+    for (const wpnSprite of this.weaponPickupSprites) {
+      if (!wpnSprite.active) continue;
+      const dist = Math.hypot(this.player.x - wpnSprite.x, this.player.y - wpnSprite.y);
+      if (dist <= WEAPON_PICKUP_RANGE) {
+        candidates.push({
+          type: 'weapon',
+          item: wpnSprite,
+          pos: { x: wpnSprite.x, y: wpnSprite.y },
+          dist,
+        });
+      }
+    }
+
     candidates.sort((a, b) => a.dist - b.dist);
     const winner = candidates[0] || null;
 
@@ -513,13 +545,20 @@ export class GameScene extends Phaser.Scene {
   }
 
   createBullets() {
-    const gfx = this.make.graphics({ add: false });
-    gfx.fillStyle(0xffdd44, 1);
-    gfx.fillCircle(3, 3, 3);
-    gfx.generateTexture('bullet', 6, 6);
-    gfx.destroy();
+    const bulletTextures = [
+      { key: 'bullet_pistol', color: 0xffdd44, radius: 3 },
+      { key: 'bullet_shotgun', color: 0xff8844, radius: 2 },
+      { key: 'bullet_rifle', color: 0x44ddff, radius: 3 },
+    ];
+    for (const tex of bulletTextures) {
+      const gfx = this.make.graphics({ add: false });
+      gfx.fillStyle(tex.color, 1);
+      gfx.fillCircle(tex.radius, tex.radius, tex.radius);
+      gfx.generateTexture(tex.key, tex.radius * 2, tex.radius * 2);
+      gfx.destroy();
+    }
 
-    this.bulletGroup = this.physics.add.group({ maxSize: 20 });
+    this.bulletGroup = this.physics.add.group({ maxSize: 30 });
 
     this.physics.add.collider(this.bulletGroup, this.walls, this.onBulletHitWall, null, this);
     this.physics.add.collider(this.bulletGroup, this.furnitureGroup, this.onBulletHitWall, null, this);
@@ -540,6 +579,27 @@ export class GameScene extends Phaser.Scene {
     this.physics.add.collider(this.enemyBulletGroup, this.furnitureGroup, this.onBulletHitWall, null, this);
     this.physics.add.collider(this.enemyBulletGroup, this.doorGroup, this.onBulletHitWall, null, this);
     this.physics.add.overlap(this.enemyBulletGroup, this.player, this.onEnemyBulletHitPlayer, null, this);
+  }
+
+  createWeaponPickups() {
+    this.weaponPickupSprites = [];
+
+    for (const wpn of WEAPON_TYPES.filter(w => w.id !== 'pistol')) {
+      const gfx = this.make.graphics({ add: false });
+      gfx.fillStyle(wpn.pickupColor, 1);
+      gfx.fillRect(0, 2, 16, 6);
+      gfx.fillRect(6, 0, 4, 10);
+      gfx.generateTexture(`pickup_${wpn.id}`, 16, 10);
+      gfx.destroy();
+    }
+
+    const wpnData = generateLevelWeapon(this.level.rooms, this.levelSeed, this.roomFurniture);
+    if (wpnData) {
+      const sprite = this.add.sprite(wpnData.x, wpnData.y, `pickup_${wpnData.weaponId}`);
+      sprite.setDepth(5);
+      sprite.setData('weaponId', wpnData.weaponId);
+      this.weaponPickupSprites.push(sprite);
+    }
   }
 
   fireEnemyBullet(fromX, fromY, toX, toY) {
@@ -615,6 +675,14 @@ export class GameScene extends Phaser.Scene {
     });
     this.treasureText.setScrollFactor(0);
     this.treasureText.setDepth(1000);
+
+    this.weaponText = this.add.text(20, 86, '', {
+      fontSize: '14px',
+      color: '#ffffff',
+      fontFamily: 'monospace',
+    });
+    this.weaponText.setScrollFactor(0);
+    this.weaponText.setDepth(1000);
 
     this.floorText = this.add.text(this.cameras.main.width - 180, 145, 'B1', {
       fontSize: '12px',
@@ -829,7 +897,35 @@ export class GameScene extends Phaser.Scene {
   }
 
   fireBullet() {
-    const bullet = this.bulletGroup.get(this.player.x, this.player.y, 'bullet');
+    const weapon = getActiveWeapon(this.weaponState);
+    const textureKey = `bullet_${weapon.id}`;
+    const pointer = this.input.activePointer;
+
+    if (this.bulletCount > 1 && this.bulletSpreadAngle > 0) {
+      const pellets = calculateShotgunSpread(
+        this.player.x, this.player.y,
+        pointer.worldX, pointer.worldY,
+        this.bulletSpeed, this.bulletCount, this.bulletSpreadAngle
+      );
+      for (const pellet of pellets) {
+        this.spawnBullet(textureKey, pellet.vx, pellet.vy);
+      }
+    } else {
+      let { vx, vy } = calculateBulletVelocity(
+        this.player.x, this.player.y,
+        pointer.worldX, pointer.worldY,
+        this.bulletSpeed
+      );
+      if (vx === 0 && vy === 0) {
+        vx = Math.cos(this.playerAngle) * this.bulletSpeed;
+        vy = Math.sin(this.playerAngle) * this.bulletSpeed;
+      }
+      this.spawnBullet(textureKey, vx, vy);
+    }
+  }
+
+  spawnBullet(textureKey, vx, vy) {
+    const bullet = this.bulletGroup.get(this.player.x, this.player.y, textureKey);
     if (!bullet) return;
 
     bullet.setActive(true);
@@ -837,20 +933,11 @@ export class GameScene extends Phaser.Scene {
     bullet.body.reset(this.player.x, this.player.y);
     bullet.setDepth(150);
     bullet.body.setSize(6, 6, true);
-
-    const pointer = this.input.activePointer;
-    let { vx, vy } = calculateBulletVelocity(
-      this.player.x, this.player.y,
-      pointer.worldX, pointer.worldY,
-      BULLET_SPEED
-    );
-    if (vx === 0 && vy === 0) {
-      vx = Math.cos(this.playerAngle) * BULLET_SPEED;
-      vy = Math.sin(this.playerAngle) * BULLET_SPEED;
-    }
     bullet.setVelocity(vx, vy);
     bullet.setData('originX', this.player.x);
     bullet.setData('originY', this.player.y);
+    bullet.setData('damage', this.bulletDamage);
+    bullet.setData('range', this.bulletRange);
   }
 
   onBulletHitWall(bullet) {
@@ -867,7 +954,8 @@ export class GameScene extends Phaser.Scene {
     const enemyState = this.enemyStates.find(es => es.sprite === enemySprite);
     if (!enemyState) return;
 
-    enemyState.health = applyEnemyDamage(enemyState.health, this.bulletDamage);
+    const damage = bullet.getData('damage') || this.bulletDamage;
+    enemyState.health = applyEnemyDamage(enemyState.health, damage);
 
     if (isEnemyDead(enemyState.health)) {
       enemySprite.setActive(false);
@@ -1018,6 +1106,12 @@ export class GameScene extends Phaser.Scene {
 
     this.batteryCountText.setText(`BAT x${this.inventoryState.batteries}`);
     this.treasureText.setText(`$${this.inventoryState.treasureValue}`);
+
+    const weapon = getActiveWeapon(this.weaponState);
+    const colorHex = '#' + weapon.color.toString(16).padStart(6, '0');
+    this.weaponText.setColor(colorHex);
+    const slotIndicator = this.weaponState.slots[1] ? '[Q]' : '';
+    this.weaponText.setText(`${weapon.name.toUpperCase()} ${slotIndicator}`);
   }
 
   drawMinimap() {
@@ -1067,6 +1161,7 @@ export class GameScene extends Phaser.Scene {
       S: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S),
       D: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
       E: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E),
+      Q: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Q),
     };
 
     this.input.mouse.disableContextMenu();
@@ -1075,6 +1170,30 @@ export class GameScene extends Phaser.Scene {
         this.onUseBattery();
       }
     });
+  }
+
+  onWeaponPickup(wpnSprite) {
+    const weaponId = wpnSprite.getData('weaponId');
+    const weaponType = WEAPON_TYPES.find(w => w.id === weaponId);
+    if (!weaponType) return;
+
+    const result = pickupWeapon(this.weaponState, weaponType);
+    this.weaponState = result.state;
+    this.updateWeaponStats();
+
+    wpnSprite.setActive(false);
+    wpnSprite.setVisible(false);
+    this.weaponPickupSprites = this.weaponPickupSprites.filter(s => s !== wpnSprite);
+
+    if (result.droppedWeapon) {
+      const dropSprite = this.add.sprite(
+        this.player.x, this.player.y,
+        `pickup_${result.droppedWeapon.id}`
+      );
+      dropSprite.setDepth(5);
+      dropSprite.setData('weaponId', result.droppedWeapon.id);
+      this.weaponPickupSprites.push(dropSprite);
+    }
   }
 
   onUseBattery() {
@@ -1167,7 +1286,8 @@ export class GameScene extends Phaser.Scene {
       if (!bullet.active) continue;
       const originX = bullet.getData('originX');
       const originY = bullet.getData('originY');
-      if (isBulletExpired(originX, originY, bullet.x, bullet.y, this.bulletRange)) {
+      const range = bullet.getData('range') || this.bulletRange;
+      if (isBulletExpired(originX, originY, bullet.x, bullet.y, range)) {
         bullet.setActive(false);
         bullet.setVisible(false);
         bullet.body.stop();
@@ -1217,6 +1337,11 @@ export class GameScene extends Phaser.Scene {
 
     this.updateInteractPrompt();
 
+    if (Phaser.Input.Keyboard.JustDown(this.keys.Q)) {
+      this.weaponState = switchWeapon(this.weaponState);
+      this.updateWeaponStats();
+    }
+
     if (Phaser.Input.Keyboard.JustDown(this.keys.E)) {
       if (this.hidingState.isHiding) {
         this.hidingState = exitHiding(this.hidingState);
@@ -1227,6 +1352,8 @@ export class GameScene extends Phaser.Scene {
           this.onToggleSwitch(this.nearestInteractable.item.id);
         } else if (this.nearestInteractable.type === 'furniture') {
           this.hidingState = enterHiding(this.hidingState, this.nearestInteractable.item);
+        } else if (this.nearestInteractable.type === 'weapon') {
+          this.onWeaponPickup(this.nearestInteractable.item);
         }
       }
     }

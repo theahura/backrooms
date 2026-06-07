@@ -29,3 +29,18 @@ export function isBulletExpired(originX, originY, currentX, currentY, maxRange) 
   const dy = currentY - originY;
   return Math.sqrt(dx * dx + dy * dy) > maxRange;
 }
+
+export function calculateShotgunSpread(originX, originY, targetX, targetY, speed, bulletCount, spreadAngle) {
+  const baseAngle = Math.atan2(targetY - originY, targetX - originX);
+  if (bulletCount <= 1) {
+    return [{ vx: Math.cos(baseAngle) * speed, vy: Math.sin(baseAngle) * speed }];
+  }
+  const halfSpread = spreadAngle / 2;
+  const pellets = [];
+  for (let i = 0; i < bulletCount; i++) {
+    const offset = -halfSpread + (spreadAngle * i / (bulletCount - 1));
+    const angle = baseAngle + offset;
+    pellets.push({ vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed });
+  }
+  return pellets;
+}

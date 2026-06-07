@@ -1,6 +1,6 @@
 # Current Progress
 
-## Status: Multi-Floor Level with Stairs
+## Status: Weapon Switching System
 
 Added multi-floor level generation with bidirectional stairs connecting floors. Level now generates 2 floors (4 rooms on floor 0, 3 rooms on floor 1 = 7 total rooms). Floors are separated by 10000px in world-space Y. One stair connection links a non-starting room on floor 0 to a room on floor 1. Stairs are overlap zones that trigger camera fade teleportation (300ms fade out, reposition, 300ms fade in). Minimap shows only the current floor's visited rooms with a "B1"/"B2" floor indicator. Stair visuals: dark rectangles with step lines and pulsing purple glow. Player input/physics frozen during teleport via `isTeleporting` flag.
 
@@ -182,7 +182,21 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
   - Room IDs globally unique across floors (floor 1 IDs offset by floor 0 count)
   - 12 new unit tests covering multi-floor generation, stair connections, ID uniqueness, bounds, determinism
   - 2 new exploration tests for floor filtering
-- 291 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, weapon upgrades, enemy types, and stairs
+- Weapon switching system (Q key to cycle, E key to pick up)
+  - Pure function module `weapons.js`: WEAPON_TYPES, createWeaponState, switchWeapon, pickupWeapon, getActiveWeapon, getEffectiveStats, generateRoomWeapon
+  - 3 weapon types: Pistol (default, balanced), Shotgun (4 pellets, spread, close range), Rifle (high damage, long range, slow fire rate)
+  - 2 weapon slots: pistol always in slot 0, found weapons in slot 1
+  - Weapon pickups spawn in rooms via seeded PRNG (seed offset +60000)
+  - Pickups integrate with E-key interaction system (distance-sorted candidates alongside doors, switches, furniture)
+  - When picking up with full slots: swaps slot 1, drops old weapon on ground
+  - `calculateShotgunSpread()` added to shooting.js for multi-pellet spread fire
+  - Per-bullet damage and range stored via `setData()` on each bullet (supports mixed weapons)
+  - Upgrade bonuses (weaponDamage, fireRate, bulletRange) computed as deltas from base and applied additively to equipped weapon
+  - Per-weapon bullet textures: yellow (pistol), orange (shotgun), cyan (rifle)
+  - HUD shows current weapon name in weapon color, with [Q] indicator when second weapon is held
+  - Bullet pool increased from 20 to 30 to accommodate shotgun bursts
+  - 22 unit tests covering weapon state, switching, pickup/swap, effective stats, shotgun spread, and spawn logic
+- 313 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, weapon upgrades, enemy types, stairs, and weapons
 - Documentation (docs.md files for root, src, systems, scenes)
 - Bug fix: flashlight mouse tracking drift during WASD movement
   - Root cause: Phaser 3 `pointer.worldX`/`worldY` are cached properties only refreshed on mouse events, not camera scroll
@@ -190,7 +204,7 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
   - Also fixes bullet direction when shooting while moving
 
 ## Architecture
-- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop, doors, lightswitch, hiding, persistence, exploration, startroom, scaling, stairs) — testable without Phaser
+- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop, doors, lightswitch, hiding, persistence, exploration, startroom, scaling, stairs, weapons) — testable without Phaser
 - `src/scenes/` — Phaser scene classes that wire systems together for rendering (GameScene for gameplay, ShopScene for upgrades between runs)
 - Darkness uses BitmapMask with invertAlpha on a Graphics overlay
 - Furniture segments use the same `{x1,y1,x2,y2}` format as walls — concatenated into `wallSegments` for raycasting with zero visibility code changes
@@ -199,13 +213,13 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
 - Enemy LOS reuses `raySegmentIntersection` from visibility.js — single ray from enemy to player, checked against wall segments
 - Enemy AI is a pure function state machine — takes state in, returns updated state with velocity. Three enemy types (basic, crawler, spitter) share the same FSM with type-aware speed constants via `getTypeSpeeds()`. Spitters add a 4th `attack` state with `wantsToFire` signaling to the scene.
 - Enemy type is assigned at spawn time by `getEnemyType(rand, runCount)` — run-gated distribution ensures gradual introduction of new types
-- Combat/shooting/battery/inventory/hiding/exploration/startroom/scaling are pure function modules (`combat.js`, `shooting.js`, `battery.js`, `inventory.js`, `hiding.js`, `exploration.js`, `startroom.js`, `scaling.js`) — same architecture pattern as enemy/movement
+- Combat/shooting/battery/inventory/hiding/exploration/startroom/scaling/weapons are pure function modules (`combat.js`, `shooting.js`, `battery.js`, `inventory.js`, `hiding.js`, `exploration.js`, `startroom.js`, `scaling.js`, `weapons.js`) — same architecture pattern as enemy/movement
 - Items system (`items.js`) follows same spawning pattern as enemy.js: seeded PRNG, furniture overlap avoidance, skip room 0
-- Player combat, battery, inventory, hiding, exploration, and shop states are immutable objects; enemy health is a mutable field on the enemy state (asymmetry: player state is passed through pure functions, enemy health is mutated in-place in the scene callback)
-- Item spawning uses seed offset +20000 (furniture: +0, enemies: +10000, items: +20000, doors: +30000, switches: +40000) to avoid correlation
+- Player combat, battery, inventory, hiding, exploration, weapon, and shop states are immutable objects; enemy health is a mutable field on the enemy state (asymmetry: player state is passed through pure functions, enemy health is mutated in-place in the scene callback)
+- Item spawning uses seed offset +20000 (furniture: +0, enemies: +10000, items: +20000, doors: +30000, switches: +40000, weapons: +60000) to avoid correlation
 - Closable door segments are dynamically pushed/spliced from `wallSegments` — same mutable array pattern as furniture, but toggled at runtime via `body.enable` on Phaser static bodies
 - Light switch lit rooms are drawn as fillRect into maskGraphics (same BitmapMask as flashlight) — drawn before the flashlight early-return so lit rooms stay visible even when battery is dead
-- E-key interaction resolves nearest interactable (door, switch, or hideable furniture) via distance-sorted candidates array in `updateInteractPrompt()`
+- E-key interaction resolves nearest interactable (door, switch, hideable furniture, or weapon pickup) via distance-sorted candidates array in `updateInteractPrompt()`
 - Shop state persists in `game.registry` (in-memory, survives scene transitions) and is backed by localStorage via `persistence.js` (survives browser reloads)
 - GameScene `init()` reads upgrade levels from registry and computes stat values via `getUpgradeValue()` — spreads `createShopState().upgrades` as default for forward compatibility with new upgrade keys
 - Enemy stats (HP, count, chase speed, contact damage) are precomputed per type in `init()` via `scaling.js` functions — `scaledEnemyHP`, `scaledCrawlerHP`, `scaledSpitterHP`, etc. Constants in `combat.js`/`shooting.js`/`enemy.js` serve as base values only
@@ -214,7 +228,8 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
 - Per-enemy `contactDamage` field on enemy state replaces uniform `scaledEnemyDamage` — `onEnemyContact(player, enemySprite)` looks up the enemy by sprite reference
 - ShopScene `init(data)` receives `treasureEarned` via scene start data, adds to registry gold balance
 - Two-scene flow: GameScene → (exit/death) → ShopScene → (enter backrooms) → GameScene
-- Player bullet physics group uses Phaser's built-in pooling (`maxSize: 20`); enemy bullet group uses same pattern (`maxSize: 30`) with distinct red texture
+- Player bullet physics group uses Phaser's built-in pooling (`maxSize: 30`); enemy bullet group uses same pattern (`maxSize: 30`) with distinct red texture
+- `fireBullet()` reads active weapon stats: single-bullet weapons use `calculateBulletVelocity`, multi-pellet weapons use `calculateShotgunSpread`. Each bullet stores its own damage/range via `setData()`.
 - `fireEnemyBullet()` in GameScene mirrors `fireBullet()` — spawned from spitter position toward player, uses `SPITTER_PROJECTILE_SPEED`/`SPITTER_PROJECTILE_RANGE` from `shooting.js`
 - HUD uses `setScrollFactor(0)` at depth 1000 to stay fixed on screen above all game layers
 - Battery feeds into flashlight rendering: `getFlashlightConeAngle()` scales the cone angle passed to `getFlashlightPolygon()` — no changes to the visibility system itself
@@ -231,10 +246,10 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
 - Multi-floor level: `stairs.js` wraps `generateLevel()` per floor, offsets room IDs and Y positions, then creates stair connections. `generateMultiFloorLevel` replaces direct `generateLevel` call in GameScene.
 - Stair zones use identical overlap + camera fade pattern as exit zone — `onStairEnter()` mirrors `onDayComplete()` structure with `body.reset()` instead of scene transition
 - `getMinimapData(state, rooms, bounds, playerPos, exitPos, screenWidth, floorFilter)` — 7th param filters rooms by floor; null/undefined shows all (backward compatible)
-- Seed offset scheme: furniture +0, enemies +10000, items +20000, doors +30000, switches +40000, stairs +50000, floor seed +1000*floorIndex
+- Weapon system: `weapons.js` defines WEAPON_TYPES (pistol, shotgun, rifle) with per-weapon stats. `createWeaponState()` returns 2-slot inventory (pistol default + one pickup slot). Upgrade bonuses computed as deltas from pistol base values and applied additively to any weapon via `getEffectiveStats()`. Q-key cycles `activeSlot`, E-key on weapon pickup calls `pickupWeapon()` which fills empty slot or swaps.
+- Seed offset scheme: furniture +0, enemies +10000, items +20000, doors +30000, switches +40000, stairs +50000, weapons +60000, floor seed +1000*floorIndex
 
 ## Next Steps
-- Add weapons switching (Q/E to switch weapons, multiple weapon types)
 - Add backpack / storage capacity upgrades
 - Add different exit locations (spec: discovering alternate exits leads to different locations)
 - Add lore items in rooms
