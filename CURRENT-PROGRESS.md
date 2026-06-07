@@ -1,8 +1,8 @@
 # Current Progress
 
-## Status: Zombie Enemy System Complete
+## Status: Combat System Complete
 
-The game now has zombie enemies that spawn in rooms, chase the player when they have line-of-sight, and wander randomly when they can't see the player. Enemies are hidden by the darkness/flashlight system and collide with walls, furniture, and each other.
+The game now has a full combat loop: enemies damage the player on contact (with invulnerability cooldown), the player can shoot projectile bullets to kill enemies (2 shots each), and the player dies when HP reaches 0 (scene restarts). A HUD health bar shows current health.
 
 ## Completed
 - Application spec written
@@ -33,7 +33,22 @@ The game now has zombie enemies that spawn in rooms, chase the player when they 
   - Enemies render at depth 60 (below darkness at 100) — automatically hidden by flashlight mask
   - Camera shake on player-enemy contact (placeholder for future damage system)
   - `generateTexture` creates red circle sprite for enemies
-- 59 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, and AI state machine
+- Player health/damage system
+  - 100 HP, 20 damage per enemy contact, 1 second invulnerability cooldown after hit
+  - Camera shake + red flash on damage, player turns red/translucent during invulnerability
+  - Death at 0 HP: camera fade to black, scene restart
+  - HUD health bar (top-left, always visible above darkness)
+- Shooting mechanics
+  - Left-click fires yellow projectile bullets toward mouse cursor
+  - Bullet speed 500, max range 600px, fire rate 200ms cooldown
+  - Bullets collide with walls and furniture (destroyed on impact)
+  - Bullets damage enemies (25 per hit, 2 shots to kill)
+  - Object pooling via Phaser physics group (max 20 active bullets)
+  - Bullets render at depth 150 (visible above darkness layer)
+- Enemy health system
+  - 50 HP per zombie, killed after 2 bullet hits
+  - Dead enemies removed from physics and AI updates
+- 91 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, and shooting
 - Documentation (docs.md files for root, src, systems, scenes)
 
 ## Architecture
@@ -45,12 +60,14 @@ The game now has zombie enemies that spawn in rooms, chase the player when they 
 - Doorways are gaps in wall segments — the visibility system naturally handles light passing through without any changes
 - Enemy LOS reuses `raySegmentIntersection` from visibility.js — single ray from enemy to player, checked against wall segments
 - Enemy AI is a pure function state machine — takes state in, returns updated state with velocity
+- Combat/shooting are pure function modules (`combat.js`, `shooting.js`) — same architecture pattern as enemy/movement
+- Player combat state is an immutable object; enemy health is a mutable field on the enemy state (asymmetry: player state is passed through pure functions, enemy health is mutated in-place in the scene callback)
+- Bullet physics group uses Phaser's built-in pooling (`maxSize: 20`, `getFirstDead`)
+- HUD uses `setScrollFactor(0)` at depth 1000 to stay fixed on screen above all game layers
 
 ## Next Steps
 - Implement flashlight battery drain and day/exit cycle
 - Add items and inventory system
-- Implement shooting mechanics
-- Add player health/damage system (currently just camera shake on contact)
 - Add shop/upgrade system between runs
 - Add starting room (furniture store with crack in wall)
 - Add closable doors to some room connections

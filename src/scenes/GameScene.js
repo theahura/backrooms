@@ -4,6 +4,8 @@ import { createFurnitureSegments, generateRoomFurniture } from '../systems/furni
 import { getFlashlightPolygon } from '../systems/visibility.js';
 import { generateLevel } from '../systems/level.js';
 import { generateRoomEnemies, updateEnemyAI } from '../systems/enemy.js';
+import { createCombatState, applyDamage, updateCombat, getHealthFraction, isInvulnerable, applyEnemyDamage, isEnemyDead, ENEMY_CONTACT_DAMAGE, ENEMY_MAX_HP, BULLET_DAMAGE } from '../systems/combat.js';
+import { calculateBulletVelocity, canFire, updateFireCooldown, isBulletExpired, BULLET_SPEED, FIRE_RATE_MS, BULLET_MAX_RANGE } from '../systems/shooting.js';
 
 const PLAYER_SPEED = 200;
 const WALL_THICKNESS = 16;
@@ -23,14 +25,17 @@ export class GameScene extends Phaser.Scene {
     this.wallSegments = [...this.level.wallSegments];
 
     this.roomFurniture = new Map();
-    this.contactCooldown = 0;
+    this.combatState = createCombatState();
+    this.fireCooldown = 0;
 
     this.createRooms();
     this.createPlayer();
     this.createEnemies();
+    this.createBullets();
     this.setupInput();
     this.setupCamera();
     this.createDarknessOverlay();
+    this.createHUD();
   }
 
   createRooms() {
@@ -196,6 +201,7 @@ export class GameScene extends Phaser.Scene {
           lastKnownX: 0,
           lastKnownY: 0,
           searchTimer: 0,
+          health: ENEMY_MAX_HP,
         });
       }
     }
@@ -206,10 +212,97 @@ export class GameScene extends Phaser.Scene {
     this.physics.add.overlap(this.player, this.enemyGroup, this.onEnemyContact, null, this);
   }
 
+  createBullets() {
+    const gfx = this.make.graphics({ add: false });
+    gfx.fillStyle(0xffdd44, 1);
+    gfx.fillCircle(3, 3, 3);
+    gfx.generateTexture('bullet', 6, 6);
+    gfx.destroy();
+
+    this.bulletGroup = this.physics.add.group({ maxSize: 20 });
+
+    this.physics.add.collider(this.bulletGroup, this.walls, this.onBulletHitWall, null, this);
+    this.physics.add.collider(this.bulletGroup, this.furnitureGroup, this.onBulletHitWall, null, this);
+    this.physics.add.overlap(this.bulletGroup, this.enemyGroup, this.onBulletHitEnemy, null, this);
+  }
+
+  createHUD() {
+    this.hudGraphics = this.add.graphics();
+    this.hudGraphics.setScrollFactor(0);
+    this.hudGraphics.setDepth(1000);
+  }
+
+  fireBullet() {
+    const bullet = this.bulletGroup.get(this.player.x, this.player.y, 'bullet');
+    if (!bullet) return;
+
+    bullet.setActive(true);
+    bullet.setVisible(true);
+    bullet.body.reset(this.player.x, this.player.y);
+    bullet.setDepth(150);
+    bullet.body.setSize(6, 6, true);
+
+    const pointer = this.input.activePointer;
+    let { vx, vy } = calculateBulletVelocity(
+      this.player.x, this.player.y,
+      pointer.worldX, pointer.worldY,
+      BULLET_SPEED
+    );
+    if (vx === 0 && vy === 0) {
+      vx = Math.cos(this.playerAngle) * BULLET_SPEED;
+      vy = Math.sin(this.playerAngle) * BULLET_SPEED;
+    }
+    bullet.setVelocity(vx, vy);
+    bullet.setData('originX', this.player.x);
+    bullet.setData('originY', this.player.y);
+  }
+
+  onBulletHitWall(bullet) {
+    bullet.setActive(false);
+    bullet.setVisible(false);
+    bullet.body.stop();
+  }
+
+  onBulletHitEnemy(bullet, enemySprite) {
+    bullet.setActive(false);
+    bullet.setVisible(false);
+    bullet.body.stop();
+
+    const enemyState = this.enemyStates.find(es => es.sprite === enemySprite);
+    if (!enemyState) return;
+
+    enemyState.health = applyEnemyDamage(enemyState.health, BULLET_DAMAGE);
+
+    if (isEnemyDead(enemyState.health)) {
+      enemySprite.setActive(false);
+      enemySprite.setVisible(false);
+      enemySprite.body.stop();
+      enemySprite.body.enable = false;
+      this.enemyStates = this.enemyStates.filter(es => es !== enemyState);
+    }
+  }
+
   onEnemyContact() {
-    if (this.contactCooldown > 0) return;
-    this.contactCooldown = 500;
-    this.cameras.main.shake(100, 0.01);
+    const before = this.combatState;
+    this.combatState = applyDamage(before, ENEMY_CONTACT_DAMAGE);
+
+    if (this.combatState.hp < before.hp) {
+      this.cameras.main.shake(100, 0.01);
+      this.cameras.main.flash(150, 255, 0, 0);
+
+      if (this.combatState.isDead) {
+        this.onPlayerDeath();
+      }
+    }
+  }
+
+  onPlayerDeath() {
+    this.player.body.stop();
+    this.player.body.enable = false;
+    this.cameras.main.fadeOut(500, 0, 0, 0);
+    this.cameras.main.once('camerafadeoutcomplete', () => {
+      this.scene.restart();
+    });
   }
 
   updateEnemies(delta) {
@@ -240,11 +333,34 @@ export class GameScene extends Phaser.Scene {
     this.playerGraphics.y = this.player.y;
     this.playerGraphics.setRotation(this.playerAngle || 0);
 
-    this.playerGraphics.fillStyle(0x44aa44, 1);
+    const hurt = isInvulnerable(this.combatState);
+    const alpha = hurt ? 0.5 : 1;
+
+    this.playerGraphics.fillStyle(hurt ? 0xcc4444 : 0x44aa44, alpha);
     this.playerGraphics.fillCircle(0, 0, 10);
 
-    this.playerGraphics.fillStyle(0x88ee88, 1);
+    this.playerGraphics.fillStyle(hurt ? 0xee8888 : 0x88ee88, alpha);
     this.playerGraphics.fillTriangle(5, -4, 5, 4, 14, 0);
+  }
+
+  drawHUD() {
+    const gfx = this.hudGraphics;
+    gfx.clear();
+
+    const x = 20;
+    const y = 20;
+    const width = 200;
+    const height = 16;
+    const fraction = getHealthFraction(this.combatState);
+
+    gfx.fillStyle(0x222222, 0.8);
+    gfx.fillRect(x, y, width, height);
+
+    gfx.fillStyle(fraction > 0.3 ? 0x44aa44 : 0xcc3333, 1);
+    gfx.fillRect(x, y, width * fraction, height);
+
+    gfx.lineStyle(2, 0xffffff, 0.5);
+    gfx.strokeRect(x, y, width, height);
   }
 
   setupInput() {
@@ -319,7 +435,22 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  updateBullets() {
+    for (const bullet of this.bulletGroup.getChildren()) {
+      if (!bullet.active) continue;
+      const originX = bullet.getData('originX');
+      const originY = bullet.getData('originY');
+      if (isBulletExpired(originX, originY, bullet.x, bullet.y, BULLET_MAX_RANGE)) {
+        bullet.setActive(false);
+        bullet.setVisible(false);
+        bullet.body.stop();
+      }
+    }
+  }
+
   update(_time, delta) {
+    if (this.combatState.isDead) return;
+
     const keyState = {
       up: this.keys.W.isDown,
       down: this.keys.S.isDown,
@@ -338,9 +469,18 @@ export class GameScene extends Phaser.Scene {
       pointer.worldY
     );
 
-    if (this.contactCooldown > 0) this.contactCooldown -= delta;
+    this.combatState = updateCombat(this.combatState, delta);
+    this.fireCooldown = updateFireCooldown(this.fireCooldown, delta);
+
+    if (pointer.isDown && canFire(this.fireCooldown)) {
+      this.fireBullet();
+      this.fireCooldown = FIRE_RATE_MS;
+    }
+
+    this.updateBullets();
     this.updateEnemies(delta);
     this.drawPlayer();
     this.updateDarkness();
+    this.drawHUD();
   }
 }

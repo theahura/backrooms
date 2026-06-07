@@ -168,3 +168,63 @@ project/
 - No pathfinding — enemies chase in a direct line, may get stuck on furniture corners (thematically appropriate for zombies)
 - No damage/health system yet — will need at least basic player HP and damage on contact
 - No enemy death/combat — shooting mechanics are a separate future feature
+
+## Combat System Research
+
+### Architecture: Two New Pure Modules
+- `src/systems/combat.js` — player health, damage cooldowns, enemy health, damage application
+- `src/systems/shooting.js` — bullet velocity calculation, fire rate cooldown logic
+- Both are pure functions taking/returning plain objects — testable without Phaser
+- GameScene wires these to Phaser physics groups, sprites, and input
+
+### Player Health System
+- `PLAYER_MAX_HP = 100`, `ENEMY_CONTACT_DAMAGE = 20`, `DAMAGE_COOLDOWN_MS = 1000`
+- State object: `{ hp, maxHp, damageCooldown, isDead }`
+- `applyDamage(state, amount)` — returns unchanged state if cooldown > 0 or isDead, otherwise reduces HP and sets cooldown
+- `updateCombat(state, delta)` — decrements cooldown
+- Replaces the existing `this.contactCooldown` field on GameScene
+- Visual feedback: camera flash (red, 150ms) + shake on hit; player Graphics alpha/color flicker during cooldown
+
+### Enemy Health System
+- `ENEMY_MAX_HP = 50`, `BULLET_DAMAGE = 25` (two shots to kill)
+- Add `health` field to enemy state objects in `enemyStates` array
+- When enemy health reaches 0: set sprite inactive/invisible, remove from `enemyStates`
+- Pure function `applyEnemyDamage(health, damage)` returns new health
+
+### Shooting System
+- Projectile-based (not hitscan) — bullets are visible physics sprites in the flashlight
+- Phaser physics group (`this.bulletGroup`) with object pooling via `getFirstDead(false)`
+- `BULLET_SPEED = 500`, `FIRE_RATE_MS = 200`, `BULLET_MAX_RANGE = 600`
+- `calculateBulletVelocity(originX, originY, targetX, targetY, speed)` — pure function returning `{ vx, vy }`
+- Fire on left-click (pointer down), respecting fire rate cooldown
+- Bullet lifespan: max distance from origin (600px), deactivate when exceeded
+- Bullet texture: small yellow circle (6px diameter) via `generateTexture`
+
+### Collision Setup
+- `physics.add.collider(bulletGroup, walls, onBulletHitWall)` — deactivate bullet
+- `physics.add.overlap(bulletGroup, enemyGroup, onBulletHitEnemy)` — damage enemy, deactivate bullet
+- Bullet depth: 150 (above darkness at 100, visible in lit areas; below player at 200)
+- Alternatively: depth 60 (same as enemies, hidden in darkness) — more thematic, bullets only visible in flashlight
+
+### HUD Health Bar
+- `Phaser.GameObjects.Graphics` with `setScrollFactor(0)` and `setDepth(1000)`
+- Positioned in screen coordinates (20, 20), width 200, height 16
+- Background dark gray, fill green (>30% HP) or red (≤30%), white border
+- Redrawn each frame from `getHealthFraction(state)`
+
+### Death/Game Over
+- On player death: fade camera to black (500ms), then `scene.restart()`
+- Simple restart for now — no game over screen (future feature)
+
+### Phaser Integration Points
+- Existing `onEnemyContact` callback (line 209) becomes the damage integration point
+- Existing `contactCooldown` (line 26, 341) replaced by `playerCombatState.damageCooldown`
+- New `this.input.on('pointerdown', ...)` for shooting
+- New `this.bulletGroup` physics group in `create()`
+- Bullets need `body.reset(x, y)`, `setActive(true)`, `setVisible(true)` when firing from pool
+- Fire rate cooldown tracked as `this.fireCooldown` on scene, decremented in `update()`
+
+### Rendering Depth Decisions
+- Bullets at depth 150 — visible above darkness, player can see their own shots
+- HUD at depth 1000 — always on top
+- Everything else unchanged: enemies 60, darkness 100, light 99, player 200

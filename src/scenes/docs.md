@@ -4,26 +4,23 @@ Path: @/src/scenes
 
 ### Overview
 - Phaser Scene subclasses that wire pure game systems to Phaser's rendering, physics, and input APIs
-- Currently contains a single scene (`GameScene`) that implements the core gameplay loop including player movement, flashlight/darkness, and enemy AI
+- Currently contains a single scene (`GameScene`) that implements the core gameplay loop including player movement, flashlight/darkness, enemy AI, combat (player/enemy health + damage), shooting (bullet physics + pooling), and HUD rendering
 
 ### How it fits into the larger codebase
 - `@/src/main.js` registers scene classes with the Phaser.Game instance
-- Scenes import pure functions from `@/src/systems/` for game math (level generation, movement, visibility, room geometry, furniture, enemy AI) and handle all Phaser-specific concerns: sprite creation, physics bodies, input binding, camera, and Graphics drawing
+- Scenes import pure functions from `@/src/systems/` for game math (level generation, movement, visibility, room geometry, furniture, enemy AI, combat, shooting) and handle all Phaser-specific concerns: sprite creation, physics bodies, input binding, camera, collision callbacks, and Graphics drawing
 - Scenes are the only place in the codebase that depends on Phaser -- this boundary is intentional to keep game logic testable
 - `GameScene` consumes the output of `generateLevel()` from `@/src/systems/level.js` to set up the entire multi-room level at scene creation time
 - `GameScene` calls `generateRoomEnemies()` from `@/src/systems/enemy.js` at creation and `updateEnemyAI()` every frame, bridging the pure AI state machine to Phaser physics bodies
+- `GameScene` creates combat state via `createCombatState()` from `@/src/systems/combat.js` at scene start, ticks it with `updateCombat()` each frame, and applies damage in collision callbacks. Shooting functions from `@/src/systems/shooting.js` are used to compute bullet velocity and manage fire rate cooldown
 
 ### Core Implementation
 - **GameScene lifecycle**: `create()` runs once when the scene starts, `update()` runs every frame
-- **create() setup sequence**:
-  1. Calls `generateLevel(LEVEL_SEED, ROOM_COUNT)` to get the full level data (`rooms` array + `wallSegments`)
-  2. `createRooms()` -- iterates over all rooms: draws each room's floor and walls, creates physics bodies (with door gaps), generates and renders furniture per room, then draws doorway floor tiles over wall graphics so doorways appear open
-  3. `createPlayer()` -- spawns the player at the center of room 0
-  4. `createEnemies()` -- generates a procedural enemy texture, spawns enemies in all rooms except room 0, sets up enemy physics group with colliders against walls/furniture/other enemies, and creates a player overlap trigger
-  5. `setupInput()` -- binds WASD keys
-  6. `setupCamera()` -- computes the bounding box of all rooms, sets camera follow bounds and physics world bounds to cover the entire level
-  7. `createDarknessOverlay()` -- creates the three-layer darkness system (see below)
-- **update() frame loop**: reads WASD key state -> `calculateVelocity()` -> sets player physics velocity -> computes aim angle from mouse world position -> `updateEnemies(delta)` runs the AI state machine for every enemy and applies returned velocities -> redraws player graphic -> recomputes and redraws flashlight visibility polygon
+- **create() setup sequence**: initializes level geometry, player, enemies, bullets, input, camera, darkness overlay, and HUD. Notable additions beyond the base level setup:
+  - `createEnemies()` now adds a `health` field (from `ENEMY_MAX_HP`) to each enemy state object and wires a player-enemy overlap callback (`onEnemyContact`) for contact damage
+  - `createBullets()` creates a pooled physics group (`maxSize: 20`), generates a bullet texture, and wires bullet-wall/furniture colliders and bullet-enemy overlap
+  - `createHUD()` creates a Graphics object with `setScrollFactor(0)` at depth 1000 so the health bar stays fixed on screen
+- **update() frame loop**: early-returns if player is dead. Then: reads WASD key state -> `calculateVelocity()` -> sets player velocity -> computes aim angle from mouse -> ticks combat cooldown (`updateCombat`) and fire cooldown (`updateFireCooldown`) -> checks for mouse click + `canFire()` to fire bullets -> `updateBullets()` expires out-of-range bullets -> `updateEnemies(delta)` runs AI -> redraws player (with invulnerability visual feedback) -> recomputes darkness -> redraws HUD health bar
 - **Enemy integration pattern**: `GameScene` maintains a parallel `enemyStates` array alongside the Phaser physics sprites in `enemyGroup`. Each frame, `updateEnemies()` syncs sprite positions into the state objects, calls the pure `updateEnemyAI()` function, copies the returned state back, and applies velocity to the sprite. This keeps the AI logic testable in `@/src/systems/enemy.js` while letting Phaser handle physics resolution
 
 ### Things to Know
@@ -35,11 +32,16 @@ Path: @/src/scenes
   | enemy sprites | 60 | Enemies hidden by darkness (below mask) |
   | `lightGraphics` | 99 | Faint yellow tint drawn under the flashlight cone |
   | `darkGraphics` | 100 | Black rectangle covering the entire level (the darkness) |
+  | bullet sprites | 150 | Bullets visible above darkness but below player |
   | `playerGraphics` | 200 | Player always visible (above darkness) |
+  | `hudGraphics` | 1000 | Health bar fixed on screen (above everything) |
 
-  Because enemies render at depth 60 (below darkness at 100), they are automatically hidden by the darkness overlay and only revealed when the flashlight cone reaches them
+  Enemies at depth 60 are hidden by the darkness overlay and only revealed by the flashlight. Bullets at depth 150 are always visible (above darkness), giving visual feedback even when firing into dark areas. The HUD uses `setScrollFactor(0)` so it does not move with the camera
 - **Darkness system architecture**: the BitmapMask has `invertAlpha = true`, so white pixels in `maskGraphics` punch transparent holes in `darkGraphics`, revealing the room beneath the flashlight cone
-- **Enemy physics uses a dynamic group** (unlike walls and furniture which are static groups). Enemies collide with walls, furniture, and each other. Player-enemy interaction uses `overlap` (not `collider`), triggering `onEnemyContact()` which currently shakes the camera
+- **Enemy physics uses a dynamic group** (unlike walls and furniture which are static groups). Enemies collide with walls, furniture, and each other. Player-enemy interaction uses `overlap` (not `collider`), triggering `onEnemyContact()` which applies contact damage, camera shake/flash, and checks for player death
+- **Bullet physics group** uses pooling (`maxSize: 20`). Bullet-wall/furniture uses `collider` (instant deactivation). Bullet-enemy uses `overlap` -- on hit, the bullet is deactivated and the enemy takes `BULLET_DAMAGE`. When enemy health reaches 0, the enemy is deactivated and removed from `enemyStates[]`. Bullets store their origin position via `setData()` for range-expiry checks each frame
+- **Player death flow**: when `combatState.isDead` becomes true, `onPlayerDeath()` stops the player body, disables physics, triggers a 500ms camera fade-out, and restarts the scene on completion. The `update()` loop early-returns while dead, preventing further input processing
+- **Visual feedback for combat**: taking damage triggers `cameras.main.shake()` and `cameras.main.flash()`. During invulnerability, the player graphic switches to a red tint with 50% alpha (`drawPlayer()` checks `isInvulnerable()`). The HUD health bar turns red when below 30% HP
 - **Multi-room physics with door gaps**: `createRoomPhysics()` splits each wall into physics zones that skip over door offsets. This mirrors the raycasting segments produced by `createRoomWalls()` so that physics collision and flashlight occlusion agree on where doors are
 - **Wall dual-purpose**: walls exist as both Phaser Arcade Physics static zones (for player collision) and as line segments from `createRoomWalls()` (for raycasting). Furniture follows the same pattern -- each item is both a physics zone and a set of raycasting segments. Enemies do not produce segments; they are dynamic actors, not static occluders
 - **Player rendering**: the player is a Graphics object (`playerGraphics`) drawn at depth 200 (above the darkness overlay at depth 100), so the player is always visible regardless of flashlight direction
