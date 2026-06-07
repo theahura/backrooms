@@ -13,6 +13,9 @@ The basic idea:
   - longer flashlight battery
   - more powerful flashlight (covers more of the room)
   - compass / map that fills in as the player goes
+- each day starts in the same 'room'. The starting room should look like a furniture store that has a crack in the wall that leads to the backrooms. If the player discovers a different 'exit', it should lead to a different location that the player ends up in. These locations should just be normal locations; have a few that the player can cycle through as needed
+
+The actual view of the top down should be that the camera is centered on the player character, fixed fov. As the player moves, the camera stays on them.
 
 movement is with wasd, looking is with the mouse, shooting is left click, using items is right click, q/e is to switch weapons if multiple are held
 
