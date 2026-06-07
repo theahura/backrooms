@@ -9,10 +9,11 @@ import { calculateBulletVelocity, canFire, updateFireCooldown, isBulletExpired, 
 import { createBatteryState, updateBattery, getBatteryFraction, getFlashlightConeAngle, shouldFlicker, rechargeBattery, BATTERY_RECHARGE_AMOUNT } from '../systems/battery.js';
 import { generateRoomItems, ITEM_TYPES } from '../systems/items.js';
 import { createInventoryState, pickupItem, useBattery } from '../systems/inventory.js';
-import { getUpgradeValue } from '../systems/shop.js';
+import { getUpgradeValue, createShopState } from '../systems/shop.js';
 import { createDoorStates, toggleDoor, getDoorCenter, findNearestDoor, DOOR_INTERACT_RANGE } from '../systems/doors.js';
 import { createSwitchStates, toggleSwitch, findNearestSwitch, getLitRoomIds, isPointInRoom, SWITCH_INTERACT_RANGE } from '../systems/lightswitch.js';
 import { createHidingState, enterHiding, exitHiding, findNearestHideable, HIDE_INTERACT_RANGE } from '../systems/hiding.js';
+import { saveGame } from '../systems/persistence.js';
 
 const WALL_THICKNESS = 16;
 const ROOM_COUNT = 6;
@@ -33,6 +34,7 @@ export class GameScene extends Phaser.Scene {
     const runCount = this.registry.get('runCount') ?? 0;
     this.registry.set('runCount', runCount + 1);
     this.levelSeed = runCount + 1;
+    saveGame(shopState || createShopState(), runCount + 1);
   }
 
   create() {

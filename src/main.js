@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { GameScene } from './scenes/GameScene.js';
 import { ShopScene } from './scenes/ShopScene.js';
+import { loadGame, saveGame } from './systems/persistence.js';
 
 const config = {
   type: Phaser.AUTO,
@@ -18,4 +19,26 @@ const config = {
   scene: [GameScene, ShopScene],
 };
 
-new Phaser.Game(config);
+const game = new Phaser.Game(config);
+
+const saved = loadGame();
+if (saved) {
+  game.registry.set('shopState', saved.shopState);
+  game.registry.set('runCount', saved.runCount);
+}
+
+function saveCurrentState() {
+  const shopState = game.registry.get('shopState');
+  const runCount = game.registry.get('runCount') ?? 0;
+  if (shopState) {
+    saveGame(shopState, runCount);
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    saveCurrentState();
+  }
+});
+
+window.addEventListener('beforeunload', saveCurrentState);

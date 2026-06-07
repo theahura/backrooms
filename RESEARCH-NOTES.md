@@ -538,3 +538,93 @@ project/
 - Each item: `{ type, x, y, width, height, color, canHide }`
 - Furniture center for interaction: `x + width/2`, `y + height/2`
 - Furniture zones in `this.furnitureGroup` do NOT carry metadata — must cross-reference with `roomFurniture`
+
+## localStorage Persistence Research
+
+### Current State: No Persistence
+- `game.registry` is Phaser's in-memory key-value store — survives scene transitions but NOT browser reloads
+- Only two registry keys exist: `shopState` (gold + upgrade levels) and `runCount` (integer)
+- Zero existing localStorage usage in the codebase
+- Phaser 3 has no built-in save/load system or localStorage integration
+
+### Registry Usage Map
+| File | Line | Key | Direction |
+|------|------|-----|-----------|
+| ShopScene.js | 19 | shopState | Read |
+| ShopScene.js | 21, 68, 115 | shopState | Write |
+| GameScene.js | 26 | shopState | Read |
+| GameScene.js | 33 | runCount | Read |
+| GameScene.js | 34 | runCount | Write |
+
+### Shop State Structure (What Needs Persisting)
+```javascript
+{
+  gold: number,           // integer, player's currency balance
+  upgrades: {
+    battery: number,      // 0-3, upgrade level
+    flashlight: number,   // 0-3, upgrade level
+    health: number,       // 0-3, upgrade level
+    speed: number,        // 0-3, upgrade level
+  }
+}
+// Also: runCount (integer) as a separate value
+```
+
+### Architecture Decision: Pure Module
+- Follow existing codebase pattern: pure function module (`src/systems/persistence.js`)
+- No Phaser dependency — testable in node environment like all other systems
+- Functions: `saveGame(shopState, runCount)`, `loadGame()`, `clearSave()`
+- Wrap all localStorage access in try-catch for Safari private browsing / quota exceeded
+- Use in-memory fallback when localStorage unavailable (game still works, just doesn't persist)
+
+### Save Data Format
+```javascript
+{
+  version: 1,                    // for future migration
+  shopState: { gold, upgrades }, // full shop state object
+  runCount: number,              // total runs completed
+}
+```
+
+### When to Save
+- On every `registry.set('shopState', ...)` in ShopScene (after gold add, after purchase, before entering backrooms)
+- On `registry.set('runCount', ...)` in GameScene init
+- On `visibilitychange` (tab hidden) and `beforeunload` (browser close) as safety nets
+- Simplest approach: save in the pure module functions, called from the same places that already do `registry.set()`
+
+### When to Load
+- On game boot in `main.js` — populate registry before GameScene's `init()` runs
+- Or in GameScene `init()` / ShopScene `init()` — defensive fallback already exists in both
+
+### localStorage Availability Detection
+```javascript
+function isStorageAvailable() {
+  try {
+    const k = '__test__';
+    localStorage.setItem(k, k);
+    localStorage.removeItem(k);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+```
+- `"localStorage" in window` is NOT sufficient — Safari Private Browsing throws QuotaExceededError on setItem
+- Must test actual read/write
+
+### Save Data Versioning
+- Include `version` field in save data for future migration
+- Migration chain: `if (data.version < N)` transform, increment version
+- Reject saves with version higher than CURRENT_VERSION (forward-compatibility protection)
+- Spread defaults on load: `{ ...defaults, ...savedData }` ensures new fields exist
+
+### Corruption Handling
+- Wrap `JSON.parse()` in try-catch — if parsing fails, return null (start fresh)
+- Validate loaded data has expected shape (gold is number, upgrades object has expected keys)
+- On QuotaExceededError during save, log and continue — don't crash the game
+
+### Integration Points
+- `main.js`: After creating `Phaser.Game`, call `loadGame()` and populate registry before scenes start
+- `ShopScene.init()` line 19: Already has `|| createShopState()` fallback — works naturally with persistence
+- `GameScene.init()` line 33: Already has `?? 0` fallback for runCount — works naturally
+- Alternative: load in a Boot scene, but current architecture doesn't have one — adding to main.js is simpler

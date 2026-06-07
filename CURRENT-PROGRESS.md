@@ -1,8 +1,8 @@
 # Current Progress
 
-## Status: Hiding Mechanics Complete
+## Status: localStorage Persistence Complete
 
-The game now has hiding mechanics. Players can press E near tables and desks (furniture with `canHide: true`) to hide inside them. While hidden, the player becomes invisible to enemy line-of-sight detection, cannot move or shoot, is immune to contact damage, and is rendered semi-transparent (alpha 0.3). Pressing any WASD key or E exits hiding immediately. The E-key interaction system now resolves between three interactable types (doors, switches, furniture) using a distance-sorted candidates array. Enemy AI gained an optional `playerHidden` parameter — when true, `canSee` is forced false regardless of actual LOS, causing chasing enemies to naturally transition to search state.
+Game progress now persists across browser sessions via localStorage. A new pure function module `persistence.js` saves shop state (gold, upgrade levels) and run counter to localStorage at every mutation point. On game boot, `main.js` loads saved state and populates the Phaser registry before any scene starts. Browser lifecycle listeners (`visibilitychange`, `beforeunload`) act as safety nets for unexpected tab closures. All localStorage access is try-catch wrapped for graceful degradation in restricted environments (Safari private browsing, storage full). The save format is versioned (`{ version, shopState, runCount }`) to support future migrations.
 
 ## Completed
 - Application spec written
@@ -107,11 +107,18 @@ The game now has hiding mechanics. Players can press E near tables and desks (fu
   - Exit hiding: press any WASD key or E
   - Pure function module `hiding.js`: createHidingState, enterHiding, exitHiding, findNearestHideable
   - E-key interaction resolves nearest of three interactable types (door, switch, furniture) via distance-sorted candidates
-- 194 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, and hiding
+- localStorage persistence for cross-session save/load
+  - Pure function module `persistence.js`: saveGame, loadGame, clearSave
+  - Versioned save format (`{ version: 1, shopState, runCount }`) under key `backrooms_save`
+  - Save triggers: every registry mutation in ShopScene (3 points) and GameScene (1 point), plus `visibilitychange`/`beforeunload` lifecycle listeners in main.js
+  - Load on boot: main.js loads saved state into game.registry before scenes start
+  - Graceful degradation: all localStorage access wrapped in try-catch (handles private browsing, quota exceeded)
+  - 11 unit tests covering round-trip, corruption, version validation, shape validation, missing field defaults, and unavailable storage
+- 205 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, and persistence
 - Documentation (docs.md files for root, src, systems, scenes)
 
 ## Architecture
-- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop, doors, lightswitch, hiding) — testable without Phaser
+- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop, doors, lightswitch, hiding, persistence) — testable without Phaser
 - `src/scenes/` — Phaser scene classes that wire systems together for rendering (GameScene for gameplay, ShopScene for upgrades between runs)
 - Darkness uses BitmapMask with invertAlpha on a Graphics overlay
 - Furniture segments use the same `{x1,y1,x2,y2}` format as walls — concatenated into `wallSegments` for raycasting with zero visibility code changes
@@ -126,7 +133,7 @@ The game now has hiding mechanics. Players can press E near tables and desks (fu
 - Closable door segments are dynamically pushed/spliced from `wallSegments` — same mutable array pattern as furniture, but toggled at runtime via `body.enable` on Phaser static bodies
 - Light switch lit rooms are drawn as fillRect into maskGraphics (same BitmapMask as flashlight) — drawn before the flashlight early-return so lit rooms stay visible even when battery is dead
 - E-key interaction resolves nearest interactable (door, switch, or hideable furniture) via distance-sorted candidates array in `updateInteractPrompt()`
-- Shop state persists in `game.registry` — survives scene transitions but not browser reloads
+- Shop state persists in `game.registry` (in-memory, survives scene transitions) and is backed by localStorage via `persistence.js` (survives browser reloads)
 - GameScene `init()` reads upgrade levels from registry and computes stat values via `getUpgradeValue()`
 - ShopScene `init(data)` receives `treasureEarned` via scene start data, adds to registry gold balance
 - Two-scene flow: GameScene → (exit/death) → ShopScene → (enter backrooms) → GameScene
@@ -138,6 +145,5 @@ The game now has hiding mechanics. Players can press E near tables and desks (fu
 ## Next Steps
 - Add starting room (furniture store with crack in wall)
 - Add compass/map that fills in as the player explores
-- Add localStorage persistence for cross-session save/load
 - Add more upgrade categories (weapon damage, fire rate, bullet range)
 - Add enemy scaling per run (more/tougher enemies as player gets stronger)

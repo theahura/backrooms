@@ -8,6 +8,7 @@ import {
   getUpgradeValue,
   UPGRADES,
 } from '../systems/shop.js';
+import { saveGame } from '../systems/persistence.js';
 
 export class ShopScene extends Phaser.Scene {
   constructor() {
@@ -19,6 +20,7 @@ export class ShopScene extends Phaser.Scene {
     let shopState = this.registry.get('shopState') || createShopState();
     shopState = addGold(shopState, treasureEarned);
     this.registry.set('shopState', shopState);
+    saveGame(shopState, this.registry.get('runCount') ?? 0);
     this.shopState = shopState;
     this.treasureEarned = treasureEarned;
   }
@@ -66,6 +68,7 @@ export class ShopScene extends Phaser.Scene {
     enterBtn.on('pointerout', () => enterBtn.setColor('#44cc44'));
     enterBtn.on('pointerdown', () => {
       this.registry.set('shopState', this.shopState);
+      saveGame(this.shopState, this.registry.get('runCount') ?? 0);
       this.scene.start('GameScene');
     });
 
@@ -113,6 +116,7 @@ export class ShopScene extends Phaser.Scene {
       if (canPurchase(this.shopState, upgrade.id)) {
         this.shopState = purchaseUpgrade(this.shopState, upgrade.id);
         this.registry.set('shopState', this.shopState);
+        saveGame(this.shopState, this.registry.get('runCount') ?? 0);
         this.refreshDisplay();
       }
     });
