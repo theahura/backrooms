@@ -48,8 +48,8 @@ export class ShopScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     this.upgradeRows = [];
-    const startY = 200;
-    const rowHeight = 80;
+    const startY = 180;
+    const rowHeight = 60;
 
     for (let i = 0; i < UPGRADES.length; i++) {
       const upgrade = UPGRADES[i];
@@ -82,8 +82,8 @@ export class ShopScene extends Phaser.Scene {
       fontFamily: 'monospace',
     });
 
-    const descText = this.add.text(100, y + 22, upgrade.description, {
-      fontSize: '12px',
+    const descText = this.add.text(100, y + 20, upgrade.description, {
+      fontSize: '11px',
       color: '#888888',
       fontFamily: 'monospace',
     });

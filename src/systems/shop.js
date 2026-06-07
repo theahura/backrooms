@@ -35,6 +35,33 @@ export const UPGRADES = [
     base: 200,
     perLevel: 20,
   },
+  {
+    id: 'weaponDamage',
+    name: 'Weapon Damage',
+    description: 'Increased bullet damage',
+    maxLevel: 3,
+    costs: [100, 300, 800],
+    base: 25,
+    perLevel: 10,
+  },
+  {
+    id: 'fireRate',
+    name: 'Fire Rate',
+    description: 'Faster firing speed',
+    maxLevel: 3,
+    costs: [100, 300, 800],
+    base: 200,
+    perLevel: -30,
+  },
+  {
+    id: 'bulletRange',
+    name: 'Bullet Range',
+    description: 'Increased bullet range',
+    maxLevel: 3,
+    costs: [100, 300, 800],
+    base: 600,
+    perLevel: 100,
+  },
 ];
 
 export function createShopState() {

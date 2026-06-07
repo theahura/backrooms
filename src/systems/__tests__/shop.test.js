@@ -107,11 +107,11 @@ describe('getUpgradeValue', () => {
     expect(val2).toBeGreaterThan(val1);
   });
 
-  it('returns increasing values for all upgrade types', () => {
+  it('returns different values at higher levels for all upgrade types', () => {
     for (const upgrade of UPGRADES) {
       const val0 = getUpgradeValue(upgrade.id, 0);
       const val1 = getUpgradeValue(upgrade.id, 1);
-      expect(val1).toBeGreaterThan(val0);
+      expect(val1).not.toBe(val0);
     }
   });
 });
@@ -145,6 +145,64 @@ describe('UPGRADES', () => {
         state = purchaseUpgrade(state, upgrade.id);
       }
       expect(canPurchase(state, upgrade.id)).toBe(false);
+    }
+  });
+
+});
+
+describe('weapon damage upgrade', () => {
+  it('returns 25 base damage at level 0', () => {
+    expect(getUpgradeValue('weaponDamage', 0)).toBe(25);
+  });
+
+  it('returns 55 damage at max level 3', () => {
+    expect(getUpgradeValue('weaponDamage', 3)).toBe(55);
+  });
+
+  it('can be purchased and used', () => {
+    let state = addGold(createShopState(), 500);
+    expect(canPurchase(state, 'weaponDamage')).toBe(true);
+    state = purchaseUpgrade(state, 'weaponDamage');
+    expect(state.upgrades.weaponDamage).toBe(1);
+  });
+});
+
+describe('fire rate upgrade', () => {
+  it('returns 200ms base cooldown at level 0', () => {
+    expect(getUpgradeValue('fireRate', 0)).toBe(200);
+  });
+
+  it('returns 110ms cooldown at max level 3', () => {
+    expect(getUpgradeValue('fireRate', 3)).toBe(110);
+  });
+
+  it('each level reduces cooldown', () => {
+    const val0 = getUpgradeValue('fireRate', 0);
+    const val1 = getUpgradeValue('fireRate', 1);
+    const val2 = getUpgradeValue('fireRate', 2);
+    const val3 = getUpgradeValue('fireRate', 3);
+    expect(val1).toBeLessThan(val0);
+    expect(val2).toBeLessThan(val1);
+    expect(val3).toBeLessThan(val2);
+  });
+});
+
+describe('bullet range upgrade', () => {
+  it('returns 600 base range at level 0', () => {
+    expect(getUpgradeValue('bulletRange', 0)).toBe(600);
+  });
+
+  it('returns 900 range at max level 3', () => {
+    expect(getUpgradeValue('bulletRange', 3)).toBe(900);
+  });
+});
+
+describe('createShopState with all upgrades', () => {
+  it('initializes all upgrade keys at level 0', () => {
+    const state = createShopState();
+    expect(Object.keys(state.upgrades).length).toBe(UPGRADES.length);
+    for (const upgrade of UPGRADES) {
+      expect(state.upgrades[upgrade.id]).toBe(0);
     }
   });
 });

@@ -786,3 +786,83 @@ glowGfx.fillRect(crackX - 4, crackY - crackHeight/2, 12, crackHeight);
 - Store furniture is baked once in `create()` — no per-frame cost
 - Crack glow uses a single `fillRect` per frame — negligible
 - Permanent room lighting is one additional `fillRect` in `maskGraphics` per frame — already done for lit rooms
+
+## Enemy Scaling & Weapon Upgrades Research
+
+### Enemy Scaling Formulas (from roguelike best practices)
+
+Based on research across Hades, Enter the Gungeon, Binding of Isaac, Motherload, and Warframe:
+
+**Enemy HP** (safest to scale — just means more shots needed):
+```
+enemyHP = BASE_HP * (1 + 0.25 * runNumber)
+// Run 0: 50, Run 1: 62, Run 2: 75, Run 3: 87, Run 4: 100
+// Hard cap: 150 HP (run 8+)
+```
+
+**Enemy Count** (moderate scaling — more enemies per room):
+```
+extraEnemies = Math.min(Math.floor(runNumber / 2), 3)
+// Run 0: +0, Run 1: +0, Run 2: +1, Run 3: +1, Run 4: +2, Run 6+: +3
+// Cap: 5 enemies per room max (base 1-2 + 3 extra)
+```
+
+**Enemy Speed** (scale LEAST — most frustrating axis):
+```
+chaseSpeed = BASE_CHASE * (1 + 0.05 * Math.min(runNumber, 6))
+// Run 0: 80, Run 6+: 104 (30% cap)
+// NEVER exceed 50% of player speed
+```
+
+**Enemy Damage** (moderate — player has HP upgrades to compensate):
+```
+contactDamage = BASE_DAMAGE + 5 * Math.min(runNumber, 4)
+// Run 0: 20, Run 4+: 40 (cap)
+```
+
+### Design Principles
+- Player max speed (200-260) must ALWAYS exceed enemy chase speed
+- Hard caps essential for every parameter
+- All upgrades max at level 3 = ~run 4-5 difficulty plateau
+- Scaling priority: HP > count > damage > speed
+
+### New Weapon Upgrade Values
+
+Using existing `base + perLevel * level` formula:
+
+| Upgrade | ID | Base | PerLevel | Level 0 | Level 1 | Level 2 | Level 3 |
+|---|---|---|---|---|---|---|---|
+| Weapon Damage | `weaponDamage` | 25 | 10 | 25 | 35 | 45 | 55 |
+| Fire Rate (ms) | `fireRate` | 200 | -30 | 200ms | 170ms | 140ms | 110ms |
+| Bullet Range | `bulletRange` | 600 | 100 | 600 | 700 | 800 | 900 |
+
+Costs: same [100, 300, 800] as existing upgrades.
+
+### Key Breakpoints
+- At damage level 3 (55) vs base enemy (50 HP): one-shot kill — major milestone
+- At fire rate level 3 (110ms): 9.1 shots/sec vs base 5.0 — very noticeable
+- Full weapon DPS at max: 500 vs base 125 (4x improvement)
+- Enemy HP scales to counter: run 4 enemies have 100 HP → back to 2 shots at max damage
+
+### Shop Layout Concern
+- Canvas is 1024x768; 7 upgrades at 80px row height = button at Y=800 (off-screen)
+- Solution: reduce row height to 60px → button at Y=660 (safe)
+
+### Architecture: Pure Module `scaling.js`
+- `src/systems/scaling.js` — pure functions for difficulty scaling
+- `getEnemyHP(baseHP, runCount)` — scaled HP with cap
+- `getEnemyCount(baseMin, baseMax, runCount)` — scaled count with cap
+- `getEnemyChaseSpeed(baseSpeed, runCount)` — scaled speed with cap
+- `getEnemyDamage(baseDamage, runCount)` — scaled damage with cap
+- No Phaser dependency — testable in Node
+
+### Integration Points
+- `GameScene.init()`: read weapon upgrade values from registry (same pattern as existing upgrades)
+- `GameScene.init()`: store `this.runCount` for enemy scaling
+- `GameScene.createEnemies()`: use `getEnemyHP(ENEMY_MAX_HP, runCount)` instead of `ENEMY_MAX_HP`
+- `GameScene.createEnemies()`: use `getEnemyCount()` to determine enemy count per room
+- `GameScene.onBulletHitEnemy()`: use `this.bulletDamage` instead of `BULLET_DAMAGE`
+- `GameScene.fireBullet()`: use `this.fireRate` instead of `FIRE_RATE_MS`
+- `GameScene.updateBullets()`: use `this.bulletRange` instead of `BULLET_MAX_RANGE`
+- `enemy.js.generateRoomEnemies()`: add optional `extraCount` parameter
+- `ShopScene.js`: reduce rowHeight from 80 to 60 for 7 upgrades

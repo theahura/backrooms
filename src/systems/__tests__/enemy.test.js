@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hasLineOfSight, generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_WANDER } from '../enemy.js';
+import { hasLineOfSight, generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_WANDER, ENEMY_SPEED_CHASE } from '../enemy.js';
 
 describe('hasLineOfSight', () => {
   it('returns true when no walls between enemy and player', () => {
@@ -296,5 +296,54 @@ describe('updateEnemyAI', () => {
     const updated = updateEnemyAI(enemy, player, segments, 16);
 
     expect(updated.state).toBe('chase');
+  });
+
+  it('uses custom chase speed when provided', () => {
+    const enemy = createEnemy({ state: 'idle' });
+    const player = { x: 200, y: 100 };
+    const segments = [];
+    const customChaseSpeed = 120;
+
+    const updated = updateEnemyAI(enemy, player, segments, 16, false, customChaseSpeed);
+
+    expect(updated.state).toBe('chase');
+    const speed = Math.sqrt(updated.velocityX ** 2 + updated.velocityY ** 2);
+    expect(speed).toBeCloseTo(customChaseSpeed, 0);
+  });
+
+  it('uses default chase speed when not provided', () => {
+    const enemy = createEnemy({ state: 'idle' });
+    const player = { x: 200, y: 100 };
+    const segments = [];
+
+    const updated = updateEnemyAI(enemy, player, segments, 16);
+
+    const speed = Math.sqrt(updated.velocityX ** 2 + updated.velocityY ** 2);
+    expect(speed).toBeCloseTo(ENEMY_SPEED_CHASE, 0);
+  });
+});
+
+describe('generateRoomEnemies with extraCount', () => {
+  const ROOM_X = 0;
+  const ROOM_Y = 0;
+  const ROOM_WIDTH = 1200;
+  const ROOM_HEIGHT = 1000;
+  const WALL_THICKNESS = 16;
+
+  it('produces more enemies when extraCount is provided', () => {
+    const baseEnemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42, [], 1);
+    const extraEnemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42, [], 1, 3);
+    expect(extraEnemies.length).toBeGreaterThan(baseEnemies.length);
+  });
+
+  it('caps total enemies at 5', () => {
+    const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42, [], 1, 10);
+    expect(enemies.length).toBeLessThanOrEqual(5);
+  });
+
+  it('defaults to 0 extra enemies when not provided', () => {
+    const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42, [], 1);
+    expect(enemies.length).toBeGreaterThanOrEqual(1);
+    expect(enemies.length).toBeLessThanOrEqual(2);
   });
 });

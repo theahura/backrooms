@@ -33,7 +33,7 @@ export function hasLineOfSight(enemyPos, playerPos, segments, maxRange) {
   return true;
 }
 
-export function generateRoomEnemies(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, furnitureItems, roomId) {
+export function generateRoomEnemies(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, furnitureItems, roomId, extraCount = 0) {
   if (roomId === 0) return [];
 
   const rand = mulberry32(seed + 10000);
@@ -43,7 +43,7 @@ export function generateRoomEnemies(roomX, roomY, roomWidth, roomHeight, wallThi
   const maxX = roomX + roomWidth - wallThickness - margin;
   const maxY = roomY + roomHeight - wallThickness - margin;
 
-  const count = 1 + Math.floor(rand() * 2);
+  const count = Math.min(1 + Math.floor(rand() * 2) + extraCount, 5);
   const placed = [];
   const enemyRadius = 10;
 
@@ -72,7 +72,7 @@ export function generateRoomEnemies(roomX, roomY, roomWidth, roomHeight, wallThi
   return placed;
 }
 
-export function updateEnemyAI(enemy, playerPos, segments, delta, playerHidden = false) {
+export function updateEnemyAI(enemy, playerPos, segments, delta, playerHidden = false, chaseSpeed = ENEMY_SPEED_CHASE) {
   const canSee = !playerHidden && hasLineOfSight(enemy, playerPos, segments, DETECTION_RANGE);
   const result = { ...enemy };
 
@@ -80,7 +80,7 @@ export function updateEnemyAI(enemy, playerPos, segments, delta, playerHidden = 
     case 'idle': {
       if (canSee) {
         result.state = 'chase';
-        const { vx, vy } = velocityToward(enemy.x, enemy.y, playerPos.x, playerPos.y, ENEMY_SPEED_CHASE);
+        const { vx, vy } = velocityToward(enemy.x, enemy.y, playerPos.x, playerPos.y, chaseSpeed);
         result.velocityX = vx;
         result.velocityY = vy;
       } else {
@@ -96,7 +96,7 @@ export function updateEnemyAI(enemy, playerPos, segments, delta, playerHidden = 
     }
     case 'chase': {
       if (canSee) {
-        const { vx, vy } = velocityToward(enemy.x, enemy.y, playerPos.x, playerPos.y, ENEMY_SPEED_CHASE);
+        const { vx, vy } = velocityToward(enemy.x, enemy.y, playerPos.x, playerPos.y, chaseSpeed);
         result.velocityX = vx;
         result.velocityY = vy;
       } else {
@@ -113,7 +113,7 @@ export function updateEnemyAI(enemy, playerPos, segments, delta, playerHidden = 
     case 'search': {
       if (canSee) {
         result.state = 'chase';
-        const { vx, vy } = velocityToward(enemy.x, enemy.y, playerPos.x, playerPos.y, ENEMY_SPEED_CHASE);
+        const { vx, vy } = velocityToward(enemy.x, enemy.y, playerPos.x, playerPos.y, chaseSpeed);
         result.velocityX = vx;
         result.velocityY = vy;
       } else {

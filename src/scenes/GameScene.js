@@ -3,9 +3,10 @@ import { calculateVelocity } from '../systems/movement.js';
 import { createFurnitureSegments, generateRoomFurniture } from '../systems/furniture.js';
 import { getFlashlightPolygon } from '../systems/visibility.js';
 import { generateLevel } from '../systems/level.js';
-import { generateRoomEnemies, updateEnemyAI } from '../systems/enemy.js';
-import { createCombatState, applyDamage, updateCombat, getHealthFraction, isInvulnerable, applyEnemyDamage, isEnemyDead, ENEMY_CONTACT_DAMAGE, ENEMY_MAX_HP, BULLET_DAMAGE } from '../systems/combat.js';
-import { calculateBulletVelocity, canFire, updateFireCooldown, isBulletExpired, BULLET_SPEED, FIRE_RATE_MS, BULLET_MAX_RANGE } from '../systems/shooting.js';
+import { generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_CHASE } from '../systems/enemy.js';
+import { createCombatState, applyDamage, updateCombat, getHealthFraction, isInvulnerable, applyEnemyDamage, isEnemyDead, ENEMY_CONTACT_DAMAGE, ENEMY_MAX_HP } from '../systems/combat.js';
+import { calculateBulletVelocity, canFire, updateFireCooldown, isBulletExpired, BULLET_SPEED } from '../systems/shooting.js';
+import { getEnemyHP, getEnemyCount, getEnemyChaseSpeed, getEnemyDamage } from '../systems/scaling.js';
 import { createBatteryState, updateBattery, getBatteryFraction, getFlashlightConeAngle, shouldFlicker, rechargeBattery, BATTERY_RECHARGE_AMOUNT } from '../systems/battery.js';
 import { generateRoomItems, ITEM_TYPES } from '../systems/items.js';
 import { createInventoryState, pickupItem, useBattery } from '../systems/inventory.js';
@@ -27,15 +28,24 @@ export class GameScene extends Phaser.Scene {
 
   init() {
     const shopState = this.registry.get('shopState');
-    const levels = shopState ? shopState.upgrades : { battery: 0, flashlight: 0, health: 0, speed: 0 };
+    const defaultLevels = createShopState().upgrades;
+    const levels = shopState ? { ...defaultLevels, ...shopState.upgrades } : defaultLevels;
     this.maxCharge = getUpgradeValue('battery', levels.battery);
     this.flashlightAngle = getUpgradeValue('flashlight', levels.flashlight);
     this.maxHp = getUpgradeValue('health', levels.health);
     this.playerSpeed = getUpgradeValue('speed', levels.speed);
+    this.bulletDamage = getUpgradeValue('weaponDamage', levels.weaponDamage);
+    this.fireRate = getUpgradeValue('fireRate', levels.fireRate);
+    this.bulletRange = getUpgradeValue('bulletRange', levels.bulletRange);
 
     const runCount = this.registry.get('runCount') ?? 0;
     this.registry.set('runCount', runCount + 1);
     this.levelSeed = runCount + 1;
+    this.runCount = runCount;
+    this.scaledEnemyHP = getEnemyHP(ENEMY_MAX_HP, runCount);
+    this.scaledEnemyChaseSpeed = getEnemyChaseSpeed(ENEMY_SPEED_CHASE, runCount);
+    this.scaledEnemyDamage = getEnemyDamage(ENEMY_CONTACT_DAMAGE, runCount);
+    this.extraEnemyCount = getEnemyCount(runCount);
     saveGame(shopState || createShopState(), runCount + 1);
   }
 
@@ -430,7 +440,7 @@ export class GameScene extends Phaser.Scene {
       const furniture = this.roomFurniture.get(room.id) || [];
       const spawnPoints = generateRoomEnemies(
         room.x, room.y, room.width, room.height,
-        WALL_THICKNESS, room.seed, furniture, room.id
+        WALL_THICKNESS, room.seed, furniture, room.id, this.extraEnemyCount
       );
 
       for (const spawn of spawnPoints) {
@@ -451,7 +461,7 @@ export class GameScene extends Phaser.Scene {
           lastKnownX: 0,
           lastKnownY: 0,
           searchTimer: 0,
-          health: ENEMY_MAX_HP,
+          health: this.scaledEnemyHP,
         });
       }
     }
@@ -647,7 +657,7 @@ export class GameScene extends Phaser.Scene {
     const enemyState = this.enemyStates.find(es => es.sprite === enemySprite);
     if (!enemyState) return;
 
-    enemyState.health = applyEnemyDamage(enemyState.health, BULLET_DAMAGE);
+    enemyState.health = applyEnemyDamage(enemyState.health, this.bulletDamage);
 
     if (isEnemyDead(enemyState.health)) {
       enemySprite.setActive(false);
@@ -662,7 +672,7 @@ export class GameScene extends Phaser.Scene {
     if (this.hidingState.isHiding) return;
 
     const before = this.combatState;
-    this.combatState = applyDamage(before, ENEMY_CONTACT_DAMAGE);
+    this.combatState = applyDamage(before, this.scaledEnemyDamage);
 
     if (this.combatState.hp < before.hp) {
       this.cameras.main.shake(100, 0.01);
@@ -699,7 +709,7 @@ export class GameScene extends Phaser.Scene {
         continue;
       }
 
-      const updated = updateEnemyAI(es, playerPos, this.wallSegments, delta, this.hidingState.isHiding);
+      const updated = updateEnemyAI(es, playerPos, this.wallSegments, delta, this.hidingState.isHiding, this.scaledEnemyChaseSpeed);
 
       es.state = updated.state;
       es.velocityX = updated.velocityX;
@@ -923,7 +933,7 @@ export class GameScene extends Phaser.Scene {
       if (!bullet.active) continue;
       const originX = bullet.getData('originX');
       const originY = bullet.getData('originY');
-      if (isBulletExpired(originX, originY, bullet.x, bullet.y, BULLET_MAX_RANGE)) {
+      if (isBulletExpired(originX, originY, bullet.x, bullet.y, this.bulletRange)) {
         bullet.setActive(false);
         bullet.setVisible(false);
         bullet.body.stop();
@@ -968,7 +978,7 @@ export class GameScene extends Phaser.Scene {
 
     if (!this.hidingState.isHiding && pointer.leftButtonDown() && canFire(this.fireCooldown)) {
       this.fireBullet();
-      this.fireCooldown = FIRE_RATE_MS;
+      this.fireCooldown = this.fireRate;
     }
 
     this.updateInteractPrompt();
