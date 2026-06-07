@@ -6,6 +6,7 @@ import { generateLevel } from '../systems/level.js';
 import { generateRoomEnemies, updateEnemyAI } from '../systems/enemy.js';
 import { createCombatState, applyDamage, updateCombat, getHealthFraction, isInvulnerable, applyEnemyDamage, isEnemyDead, ENEMY_CONTACT_DAMAGE, ENEMY_MAX_HP, BULLET_DAMAGE } from '../systems/combat.js';
 import { calculateBulletVelocity, canFire, updateFireCooldown, isBulletExpired, BULLET_SPEED, FIRE_RATE_MS, BULLET_MAX_RANGE } from '../systems/shooting.js';
+import { createBatteryState, updateBattery, getBatteryFraction, getFlashlightConeAngle, shouldFlicker } from '../systems/battery.js';
 
 const PLAYER_SPEED = 200;
 const WALL_THICKNESS = 16;
@@ -26,12 +27,15 @@ export class GameScene extends Phaser.Scene {
 
     this.roomFurniture = new Map();
     this.combatState = createCombatState();
+    this.batteryState = createBatteryState();
     this.fireCooldown = 0;
+    this.dayEnding = false;
 
     this.createRooms();
     this.createPlayer();
     this.createEnemies();
     this.createBullets();
+    this.createExitZone();
     this.setupInput();
     this.setupCamera();
     this.createDarknessOverlay();
@@ -232,6 +236,35 @@ export class GameScene extends Phaser.Scene {
     this.hudGraphics.setDepth(1000);
   }
 
+  createExitZone() {
+    const room = this.level.rooms[0];
+    const exitX = room.x + WALL_THICKNESS + 32;
+    const exitY = room.y + WALL_THICKNESS + 32;
+    const exitSize = 64;
+
+    this.exitGraphics = this.add.graphics();
+    this.exitGraphics.setDepth(10);
+    this.exitGraphics.fillStyle(0x44cc44, 0.3);
+    this.exitGraphics.fillRect(exitX - exitSize / 2, exitY - exitSize / 2, exitSize, exitSize);
+    this.exitGraphics.lineStyle(2, 0x44cc44, 0.6);
+    this.exitGraphics.strokeRect(exitX - exitSize / 2, exitY - exitSize / 2, exitSize, exitSize);
+
+    this.exitZone = this.add.zone(exitX, exitY, exitSize, exitSize);
+    this.physics.add.existing(this.exitZone, true);
+    this.physics.add.overlap(this.player, this.exitZone, this.onDayComplete, null, this);
+  }
+
+  onDayComplete() {
+    if (this.dayEnding) return;
+    this.dayEnding = true;
+    this.player.body.stop();
+    this.player.body.enable = false;
+    this.cameras.main.fadeOut(1000, 0, 0, 0);
+    this.cameras.main.once('camerafadeoutcomplete', () => {
+      this.scene.restart();
+    });
+  }
+
   fireBullet() {
     const bullet = this.bulletGroup.get(this.player.x, this.player.y, 'bullet');
     if (!bullet) return;
@@ -361,6 +394,22 @@ export class GameScene extends Phaser.Scene {
 
     gfx.lineStyle(2, 0xffffff, 0.5);
     gfx.strokeRect(x, y, width, height);
+
+    const battY = y + height + 6;
+    const battFraction = getBatteryFraction(this.batteryState);
+
+    gfx.fillStyle(0x222222, 0.8);
+    gfx.fillRect(x, battY, width, height);
+
+    let battColor = 0xcccc33;
+    if (battFraction <= 0.25) battColor = 0xcc3333;
+    else if (battFraction <= 0.5) battColor = 0xcc8833;
+
+    gfx.fillStyle(battColor, 1);
+    gfx.fillRect(x, battY, width * battFraction, height);
+
+    gfx.lineStyle(2, 0xffffff, 0.5);
+    gfx.strokeRect(x, battY, width, height);
   }
 
   setupInput() {
@@ -409,22 +458,25 @@ export class GameScene extends Phaser.Scene {
     gfx.fillPath();
   }
 
-  updateDarkness() {
+  updateDarkness(time) {
     this.darkGraphics.clear();
     this.lightGraphics.clear();
     this.maskGraphics.clear();
+
+    const { minX, minY, maxX, maxY } = this.levelBounds;
+    this.darkGraphics.fillStyle(0x000000, 0.95);
+    this.darkGraphics.fillRect(minX - 100, minY - 100, maxX - minX + 200, maxY - minY + 200);
+
+    const coneAngle = getFlashlightConeAngle(this.batteryState, FLASHLIGHT_CONE_ANGLE);
+    if (coneAngle <= 0 || shouldFlicker(this.batteryState, time)) return;
 
     const origin = { x: this.player.x, y: this.player.y };
     const polygon = getFlashlightPolygon(
       origin,
       this.playerAngle || 0,
-      FLASHLIGHT_CONE_ANGLE,
+      coneAngle,
       this.wallSegments
     );
-
-    const { minX, minY, maxX, maxY } = this.levelBounds;
-    this.darkGraphics.fillStyle(0x000000, 0.95);
-    this.darkGraphics.fillRect(minX - 100, minY - 100, maxX - minX + 200, maxY - minY + 200);
 
     if (polygon.length >= 3) {
       this.maskGraphics.fillStyle(0xffffff);
@@ -448,8 +500,8 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  update(_time, delta) {
-    if (this.combatState.isDead) return;
+  update(time, delta) {
+    if (this.combatState.isDead || this.dayEnding) return;
 
     const keyState = {
       up: this.keys.W.isDown,
@@ -470,6 +522,7 @@ export class GameScene extends Phaser.Scene {
     );
 
     this.combatState = updateCombat(this.combatState, delta);
+    this.batteryState = updateBattery(this.batteryState, delta);
     this.fireCooldown = updateFireCooldown(this.fireCooldown, delta);
 
     if (pointer.isDown && canFire(this.fireCooldown)) {
@@ -480,7 +533,7 @@ export class GameScene extends Phaser.Scene {
     this.updateBullets();
     this.updateEnemies(delta);
     this.drawPlayer();
-    this.updateDarkness();
+    this.updateDarkness(time);
     this.drawHUD();
   }
 }

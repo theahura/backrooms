@@ -1,0 +1,102 @@
+import { describe, it, expect } from 'vitest';
+import {
+  createBatteryState,
+  updateBattery,
+  getBatteryFraction,
+  getFlashlightConeAngle,
+  shouldFlicker,
+} from '../battery.js';
+
+describe('createBatteryState', () => {
+  it('starts fully charged and not depleted', () => {
+    const state = createBatteryState();
+    expect(getBatteryFraction(state)).toBe(1);
+    expect(state.isDepleted).toBe(false);
+  });
+});
+
+describe('updateBattery', () => {
+  it('drains charge over time', () => {
+    const state = createBatteryState();
+    const updated = updateBattery(state, 1000);
+    expect(getBatteryFraction(updated)).toBeLessThan(1);
+    expect(getBatteryFraction(updated)).toBeGreaterThan(0);
+  });
+
+  it('drains more with larger delta', () => {
+    const state = createBatteryState();
+    const small = updateBattery(state, 1000);
+    const large = updateBattery(state, 5000);
+    expect(getBatteryFraction(large)).toBeLessThan(getBatteryFraction(small));
+  });
+
+  it('depletes fully after enough time', () => {
+    const state = createBatteryState();
+    const depleted = updateBattery(state, 200000);
+    expect(getBatteryFraction(depleted)).toBe(0);
+    expect(depleted.isDepleted).toBe(true);
+  });
+
+  it('does not drain below zero', () => {
+    const state = createBatteryState();
+    const depleted = updateBattery(state, 200000);
+    const overDrained = updateBattery(depleted, 10000);
+    expect(getBatteryFraction(overDrained)).toBe(0);
+    expect(overDrained.isDepleted).toBe(true);
+  });
+});
+
+describe('getFlashlightConeAngle', () => {
+  const baseCone = Math.PI / 4;
+
+  it('returns full cone angle at full battery', () => {
+    const state = createBatteryState();
+    expect(getFlashlightConeAngle(state, baseCone)).toBe(baseCone);
+  });
+
+  it('returns reduced cone angle at partial battery', () => {
+    const state = createBatteryState();
+    const halfDrained = updateBattery(state, 45000);
+    const angle = getFlashlightConeAngle(halfDrained, baseCone);
+    expect(angle).toBeLessThan(baseCone);
+    expect(angle).toBeGreaterThan(0);
+  });
+
+  it('returns zero when battery is depleted', () => {
+    const state = createBatteryState();
+    const depleted = updateBattery(state, 200000);
+    expect(getFlashlightConeAngle(depleted, baseCone)).toBe(0);
+  });
+
+  it('cone angle decreases as battery drains', () => {
+    const state = createBatteryState();
+    const early = updateBattery(state, 10000);
+    const late = updateBattery(state, 60000);
+    expect(getFlashlightConeAngle(late, baseCone)).toBeLessThan(
+      getFlashlightConeAngle(early, baseCone)
+    );
+  });
+});
+
+describe('shouldFlicker', () => {
+  it('does not flicker above 25% battery', () => {
+    const state = createBatteryState();
+    const healthy = updateBattery(state, 30000);
+    expect(getBatteryFraction(healthy)).toBeGreaterThan(0.25);
+    for (let t = 0; t < 1000; t += 16) {
+      expect(shouldFlicker(healthy, t)).toBe(false);
+    }
+  });
+
+  it('flickers at low battery for some time values', () => {
+    const state = createBatteryState();
+    const low = updateBattery(state, 80000);
+    expect(getBatteryFraction(low)).toBeLessThan(0.25);
+    const results = [];
+    for (let t = 0; t < 2000; t += 16) {
+      results.push(shouldFlicker(low, t));
+    }
+    expect(results).toContain(true);
+    expect(results).toContain(false);
+  });
+});

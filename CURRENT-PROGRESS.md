@@ -1,8 +1,8 @@
 # Current Progress
 
-## Status: Combat System Complete
+## Status: Battery & Day/Exit Cycle Complete
 
-The game now has a full combat loop: enemies damage the player on contact (with invulnerability cooldown), the player can shoot projectile bullets to kill enemies (2 shots each), and the player dies when HP reaches 0 (scene restarts). A HUD health bar shows current health.
+The game now has its core survival loop: the flashlight battery drains over 90 seconds, progressively narrowing the flashlight cone. Below 25% battery, the flashlight flickers. At 0%, total darkness. A green exit zone in room 0 lets the player complete the day successfully. HUD shows both health and battery bars.
 
 ## Completed
 - Application spec written
@@ -48,7 +48,17 @@ The game now has a full combat loop: enemies damage the player on contact (with 
 - Enemy health system
   - 50 HP per zombie, killed after 2 bullet hits
   - Dead enemies removed from physics and AI updates
-- 91 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, and shooting
+- Flashlight battery drain system
+  - 90-second full drain, battery depletes linearly over time
+  - Flashlight cone angle scales from 100% to 25% of base as battery drains
+  - Below 25% battery: deterministic sine-wave flickering effect
+  - At 0% battery: flashlight dies completely (total darkness)
+  - HUD battery bar below health bar (yellow > orange > red color transitions)
+- Exit zone and day/exit cycle
+  - Green exit marker in top-left of room 0 (starting room)
+  - Overlap detection triggers day completion (camera fadeout + scene restart)
+  - `dayEnding` flag freezes game state during exit transition
+- 98 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, and battery
 - Documentation (docs.md files for root, src, systems, scenes)
 
 ## Architecture
@@ -60,16 +70,19 @@ The game now has a full combat loop: enemies damage the player on contact (with 
 - Doorways are gaps in wall segments — the visibility system naturally handles light passing through without any changes
 - Enemy LOS reuses `raySegmentIntersection` from visibility.js — single ray from enemy to player, checked against wall segments
 - Enemy AI is a pure function state machine — takes state in, returns updated state with velocity
-- Combat/shooting are pure function modules (`combat.js`, `shooting.js`) — same architecture pattern as enemy/movement
-- Player combat state is an immutable object; enemy health is a mutable field on the enemy state (asymmetry: player state is passed through pure functions, enemy health is mutated in-place in the scene callback)
+- Combat/shooting/battery are pure function modules (`combat.js`, `shooting.js`, `battery.js`) — same architecture pattern as enemy/movement
+- Player combat and battery states are immutable objects; enemy health is a mutable field on the enemy state (asymmetry: player state is passed through pure functions, enemy health is mutated in-place in the scene callback)
 - Bullet physics group uses Phaser's built-in pooling (`maxSize: 20`, `getFirstDead`)
 - HUD uses `setScrollFactor(0)` at depth 1000 to stay fixed on screen above all game layers
+- Battery feeds into flashlight rendering: `getFlashlightConeAngle()` scales the cone angle passed to `getFlashlightPolygon()` — no changes to the visibility system itself
+- Exit zone uses Phaser's zone + overlap detection pattern (same as enemy contact)
 
 ## Next Steps
-- Implement flashlight battery drain and day/exit cycle
-- Add items and inventory system
-- Add shop/upgrade system between runs
+- Add items and inventory system (batteries, valuables/treasure for scoring)
+- Add shop/upgrade system between runs (trade valuables for upgrades)
 - Add starting room (furniture store with crack in wall)
 - Add closable doors to some room connections
 - Add light switches that prevent enemy spawning
 - Add hiding mechanics (interact with canHide furniture to become invisible to enemies)
+- Add day-complete scoring/summary screen (currently just restarts)
+- Add compass/map that fills in as the player explores

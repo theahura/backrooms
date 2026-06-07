@@ -169,6 +169,47 @@ project/
 - No damage/health system yet — will need at least basic player HP and damage on contact
 - No enemy death/combat — shooting mechanics are a separate future feature
 
+## Flashlight Battery & Day/Exit Cycle Research
+
+### Battery Drain Design Parameters
+- **Drain rate**: 90 seconds full depletion is the sweet spot — fast enough to create tension, slow enough to allow meaningful exploration (F.E.A.R. uses 20s which is too aggressive, Blood II uses 100s)
+- **Visual degradation (layered)**:
+  - At 50% battery: cone angle shrinks to ~75% of base
+  - At 25%: cone angle at ~50%, intermittent flickering begins
+  - At 10%: aggressive flickering, significant cone reduction
+  - At 0%: no flashlight polygon at all — total darkness
+- **Battery indicator**: Segmented HUD bar (same pattern as health bar) + visual cone degradation
+- **Death behavior**: Battery depletion = total darkness = effectively a death sentence (can still move but can't see enemies)
+
+### Architecture: Pure Module Pattern
+- Follow `combat.js` exactly: constants, state factory, update function, fraction getter
+- `src/systems/battery.js` — pure functions: `createBatteryState`, `updateBattery`, `getBatteryFraction`, `getFlashlightConeAngle`
+- State: `{ charge, maxCharge, isDepleted }`
+- `updateBattery(state, delta)` — immutable state transition, drains charge based on delta time
+- `getFlashlightConeAngle(state, baseConeAngle)` — scales cone angle based on battery fraction
+- Flickering: `shouldFlicker(state, time)` — returns boolean based on battery level and time for pseudo-random flicker effect
+
+### Exit Zone Design
+- Place exit zone in room 0 (player spawn room) — a specific area the player must return to
+- Use Phaser `this.add.zone()` + `this.physics.add.existing(zone, true)` + `this.physics.add.overlap(player, zone, callback)`
+- Visual indicator: draw a green/glowing rectangle on the floor to mark the exit
+- On overlap: end the day successfully (camera fade out, scene restart)
+- Exit should be in a corner of room 0, away from player spawn at center
+
+### GameScene Integration Points
+- `FLASHLIGHT_CONE_ANGLE` (line 12): stays as base/max value
+- `create()` (line 21): add `this.batteryState = createBatteryState()`
+- `updateDarkness()` (line 418-423): replace `FLASHLIGHT_CONE_ANGLE` with dynamic value from battery state
+- `drawHUD()` (line 346-364): add battery bar below health bar (y=42)
+- `update()` (line 451): add `this.batteryState = updateBattery(this.batteryState, delta)`
+- `createPlayer()` (line 150): nearby — add exit zone creation in room 0
+
+### Flickering Implementation
+- Use time-based pseudo-random pattern (not Math.random — must be deterministic for tests)
+- At <25% battery: toggle flashlight visibility at intervals (flicker)
+- Pattern: `sin(time * frequency) > threshold` where frequency increases as battery drops
+- During flicker "off" frames: skip drawing the flashlight polygon entirely
+
 ## Combat System Research
 
 ### Architecture: Two New Pure Modules
