@@ -12,6 +12,8 @@ export const WEAPON_TYPES = [
     spreadAngle: 0,
     color: 0xffdd44,
     pickupColor: 0xaaaa44,
+    maxAmmo: 50,
+    startAmmo: 15,
   },
   {
     id: 'shotgun',
@@ -24,6 +26,8 @@ export const WEAPON_TYPES = [
     spreadAngle: Math.PI / 5,
     color: 0xff8844,
     pickupColor: 0xcc6633,
+    maxAmmo: 20,
+    startAmmo: 6,
   },
   {
     id: 'rifle',
@@ -36,13 +40,29 @@ export const WEAPON_TYPES = [
     spreadAngle: 0,
     color: 0x44ddff,
     pickupColor: 0x3399aa,
+    maxAmmo: 15,
+    startAmmo: 4,
   },
 ];
 
-export function createWeaponState() {
+export const AMMO_PER_PICKUP = {
+  pistol: 10,
+  shotgun: 4,
+  rifle: 3,
+};
+
+export function createWeaponState(options = {}) {
+  if (options.startingPistol) {
+    return {
+      slots: [WEAPON_TYPES[0], null],
+      activeSlot: 0,
+      ammo: [WEAPON_TYPES[0].startAmmo, 0],
+    };
+  }
   return {
-    slots: [WEAPON_TYPES[0], null],
+    slots: [null, null],
     activeSlot: 0,
+    ammo: [0, 0],
   };
 }
 
@@ -52,22 +72,58 @@ export function switchWeapon(state) {
   return { ...state, activeSlot: otherSlot };
 }
 
-export function pickupWeapon(state, weaponType) {
-  if (state.slots[1] === null) {
+export function pickupWeapon(state, weaponType, initialAmmo) {
+  const ammoToSet = initialAmmo !== undefined ? initialAmmo : weaponType.startAmmo;
+  const firstEmpty = state.slots[0] === null ? 0 : state.slots[1] === null ? 1 : -1;
+
+  if (firstEmpty >= 0) {
+    const newSlots = [...state.slots];
+    newSlots[firstEmpty] = weaponType;
+    const newAmmo = [...state.ammo];
+    newAmmo[firstEmpty] = ammoToSet;
     return {
-      state: { ...state, slots: [state.slots[0], weaponType] },
+      state: { ...state, slots: newSlots, ammo: newAmmo },
       droppedWeapon: null,
     };
   }
+
   const dropped = state.slots[1];
+  const droppedAmmo = state.ammo[1];
+  const newSlots = [state.slots[0], weaponType];
+  const newAmmo = [state.ammo[0], ammoToSet];
   return {
-    state: { ...state, slots: [state.slots[0], weaponType] },
-    droppedWeapon: dropped,
+    state: { ...state, slots: newSlots, ammo: newAmmo },
+    droppedWeapon: { ...dropped, ammo: droppedAmmo },
   };
 }
 
 export function getActiveWeapon(state) {
   return state.slots[state.activeSlot];
+}
+
+export function hasAmmo(state) {
+  const weapon = state.slots[state.activeSlot];
+  if (!weapon) return false;
+  return state.ammo[state.activeSlot] > 0;
+}
+
+export function consumeAmmo(state) {
+  const weapon = state.slots[state.activeSlot];
+  if (!weapon) return state;
+  const current = state.ammo[state.activeSlot];
+  if (current <= 0) return state;
+  const newAmmo = [...state.ammo];
+  newAmmo[state.activeSlot] = current - 1;
+  return { ...state, ammo: newAmmo };
+}
+
+export function addAmmo(state, amount) {
+  const weapon = state.slots[state.activeSlot];
+  if (!weapon) return state;
+  const current = state.ammo[state.activeSlot];
+  const newAmmo = [...state.ammo];
+  newAmmo[state.activeSlot] = Math.min(current + amount, weapon.maxAmmo);
+  return { ...state, ammo: newAmmo };
 }
 
 const MIN_FIRE_RATE = 50;
@@ -84,16 +140,24 @@ export function getEffectiveStats(weapon, bonuses) {
   };
 }
 
-export function generateLevelWeapon(rooms, seed, furnitureByRoom) {
-  const nonZeroRooms = rooms.filter(r => r.id !== 0);
-  if (nonZeroRooms.length === 0) return null;
+export function generateLevelWeapons(rooms, seed, furnitureByRoom) {
+  const floors = [...new Set(rooms.map(r => r.floor))];
+  const results = [];
 
-  const rand = mulberry32(seed + 60000);
-  const roomIndex = Math.floor(rand() * nonZeroRooms.length);
-  const room = nonZeroRooms[roomIndex];
+  for (const floor of floors) {
+    const floorRooms = rooms.filter(r => r.floor === floor && r.id !== 0);
+    if (floorRooms.length === 0) continue;
 
-  const furniture = furnitureByRoom.get(room.id) || [];
-  return generateRoomWeapon(room.x, room.y, room.width, room.height, 16, seed, furniture, room.id);
+    const rand = mulberry32(seed + 60000 + floor * 100);
+    const roomIndex = Math.floor(rand() * floorRooms.length);
+    const room = floorRooms[roomIndex];
+
+    const furniture = furnitureByRoom.get(room.id) || [];
+    const weapon = generateRoomWeapon(room.x, room.y, room.width, room.height, 16, seed + floor * 100, furniture, room.id);
+    if (weapon) results.push(weapon);
+  }
+
+  return results;
 }
 
 export function generateRoomWeapon(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, furnitureItems, roomId) {
@@ -106,9 +170,8 @@ export function generateRoomWeapon(roomX, roomY, roomWidth, roomHeight, wallThic
   const maxX = roomX + roomWidth - wallThickness - margin;
   const maxY = roomY + roomHeight - wallThickness - margin;
 
-  const pickableWeapons = WEAPON_TYPES.filter(w => w.id !== 'pistol');
-  const weaponIndex = Math.floor(rand() * pickableWeapons.length);
-  const weapon = pickableWeapons[weaponIndex];
+  const weaponIndex = Math.floor(rand() * WEAPON_TYPES.length);
+  const weapon = WEAPON_TYPES[weaponIndex];
 
   const itemRadius = 12;
   for (let attempt = 0; attempt < 40; attempt++) {
@@ -135,3 +198,4 @@ export function generateRoomWeapon(roomX, roomY, roomWidth, roomHeight, wallThic
 
   return null;
 }
+

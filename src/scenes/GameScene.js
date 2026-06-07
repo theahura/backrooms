@@ -7,7 +7,7 @@ import { generateMultiFloorLevel, getFloorBounds, FLOOR_ROOM_COUNTS, STAIR_SIZE 
 import { generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_CHASE, CRAWLER_CHASE_SPEED, SPITTER_CHASE_SPEED } from '../systems/enemy.js';
 import { createCombatState, applyDamage, updateCombat, getHealthFraction, isInvulnerable, applyEnemyDamage, isEnemyDead, ENEMY_CONTACT_DAMAGE, ENEMY_MAX_HP, CRAWLER_MAX_HP, SPITTER_MAX_HP, CRAWLER_CONTACT_DAMAGE, SPITTER_CONTACT_DAMAGE, SPITTER_PROJECTILE_DAMAGE } from '../systems/combat.js';
 import { calculateBulletVelocity, calculateShotgunSpread, canFire, updateFireCooldown, isBulletExpired, SPITTER_PROJECTILE_SPEED, SPITTER_PROJECTILE_RANGE } from '../systems/shooting.js';
-import { WEAPON_TYPES, createWeaponState, switchWeapon, pickupWeapon, getActiveWeapon, getEffectiveStats, generateLevelWeapon } from '../systems/weapons.js';
+import { WEAPON_TYPES, createWeaponState, switchWeapon, pickupWeapon, getActiveWeapon, getEffectiveStats, generateLevelWeapons, hasAmmo, consumeAmmo, addAmmo, AMMO_PER_PICKUP } from '../systems/weapons.js';
 import { getEnemyHP, getEnemyCount, getEnemyChaseSpeed, getEnemyDamage } from '../systems/scaling.js';
 import { createBatteryState, updateBattery, getBatteryFraction, getFlashlightConeAngle, shouldFlicker, rechargeBattery, BATTERY_RECHARGE_AMOUNT } from '../systems/battery.js';
 import { generateRoomItems, ITEM_TYPES } from '../systems/items.js';
@@ -41,7 +41,8 @@ export class GameScene extends Phaser.Scene {
       range: getUpgradeValue('bulletRange', levels.bulletRange) - 600,
     };
     this.maxItems = getUpgradeValue('backpack', levels.backpack);
-    this.weaponState = createWeaponState();
+    const hasStartingPistol = (levels.startingPistol || 0) > 0;
+    this.weaponState = createWeaponState({ startingPistol: hasStartingPistol });
     this.updateWeaponStats();
 
     const runCount = this.registry.get('runCount') ?? 0;
@@ -63,6 +64,16 @@ export class GameScene extends Phaser.Scene {
 
   updateWeaponStats() {
     const weapon = getActiveWeapon(this.weaponState);
+    if (!weapon) {
+      this.bulletDamage = 0;
+      this.fireRate = 0;
+      this.bulletRange = 0;
+      this.bulletSpeed = 0;
+      this.bulletCount = 0;
+      this.bulletSpreadAngle = 0;
+      this.bulletColor = 0;
+      return;
+    }
     const stats = getEffectiveStats(weapon, this.upgradeBonuses);
     this.bulletDamage = stats.damage;
     this.fireRate = stats.fireRate;
@@ -474,10 +485,21 @@ export class GameScene extends Phaser.Scene {
   onItemPickup(player, itemSprite) {
     if (!itemSprite.active) return;
     if (!canPickupItem(this.inventoryState)) return;
+    const itemType = itemSprite.getData('itemType');
+    if (itemType === 'ammo' && !getActiveWeapon(this.weaponState)) return;
+    if (itemType === 'ammo') {
+      const weapon = getActiveWeapon(this.weaponState);
+      if (this.weaponState.ammo[this.weaponState.activeSlot] >= weapon.maxAmmo) return;
+    }
     this.inventoryState = pickupItem(this.inventoryState, {
-      type: itemSprite.getData('itemType'),
+      type: itemType,
       value: itemSprite.getData('itemValue'),
     });
+    if (itemType === 'ammo') {
+      const weapon = getActiveWeapon(this.weaponState);
+      const amount = AMMO_PER_PICKUP[weapon.id] || 10;
+      this.weaponState = addAmmo(this.weaponState, amount);
+    }
     itemSprite.destroy();
   }
 
@@ -618,7 +640,7 @@ export class GameScene extends Phaser.Scene {
   createWeaponPickups() {
     this.weaponPickupSprites = [];
 
-    for (const wpn of WEAPON_TYPES.filter(w => w.id !== 'pistol')) {
+    for (const wpn of WEAPON_TYPES) {
       const gfx = this.make.graphics({ add: false });
       gfx.fillStyle(wpn.pickupColor, 1);
       gfx.fillRect(0, 2, 16, 6);
@@ -627,8 +649,8 @@ export class GameScene extends Phaser.Scene {
       gfx.destroy();
     }
 
-    const wpnData = generateLevelWeapon(this.level.rooms, this.levelSeed, this.roomFurniture);
-    if (wpnData) {
+    const weapons = generateLevelWeapons(this.level.rooms, this.levelSeed, this.roomFurniture);
+    for (const wpnData of weapons) {
       const sprite = this.add.sprite(wpnData.x, wpnData.y, `pickup_${wpnData.weaponId}`);
       sprite.setDepth(5);
       sprite.setData('weaponId', wpnData.weaponId);
@@ -1153,10 +1175,16 @@ export class GameScene extends Phaser.Scene {
     this.capacityText.setText(`[${this.inventoryState.itemCount}/${this.inventoryState.maxItems}]`);
 
     const weapon = getActiveWeapon(this.weaponState);
-    const colorHex = '#' + weapon.color.toString(16).padStart(6, '0');
-    this.weaponText.setColor(colorHex);
-    const slotIndicator = this.weaponState.slots[1] ? '[Q]' : '';
-    this.weaponText.setText(`${weapon.name.toUpperCase()} ${slotIndicator}`);
+    if (weapon) {
+      const colorHex = '#' + weapon.color.toString(16).padStart(6, '0');
+      this.weaponText.setColor(colorHex);
+      const slotIndicator = this.weaponState.slots[1] ? '[Q]' : '';
+      const ammoCount = this.weaponState.ammo[this.weaponState.activeSlot];
+      this.weaponText.setText(`${weapon.name.toUpperCase()} [${ammoCount}/${weapon.maxAmmo}] ${slotIndicator}`);
+    } else {
+      this.weaponText.setColor('#666666');
+      this.weaponText.setText('UNARMED');
+    }
   }
 
   drawMinimap() {
@@ -1222,7 +1250,8 @@ export class GameScene extends Phaser.Scene {
     const weaponType = WEAPON_TYPES.find(w => w.id === weaponId);
     if (!weaponType) return;
 
-    const result = pickupWeapon(this.weaponState, weaponType);
+    const savedAmmo = wpnSprite.getData('weaponAmmo');
+    const result = pickupWeapon(this.weaponState, weaponType, savedAmmo);
     this.weaponState = result.state;
     this.updateWeaponStats();
 
@@ -1237,6 +1266,7 @@ export class GameScene extends Phaser.Scene {
       );
       dropSprite.setDepth(5);
       dropSprite.setData('weaponId', result.droppedWeapon.id);
+      dropSprite.setData('weaponAmmo', result.droppedWeapon.ammo);
       this.weaponPickupSprites.push(dropSprite);
     }
   }
@@ -1375,8 +1405,9 @@ export class GameScene extends Phaser.Scene {
     this.batteryState = updateBattery(this.batteryState, delta);
     this.fireCooldown = updateFireCooldown(this.fireCooldown, delta);
 
-    if (!this.hidingState.isHiding && pointer.leftButtonDown() && canFire(this.fireCooldown)) {
+    if (!this.hidingState.isHiding && pointer.leftButtonDown() && canFire(this.fireCooldown) && getActiveWeapon(this.weaponState) && hasAmmo(this.weaponState)) {
       this.fireBullet();
+      this.weaponState = consumeAmmo(this.weaponState);
       this.fireCooldown = this.fireRate;
     }
 

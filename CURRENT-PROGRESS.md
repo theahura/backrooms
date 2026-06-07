@@ -1,6 +1,10 @@
 # Current Progress
 
-## Status: Room Variety, Light-Transparent Furniture, More Connections
+## Status: Weaponless Start + Ammo System
+
+Player no longer starts with a gun — must find weapons in the backrooms. All weapons now have per-weapon ammo that depletes on firing. Key changes: (1) `createWeaponState()` starts with empty slots by default; `pickupWeapon()` fills the first empty slot. (2) Per-weapon ammo tracking via `ammo` array parallel to `slots` — pistol (max 50, start 15), shotgun (max 20, start 6), rifle (max 15, start 4). Shotgun consumes 1 ammo per trigger pull regardless of pellets. (3) New `ammo` item type spawns in rooms (weight 12, ~11% chance) and restores current weapon's ammo (pistol +10, shotgun +4, rifle +3). (4) "Starting Pistol" shop upgrade (single tier, 500 gold) gives the player a pistol at run start. (5) `generateLevelWeapons()` guarantees 1 weapon per floor (all weapon types including pistol can appear as floor drops). (6) HUD shows "UNARMED" when no weapon equipped, or "WEAPON [ammo/max] [Q]" when armed. Firing is disabled when unarmed or out of ammo. Ammo pickups are ignored when unarmed (item stays on ground).
+
+## Previous: Room Variety, Light-Transparent Furniture, More Connections
 
 Added three level design improvements: (1) Maze-like room variety via new `maze.js` module — ~40% of non-starting rooms remain open, ~30% get recursive-division internal walls with passage gaps, ~30% get staggered column grids that create interesting flashlight shadow patterns. (2) Tables and desks no longer block flashlight rays — only tall furniture (shelves, bookcases) blocks light via new `blocksLight` property on `FURNITURE_TYPES`. Physics collision still applies to all furniture. (3) Level connectivity increased — extra doors are probabilistically added between grid-adjacent rooms not already connected (~50% chance), and 2 stair connections now link floors instead of 1 (using distinct rooms).
 
@@ -236,7 +240,20 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
   - `createStairConnections` in `stairs.js` creates 2 stairs using distinct rooms per floor
   - Falls back to fewer if not enough rooms available
   - 2 new unit tests covering count and room distinctness
-- 341 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, weapon upgrades, enemy types, stairs, weapons, inventory capacity, maze generation, and room connections
+- Weaponless start + ammo system
+  - Player starts unarmed by default (empty weapon slots)
+  - Per-weapon ammo: pistol (50 max, 15 start), shotgun (20 max, 6 start), rifle (15 max, 4 start)
+  - `hasAmmo(state)`, `consumeAmmo(state)`, `addAmmo(state, amount)` pure functions for ammo management
+  - Ammo item type in ITEM_TYPES (weight 12, ~11% spawn chance, green color)
+  - Ammo pickups restore current weapon's ammo (pistol +10, shotgun +4, rifle +3 per pickup)
+  - "Starting Pistol" shop upgrade (1 tier, 500 gold) gives pistol at run start
+  - `generateLevelWeapons()` guarantees 1 weapon per floor (all types valid drops including pistol)
+  - `pickupWeapon()` fills first empty slot (slot 0 if empty, then slot 1)
+  - HUD shows "UNARMED" or "WEAPON [ammo/max] [Q]"
+  - Firing disabled when unarmed or out of ammo
+  - Ammo pickups ignored when unarmed (item stays on ground)
+  - 26 new unit tests covering ammo consumption, ammo refill, weaponless state, multi-floor weapon spawns
+- 371 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, weapon upgrades, enemy types, stairs, weapons, inventory capacity, maze generation, room connections, weaponless start, and ammo system
 - Documentation (docs.md files for root, src, systems, scenes)
 - Bug fix: flashlight mouse tracking drift during WASD movement
   - Root cause: Phaser 3 `pointer.worldX`/`worldY` are cached properties only refreshed on mouse events, not camera scroll

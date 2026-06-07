@@ -71,6 +71,15 @@ export const UPGRADES = [
     base: 8,
     perLevel: 4,
   },
+  {
+    id: 'startingPistol',
+    name: 'Starting Pistol',
+    description: 'Start each run with a pistol',
+    maxLevel: 1,
+    costs: [500],
+    base: 0,
+    perLevel: 1,
+  },
 ];
 
 export function createShopState() {

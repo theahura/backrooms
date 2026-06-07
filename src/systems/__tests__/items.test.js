@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateRoomItems, ITEM_TYPES } from '../items.js';
+import { generateRoomItems } from '../items.js';
 
 const ROOM_X = 0;
 const ROOM_Y = 0;
@@ -75,5 +75,16 @@ describe('generateRoomItems', () => {
       }
     }
     expect(Object.keys(typeCounts).length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('can spawn ammo type items', () => {
+    const typeCounts = {};
+    for (let seed = 0; seed < 100; seed++) {
+      const items = generateRoomItems(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1);
+      for (const item of items) {
+        typeCounts[item.type] = (typeCounts[item.type] || 0) + 1;
+      }
+    }
+    expect(typeCounts['ammo']).toBeGreaterThan(0);
   });
 });

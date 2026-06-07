@@ -211,3 +211,19 @@ describe('backpack upgrade', () => {
   });
 });
 
+describe('starting pistol upgrade', () => {
+  it('can be purchased with 500 gold', () => {
+    let state = addGold(createShopState(), 500);
+    expect(canPurchase(state, 'startingPistol')).toBe(true);
+    state = purchaseUpgrade(state, 'startingPistol');
+    expect(state.upgrades.startingPistol).toBe(1);
+    expect(state.gold).toBe(0);
+  });
+
+  it('cannot be purchased twice', () => {
+    let state = addGold(createShopState(), 9999);
+    state = purchaseUpgrade(state, 'startingPistol');
+    expect(canPurchase(state, 'startingPistol')).toBe(false);
+  });
+});
+

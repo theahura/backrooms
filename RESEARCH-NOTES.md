@@ -1348,3 +1348,61 @@ Add to UPGRADES array:
 - `GameScene.js` line 219: Check `blocksLight` before pushing segments
 - `GameScene.js`: After `createRoomFurniture`, call maze wall generation and push to wallSegments + create physics zones
 - New `maze.js`: Room type determination, recursive division, column generation
+
+## Weaponless Start + Ammo System Research
+
+### Design Decision: No Starting Gun + Per-Weapon Ammo
+
+The spec says "player shouldn't start with a gun" and "guns should have ammo." Research across survival horror (RE, Silent Hill, Amnesia) and roguelikes (Enter the Gungeon, Nuclear Throne, Dead Cells) reveals:
+
+1. **No roguelike successfully makes the player fully weaponless.** The proven pattern is "weak/underpowered start, not absent." However, the spec explicitly says no gun — and this game already has hiding mechanics and closable doors as defensive tools.
+2. **Per-weapon ammo (Enter the Gungeon model)** creates more tension than shared pools (Nuclear Throne model) — each weapon has its own ammo count.
+3. **Guaranteed weapon placement** in early rooms prevents softlocks while maintaining tension.
+4. **Ammo pickups** should restore ~20-30% of max capacity per pickup.
+
+### Ammo System Design
+
+**Per-weapon ammo with these values:**
+| Weapon | Start Ammo | Max Ammo | Ammo Per Pickup |
+|--------|-----------|----------|-----------------|
+| Pistol | 15 | 50 | 10 |
+| Shotgun | 6 | 20 | 4 |
+| Rifle | 4 | 15 | 3 |
+
+- Shotgun fires 4 pellets but consumes 1 ammo per shot (not per pellet)
+- Ammo is tracked per-weapon-slot, not globally
+- When ammo reaches 0, weapon cannot fire (no infinite fallback)
+
+### Weaponless Start Design
+
+**Approach:**
+- `createWeaponState()` starts with `slots: [null, null]` — no weapon
+- Player must find weapons in rooms (already spawns 1 per level)
+- Increase weapon spawns: guarantee at least 1 weapon on floor 0 and 1 on floor 1
+- Add "Starting Pistol" shop upgrade: gives pistol with ammo at run start (expensive — 500 gold)
+- When unarmed: left-click does nothing, Q does nothing, HUD shows "UNARMED"
+- Weapon pickup fills first empty slot (slot 0 first, then slot 1)
+
+### Ammo Pickup Spawning
+
+- New item type `ammo` added to ITEM_TYPES in items.js (weight: 12, between gem and battery)
+- Ammo pickups restore ammo for currently equipped weapon
+- If no weapon equipped, ammo pickups are still collected (stored as generic ammo for next weapon found)
+- Alternative: ammo pickups are weapon-specific — simpler but may feel unfair if you find ammo for a weapon you don't have
+
+**Decision: Generic ammo pickups that restore the current weapon's ammo.** Simpler implementation, avoids the problem of finding shotgun ammo without a shotgun.
+
+### Shop Integration
+
+- New shop item: "Starting Pistol" (id: `startingPistol`) — single tier, cost 500
+- When purchased: player starts each run with a pistol + 15 ammo
+- Fits the Motherload pattern: invest in starting equipment for easier exploration
+
+### Architecture Changes
+
+- `weapons.js`: Add `ammo` and `maxAmmo` fields to WEAPON_TYPES. Modify `createWeaponState()` to start empty. Add `consumeAmmo(state)`, `addAmmo(state, amount)`, `hasAmmo(state)`, `canFire(state)` functions.
+- `shooting.js`: No changes needed (already pure velocity/cooldown functions)
+- `items.js`: Add `ammo` item type to ITEM_TYPES
+- `inventory.js`: Handle ammo pickup (add to current weapon's ammo)
+- `shop.js`: Add `startingPistol` upgrade
+- `GameScene.js`: Guard `fireBullet()` with ammo check, decrement ammo on fire, display ammo in HUD, handle weaponless state (disable fire, update HUD)

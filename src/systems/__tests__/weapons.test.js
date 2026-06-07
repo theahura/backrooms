@@ -7,13 +7,19 @@ import {
   getActiveWeapon,
   getEffectiveStats,
   generateRoomWeapon,
-  generateLevelWeapon,
 } from '../weapons.js';
 import { calculateShotgunSpread } from '../shooting.js';
 
 describe('createWeaponState', () => {
-  it('starts with pistol in slot 0 and empty slot 1', () => {
+  it('starts with both slots empty by default', () => {
     const state = createWeaponState();
+    expect(state.slots[0]).toBe(null);
+    expect(state.slots[1]).toBe(null);
+    expect(state.activeSlot).toBe(0);
+  });
+
+  it('starts with pistol when startingPistol option is true', () => {
+    const state = createWeaponState({ startingPistol: true });
     expect(state.slots[0].id).toBe('pistol');
     expect(state.slots[1]).toBe(null);
     expect(state.activeSlot).toBe(0);
@@ -43,10 +49,19 @@ describe('switchWeapon', () => {
 });
 
 describe('pickupWeapon', () => {
-  it('places weapon in empty slot 1 when available', () => {
+  it('places weapon in first empty slot', () => {
     const state = createWeaponState();
     const shotgun = WEAPON_TYPES.find(w => w.id === 'shotgun');
     const result = pickupWeapon(state, shotgun);
+    expect(result.state.slots[0].id).toBe('shotgun');
+    expect(result.droppedWeapon).toBe(null);
+  });
+
+  it('places weapon in slot 1 when slot 0 is occupied', () => {
+    const state = createWeaponState({ startingPistol: true });
+    const shotgun = WEAPON_TYPES.find(w => w.id === 'shotgun');
+    const result = pickupWeapon(state, shotgun);
+    expect(result.state.slots[0].id).toBe('pistol');
     expect(result.state.slots[1].id).toBe('shotgun');
     expect(result.droppedWeapon).toBe(null);
   });
@@ -54,16 +69,16 @@ describe('pickupWeapon', () => {
   it('swaps slot 1 weapon when full', () => {
     const shotgun = WEAPON_TYPES.find(w => w.id === 'shotgun');
     const rifle = WEAPON_TYPES.find(w => w.id === 'rifle');
-    const state = { slots: [WEAPON_TYPES[0], shotgun], activeSlot: 0 };
+    const state = { slots: [WEAPON_TYPES[0], shotgun], activeSlot: 0, ammo: [15, 6] };
     const result = pickupWeapon(state, rifle);
     expect(result.state.slots[1].id).toBe('rifle');
     expect(result.droppedWeapon.id).toBe('shotgun');
   });
 
-  it('does not replace the pistol in slot 0', () => {
+  it('does not replace slot 0 when swapping', () => {
     const shotgun = WEAPON_TYPES.find(w => w.id === 'shotgun');
     const rifle = WEAPON_TYPES.find(w => w.id === 'rifle');
-    const state = { slots: [WEAPON_TYPES[0], shotgun], activeSlot: 0 };
+    const state = { slots: [WEAPON_TYPES[0], shotgun], activeSlot: 0, ammo: [15, 6] };
     const result = pickupWeapon(state, rifle);
     expect(result.state.slots[0].id).toBe('pistol');
   });
@@ -161,7 +176,7 @@ describe('generateRoomWeapon', () => {
     expect(result.x).toBeLessThan(800);
     expect(result.y).toBeGreaterThan(0);
     expect(result.y).toBeLessThan(600);
-    expect(['shotgun', 'rifle']).toContain(result.weaponId);
+    expect(['pistol', 'shotgun', 'rifle']).toContain(result.weaponId);
   });
 
   it('is deterministic with same seed', () => {
@@ -180,24 +195,3 @@ describe('generateRoomWeapon', () => {
   });
 });
 
-describe('generateLevelWeapon', () => {
-  it('returns exactly one weapon for a multi-room level', () => {
-    const rooms = [
-      { id: 0, x: 0, y: 0, width: 800, height: 600, seed: 1 },
-      { id: 1, x: 900, y: 0, width: 800, height: 600, seed: 2 },
-      { id: 2, x: 1800, y: 0, width: 800, height: 600, seed: 3 },
-    ];
-    const furnitureByRoom = new Map([[0, []], [1, []], [2, []]]);
-    const result = generateLevelWeapon(rooms, 42, furnitureByRoom);
-    expect(result).not.toBe(null);
-    expect(['shotgun', 'rifle']).toContain(result.weaponId);
-    expect(result.roomId).not.toBe(0);
-  });
-
-  it('returns null when no non-zero rooms exist', () => {
-    const rooms = [{ id: 0, x: 0, y: 0, width: 800, height: 600, seed: 1 }];
-    const furnitureByRoom = new Map([[0, []]]);
-    const result = generateLevelWeapon(rooms, 42, furnitureByRoom);
-    expect(result).toBe(null);
-  });
-});

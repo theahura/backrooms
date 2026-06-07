@@ -2,6 +2,7 @@ import { mulberry32 } from './random.js';
 
 export const ITEM_TYPES = [
   { type: 'battery', value: 0, weight: 15, color: 0xffff00, size: { w: 10, h: 14 } },
+  { type: 'ammo', value: 0, weight: 12, color: 0x88ff88, size: { w: 10, h: 10 } },
   { type: 'copper_coin', value: 10, weight: 40, color: 0xcd7f32, size: { w: 8, h: 8 } },
   { type: 'silver_coin', value: 50, weight: 25, color: 0xc0c0c0, size: { w: 8, h: 8 } },
   { type: 'gold_coin', value: 200, weight: 15, color: 0xffd700, size: { w: 8, h: 8 } },
