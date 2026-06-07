@@ -652,3 +652,58 @@ function isStorageAvailable() {
 - Single call refreshes `pointer.worldX`/`worldY` for all subsequent reads in the same frame
 - No need to change `fireBullet()` or any other code that reads `pointer.worldX`/`worldY`
 - Negligible performance cost (sin/cos + matrix operations, once per frame)
+
+## Minimap / Exploration Tracking Research
+
+### Rendering Approach: Graphics + setScrollFactor(0)
+- Use `this.add.graphics().setScrollFactor(0).setDepth(1000)` — same pattern as existing HUD
+- Draw scaled-down room rectangles with `fillRect()` for each visited room
+- Fog of war by omission: only draw rooms the player has visited
+- Clear and redraw each frame (cheap for <30 rooms of simple rectangles)
+- Player position dot: `fillCircle()` at scaled player coordinates
+- Exit marker: distinct color circle at exit location
+- Alternative approaches (second camera, RenderTexture) are overkill for simple colored rectangles
+
+### Design Decisions (Binding of Isaac / Enter the Gungeon / Horror conventions)
+| Decision | Choice | Rationale |
+|---|---|---|
+| Position | Top-right corner | Industry standard, avoids health bar (top-left) |
+| Size | ~150-180px wide | Unobtrusive, horror benefits from less UI |
+| Room representation | Filled rectangles on a grid | Rooms are uniform size on integer grid |
+| Current room | Brighter fill (light gray) | Must be instantly identifiable |
+| Visited rooms | Dim filled rectangles (dark gray) | Shows progress without visual noise |
+| Unvisited rooms | Not shown | Maintains mystery |
+| Room connections | NOT drawn explicitly | Grid adjacency implies connection (Isaac pattern) |
+| Color palette | Dark gray base, muted tones | Matches horror aesthetic |
+| Exit marker | Green dot in room 0 | Consistent with existing exit zone color |
+| Background | Semi-transparent black panel | Readable against any game scene |
+
+### Architecture: Pure Module `exploration.js`
+- Follow doors.js/lightswitch.js pattern: constants, state factory, query functions
+- `createExplorationState()` → `{ visitedRoomIds: new Set(), currentRoomId: null }`
+- `updateExploration(state, playerX, playerY, rooms)` → detects current room, adds to visited set, returns updated state
+- `getCurrentRoom(playerX, playerY, rooms)` → returns room object or null (point-in-AABB check)
+- `getMinimapData(state, rooms, playerX, playerY, exitPos)` → returns everything needed for rendering: scaled positions, colors, player dot, exit marker
+- No Phaser dependency — pure JavaScript, testable in Node
+
+### Coordinate Mapping (World → Minimap)
+- Rooms are on integer grid: `gridX * 1200`, `gridY * 1000`
+- Level bounds available as `this.levelBounds = { minX, minY, maxX, maxY }`
+- Scale factor: `minimapWidth / (maxX - minX)` for x, `minimapHeight / (maxY - minY)` for y
+- Since rooms are all same size, can simplify: use `gridX`/`gridY` as integer coordinates scaled by cell size
+- Minimap screen position: top-right corner with margin
+
+### GameScene Integration Points
+- `create()`: create `this.minimapGraphics` and `this.explorationState`
+- `update()`: call `updateExploration()` with player position, then `drawMinimap()`
+- `drawMinimap()`: clear graphics, draw background panel, iterate visited rooms as scaled rectangles, draw player dot, draw exit marker
+- Depth 1000 (same as HUD — always visible above darkness)
+
+### Performance
+- ~6 rooms × fillRect + 1 fillCircle (player) + 1 fillCircle (exit) = ~8 draw calls per frame — negligible
+- Could optimize with dirty flag (only redraw when room changes) but unnecessary for this scale
+- No need for generateTexture baking since minimap changes as rooms are visited
+
+### Persistence
+- Exploration state resets each run (new level each time) — no need to persist
+- Unlike shop state, this is ephemeral per-run data

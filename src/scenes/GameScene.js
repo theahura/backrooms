@@ -14,6 +14,7 @@ import { createDoorStates, toggleDoor, getDoorCenter, findNearestDoor, DOOR_INTE
 import { createSwitchStates, toggleSwitch, findNearestSwitch, getLitRoomIds, isPointInRoom, SWITCH_INTERACT_RANGE } from '../systems/lightswitch.js';
 import { createHidingState, enterHiding, exitHiding, findNearestHideable, HIDE_INTERACT_RANGE } from '../systems/hiding.js';
 import { saveGame } from '../systems/persistence.js';
+import { createExplorationState, updateExploration, getMinimapData, MINIMAP_COLORS } from '../systems/exploration.js';
 
 const WALL_THICKNESS = 16;
 const ROOM_COUNT = 6;
@@ -50,6 +51,7 @@ export class GameScene extends Phaser.Scene {
     this.fireCooldown = 0;
     this.dayEnding = false;
     this.hidingState = createHidingState();
+    this.explorationState = createExplorationState();
 
     this.createRooms();
     this.createDoors();
@@ -475,6 +477,10 @@ export class GameScene extends Phaser.Scene {
     this.hudGraphics.setScrollFactor(0);
     this.hudGraphics.setDepth(1000);
 
+    this.minimapGraphics = this.add.graphics();
+    this.minimapGraphics.setScrollFactor(0);
+    this.minimapGraphics.setDepth(1000);
+
     this.batteryCountText = this.add.text(20, 66, '', {
       fontSize: '14px',
       color: '#ffff00',
@@ -497,6 +503,7 @@ export class GameScene extends Phaser.Scene {
     const exitX = room.x + WALL_THICKNESS + 32;
     const exitY = room.y + WALL_THICKNESS + 32;
     const exitSize = 64;
+    this.exitPosition = { x: exitX, y: exitY };
 
     this.exitGraphics = this.add.graphics();
     this.exitGraphics.setDepth(10);
@@ -696,6 +703,38 @@ export class GameScene extends Phaser.Scene {
     this.treasureText.setText(`$${this.inventoryState.treasureValue}`);
   }
 
+  drawMinimap() {
+    const gfx = this.minimapGraphics;
+    gfx.clear();
+
+    const data = getMinimapData(
+      this.explorationState,
+      this.level.rooms,
+      this.levelBounds,
+      { x: this.player.x, y: this.player.y },
+      this.exitPosition,
+      this.cameras.main.width
+    );
+
+    gfx.fillStyle(MINIMAP_COLORS.background, MINIMAP_COLORS.backgroundAlpha);
+    gfx.fillRect(data.bgRect.x, data.bgRect.y, data.bgRect.w, data.bgRect.h);
+
+    for (const rect of data.roomRects) {
+      if (rect.isCurrent) {
+        gfx.fillStyle(MINIMAP_COLORS.current, MINIMAP_COLORS.currentAlpha);
+      } else {
+        gfx.fillStyle(MINIMAP_COLORS.visited, MINIMAP_COLORS.visitedAlpha);
+      }
+      gfx.fillRect(rect.x, rect.y, rect.w, rect.h);
+    }
+
+    gfx.fillStyle(MINIMAP_COLORS.exit, 1);
+    gfx.fillCircle(data.exitDot.x, data.exitDot.y, 3);
+
+    gfx.fillStyle(MINIMAP_COLORS.player, 1);
+    gfx.fillCircle(data.playerDot.x, data.playerDot.y, 2);
+  }
+
   setupInput() {
     this.keys = {
       W: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W),
@@ -872,6 +911,8 @@ export class GameScene extends Phaser.Scene {
     this.updateDarkness(time);
     this.drawDoors();
     this.drawSwitches();
+    this.explorationState = updateExploration(this.explorationState, this.player.x, this.player.y, this.level.rooms);
     this.drawHUD();
+    this.drawMinimap();
   }
 }

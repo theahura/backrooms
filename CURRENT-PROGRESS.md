@@ -1,8 +1,8 @@
 # Current Progress
 
-## Status: Flashlight Mouse Tracking Bug Fixed
+## Status: Fog-of-War Minimap Added
 
-Fixed a bug where the flashlight drifted away from the mouse cursor when the player moved with WASD while the mouse was stationary. Root cause: Phaser 3's `pointer.worldX`/`worldY` are stored properties that only update on mouse input events, not when the camera scrolls. Added `pointer.updateWorldPoint(this.cameras.main)` at the start of `GameScene.update()` to refresh world coordinates each frame. This also fixes bullet direction when shooting while moving.
+Added a minimap in the top-right corner of the screen that reveals rooms as the player visits them. Pure function module `exploration.js` tracks visited rooms via point-in-AABB room detection (reuses `isPointInRoom` from `lightswitch.js`) and computes scaled minimap rendering data. The minimap shows visited rooms as dark gray rectangles, the current room brighter, plus a green player dot and green exit marker. Exploration state resets each run.
 
 ## Completed
 - Application spec written
@@ -114,7 +114,17 @@ Fixed a bug where the flashlight drifted away from the mouse cursor when the pla
   - Load on boot: main.js loads saved state into game.registry before scenes start
   - Graceful degradation: all localStorage access wrapped in try-catch (handles private browsing, quota exceeded)
   - 11 unit tests covering round-trip, corruption, version validation, shape validation, missing field defaults, and unavailable storage
-- 205 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, and persistence
+- Fog-of-war minimap (exploration tracking)
+  - Pure function module `exploration.js`: createExplorationState, getCurrentRoom, updateExploration, getMinimapData
+  - Reuses `isPointInRoom` from `lightswitch.js` for room detection (point-in-AABB)
+  - Top-right HUD overlay using Graphics with `setScrollFactor(0)` at depth 1000
+  - Visited rooms shown as dark gray rectangles, current room brighter (light gray)
+  - Green player dot and green exit marker always visible
+  - Fog of war by omission: only visited rooms are drawn
+  - Exploration state resets each run — no persistence needed
+  - Minimap coordinates computed from levelBounds with scale fitting into 160x130px area
+  - 18 unit tests covering state creation, room detection, state accumulation, reference identity optimization, minimap data computation, screen width repositioning, and negative-coordinate rooms
+- 223 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, and exploration
 - Documentation (docs.md files for root, src, systems, scenes)
 - Bug fix: flashlight mouse tracking drift during WASD movement
   - Root cause: Phaser 3 `pointer.worldX`/`worldY` are cached properties only refreshed on mouse events, not camera scroll
@@ -122,7 +132,7 @@ Fixed a bug where the flashlight drifted away from the mouse cursor when the pla
   - Also fixes bullet direction when shooting while moving
 
 ## Architecture
-- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop, doors, lightswitch, hiding, persistence) — testable without Phaser
+- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop, doors, lightswitch, hiding, persistence, exploration) — testable without Phaser
 - `src/scenes/` — Phaser scene classes that wire systems together for rendering (GameScene for gameplay, ShopScene for upgrades between runs)
 - Darkness uses BitmapMask with invertAlpha on a Graphics overlay
 - Furniture segments use the same `{x1,y1,x2,y2}` format as walls — concatenated into `wallSegments` for raycasting with zero visibility code changes
@@ -130,9 +140,9 @@ Fixed a bug where the flashlight drifted away from the mouse cursor when the pla
 - Doorways are gaps in wall segments — the visibility system naturally handles light passing through without any changes
 - Enemy LOS reuses `raySegmentIntersection` from visibility.js — single ray from enemy to player, checked against wall segments
 - Enemy AI is a pure function state machine — takes state in, returns updated state with velocity
-- Combat/shooting/battery/inventory/hiding are pure function modules (`combat.js`, `shooting.js`, `battery.js`, `inventory.js`, `hiding.js`) — same architecture pattern as enemy/movement
+- Combat/shooting/battery/inventory/hiding/exploration are pure function modules (`combat.js`, `shooting.js`, `battery.js`, `inventory.js`, `hiding.js`, `exploration.js`) — same architecture pattern as enemy/movement
 - Items system (`items.js`) follows same spawning pattern as enemy.js: seeded PRNG, furniture overlap avoidance, skip room 0
-- Player combat, battery, inventory, hiding, and shop states are immutable objects; enemy health is a mutable field on the enemy state (asymmetry: player state is passed through pure functions, enemy health is mutated in-place in the scene callback)
+- Player combat, battery, inventory, hiding, exploration, and shop states are immutable objects; enemy health is a mutable field on the enemy state (asymmetry: player state is passed through pure functions, enemy health is mutated in-place in the scene callback)
 - Item spawning uses seed offset +20000 (furniture: +0, enemies: +10000, items: +20000, doors: +30000, switches: +40000) to avoid correlation
 - Closable door segments are dynamically pushed/spliced from `wallSegments` — same mutable array pattern as furniture, but toggled at runtime via `body.enable` on Phaser static bodies
 - Light switch lit rooms are drawn as fillRect into maskGraphics (same BitmapMask as flashlight) — drawn before the flashlight early-return so lit rooms stay visible even when battery is dead
@@ -146,9 +156,12 @@ Fixed a bug where the flashlight drifted away from the mouse cursor when the pla
 - Battery feeds into flashlight rendering: `getFlashlightConeAngle()` scales the cone angle passed to `getFlashlightPolygon()` — no changes to the visibility system itself
 - Exit zone uses Phaser's zone + overlap detection pattern (same as enemy contact)
 - `pointer.updateWorldPoint(this.cameras.main)` at the top of `update()` ensures `pointer.worldX`/`worldY` are current before all downstream reads (aim angle, bullet velocity)
+- Minimap uses separate `minimapGraphics` object (not shared with `hudGraphics`) — both at depth 1000 with `setScrollFactor(0)`
+- Exploration state tracks visited room IDs (Set) and current room ID — updated each frame via point-in-AABB check against all rooms
+- `getMinimapData()` computes world-to-minimap coordinate mapping from `levelBounds` with uniform scale to fit 160x130px area in top-right corner
+- `exploration.js` reuses `isPointInRoom()` from `lightswitch.js` — avoids duplicating room containment logic
 
 ## Next Steps
 - Add starting room (furniture store with crack in wall)
-- Add compass/map that fills in as the player explores
 - Add more upgrade categories (weapon damage, fire rate, bullet range)
 - Add enemy scaling per run (more/tougher enemies as player gets stronger)
