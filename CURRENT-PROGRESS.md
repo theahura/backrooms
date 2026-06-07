@@ -1,8 +1,8 @@
 # Current Progress
 
-## Status: Furniture Store Starting Room Added
+## Status: Enemy Scaling & Weapon Upgrades Added
 
-Transformed room 0 into a visually distinct furniture store with warm wood-tone colors, hand-crafted store furniture, permanent lighting, and a crack in the wall leading to the backrooms. Pure function module `startroom.js` generates the store layout, crack visual points, and exit position. The crack has a pulsing sickly-yellow glow effect. Room 0 is permanently lit (enemies that wander in freeze). Exit zone repositioned to center-north (store entrance).
+Added enemy difficulty scaling per run and three new weapon upgrade categories. Enemies get progressively harder each run (more HP, more per room, faster chase speed, higher contact damage) with hard caps on each parameter. Players can now purchase weapon damage (+10/level, one-shots base enemies at max), fire rate (-30ms/level cooldown, 9.1 shots/sec at max), and bullet range (+100px/level) upgrades in the shop. Pure function module `scaling.js` provides capped scaling formulas. GameScene reads upgrade values and scaled enemy stats at init. Shop UI compacted to fit 7 upgrade categories. Old saves seamlessly gain default values for new upgrade keys.
 
 ## Completed
 - Application spec written
@@ -134,7 +134,23 @@ Transformed room 0 into a visually distinct furniture store with warm wood-tone 
   - Crack supports both vertical walls (east/west) and horizontal walls (north/south) — `generateCrackPoints` takes a `vertical` parameter
   - Exit zone repositioned from top-left corner to center-north of room 0 (store entrance area)
   - 12 unit tests covering store layout bounds, spawn zone avoidance, determinism, crack point generation for both orientations, and exit position
-- 235 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, and starting room
+- Enemy scaling per run
+  - Pure function module `scaling.js`: getEnemyHP, getEnemyCount, getEnemyChaseSpeed, getEnemyDamage
+  - Enemy HP scales at +25% per run, hard cap at 3x base (150 HP max)
+  - Extra enemies per room: +1 every 2 runs, cap at +3 (max 5 per room)
+  - Chase speed scales at +5% per run, cap at +30% (run 6+)
+  - Contact damage scales +5 per run, cap at +20 (40 max)
+  - All scaling values precomputed in GameScene `init()` as instance properties
+  - 14 unit tests covering base values, scaling progression, and hard caps
+- Weapon upgrade categories
+  - Weapon Damage: base 25, +10/level, 3 tiers (25→35→45→55) — one-shots base enemies at max
+  - Fire Rate: base 200ms, -30ms/level, 3 tiers (200→170→140→110ms) — 9.1 shots/sec at max
+  - Bullet Range: base 600px, +100/level, 3 tiers (600→700→800→900px)
+  - Same [100, 300, 800] pricing as existing upgrades
+  - GameScene uses `this.bulletDamage`, `this.fireRate`, `this.bulletRange` instead of hardcoded constants
+  - Upgrade level fallback uses `createShopState().upgrades` spread for save compatibility
+  - ShopScene layout compacted (row height 80→60px) to fit 7 upgrades in 768px canvas
+- 263 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, and weapon upgrades
 - Documentation (docs.md files for root, src, systems, scenes)
 - Bug fix: flashlight mouse tracking drift during WASD movement
   - Root cause: Phaser 3 `pointer.worldX`/`worldY` are cached properties only refreshed on mouse events, not camera scroll
@@ -142,7 +158,7 @@ Transformed room 0 into a visually distinct furniture store with warm wood-tone 
   - Also fixes bullet direction when shooting while moving
 
 ## Architecture
-- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop, doors, lightswitch, hiding, persistence, exploration, startroom) — testable without Phaser
+- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop, doors, lightswitch, hiding, persistence, exploration, startroom, scaling) — testable without Phaser
 - `src/scenes/` — Phaser scene classes that wire systems together for rendering (GameScene for gameplay, ShopScene for upgrades between runs)
 - Darkness uses BitmapMask with invertAlpha on a Graphics overlay
 - Furniture segments use the same `{x1,y1,x2,y2}` format as walls — concatenated into `wallSegments` for raycasting with zero visibility code changes
@@ -150,7 +166,7 @@ Transformed room 0 into a visually distinct furniture store with warm wood-tone 
 - Doorways are gaps in wall segments — the visibility system naturally handles light passing through without any changes
 - Enemy LOS reuses `raySegmentIntersection` from visibility.js — single ray from enemy to player, checked against wall segments
 - Enemy AI is a pure function state machine — takes state in, returns updated state with velocity
-- Combat/shooting/battery/inventory/hiding/exploration/startroom are pure function modules (`combat.js`, `shooting.js`, `battery.js`, `inventory.js`, `hiding.js`, `exploration.js`, `startroom.js`) — same architecture pattern as enemy/movement
+- Combat/shooting/battery/inventory/hiding/exploration/startroom/scaling are pure function modules (`combat.js`, `shooting.js`, `battery.js`, `inventory.js`, `hiding.js`, `exploration.js`, `startroom.js`, `scaling.js`) — same architecture pattern as enemy/movement
 - Items system (`items.js`) follows same spawning pattern as enemy.js: seeded PRNG, furniture overlap avoidance, skip room 0
 - Player combat, battery, inventory, hiding, exploration, and shop states are immutable objects; enemy health is a mutable field on the enemy state (asymmetry: player state is passed through pure functions, enemy health is mutated in-place in the scene callback)
 - Item spawning uses seed offset +20000 (furniture: +0, enemies: +10000, items: +20000, doors: +30000, switches: +40000) to avoid correlation
@@ -158,7 +174,10 @@ Transformed room 0 into a visually distinct furniture store with warm wood-tone 
 - Light switch lit rooms are drawn as fillRect into maskGraphics (same BitmapMask as flashlight) — drawn before the flashlight early-return so lit rooms stay visible even when battery is dead
 - E-key interaction resolves nearest interactable (door, switch, or hideable furniture) via distance-sorted candidates array in `updateInteractPrompt()`
 - Shop state persists in `game.registry` (in-memory, survives scene transitions) and is backed by localStorage via `persistence.js` (survives browser reloads)
-- GameScene `init()` reads upgrade levels from registry and computes stat values via `getUpgradeValue()`
+- GameScene `init()` reads upgrade levels from registry and computes stat values via `getUpgradeValue()` — spreads `createShopState().upgrades` as default for forward compatibility with new upgrade keys
+- Enemy stats (HP, count, chase speed, contact damage) are precomputed in `init()` via `scaling.js` functions and stored as instance properties — constants in `combat.js`/`shooting.js`/`enemy.js` serve as base values only
+- `generateRoomEnemies()` accepts optional `extraCount` parameter (default 0), capped at 5 total enemies per room
+- `updateEnemyAI()` accepts optional `chaseSpeed` parameter (defaults to `ENEMY_SPEED_CHASE` constant)
 - ShopScene `init(data)` receives `treasureEarned` via scene start data, adds to registry gold balance
 - Two-scene flow: GameScene → (exit/death) → ShopScene → (enter backrooms) → GameScene
 - Bullet physics group uses Phaser's built-in pooling (`maxSize: 20`, `getFirstDead`)
@@ -176,5 +195,9 @@ Transformed room 0 into a visually distinct furniture store with warm wood-tone 
 - Exit zone position computed by `getExitPosition()` from `startroom.js` — center-north of room 0 (store entrance)
 
 ## Next Steps
-- Add more upgrade categories (weapon damage, fire rate, bullet range)
-- Add enemy scaling per run (more/tougher enemies as player gets stronger)
+- Add more enemy types (faster enemies, ranged enemies, etc.)
+- Add stairs / vertical room connections
+- Add weapons switching (Q/E to switch weapons, multiple weapon types)
+- Add backpack / storage capacity upgrades
+- Add different exit locations (spec: discovering alternate exits leads to different locations)
+- Add lore items in rooms

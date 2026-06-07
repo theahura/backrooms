@@ -10,7 +10,7 @@ Path: @/src
 - `@/index.html` loads `@/src/main.js` as an ES module via `<script type="module">`
 - `@/src/main.js` wires Phaser config (resolution, physics, renderer) and registers both scene classes (GameScene, ShopScene) with the engine
 - `@/src/scenes/` contains Phaser Scene subclasses: `GameScene` for gameplay and `ShopScene` for the between-run upgrade shop
-- `@/src/systems/` contains pure functions that scenes call for game math (movement, visibility, room geometry, furniture placement, starting room layout, enemy spawning/AI, combat/health, shooting/bullets, battery/flashlight drain, item spawning, inventory management, shop/upgrade logic, door state management, light switch state management, hiding state management, exploration/minimap tracking, and localStorage persistence)
+- `@/src/systems/` contains pure functions that scenes call for game math (movement, visibility, room geometry, furniture placement, starting room layout, enemy spawning/AI, enemy difficulty scaling, combat/health, shooting/bullets, battery/flashlight drain, item spawning, inventory management, shop/upgrade logic, door state management, light switch state management, hiding state management, exploration/minimap tracking, and localStorage persistence)
 - The architecture enforces a one-way dependency: scenes import from systems, but systems never import from scenes or Phaser. Systems may import from each other (e.g., `enemy.js` imports `raySegmentIntersection` from `visibility.js`)
 
 ### Core Implementation
@@ -29,6 +29,7 @@ index.html
        |    -> src/systems/room.js       (wall segments with door support)
        |    -> src/systems/furniture.js  (obstacle segments + placement)
        |    -> src/systems/enemy.js      (enemy spawning + LOS + AI state machine)
+       |    -> src/systems/scaling.js    (run-based enemy difficulty scaling)
        |    -> src/systems/combat.js     (player/enemy health + damage + invulnerability)
        |    -> src/systems/shooting.js   (bullet velocity + fire rate + range expiry)
        |    -> src/systems/battery.js    (battery drain + cone scaling + flicker + recharge)
@@ -39,7 +40,7 @@ index.html
        |    -> src/systems/hiding.js     (hiding state + enter/exit + nearest hideable)
        |    -> src/systems/exploration.js (exploration state + minimap data computation)
        |    -> src/systems/startroom.js  (store layout, crack points, exit position, store colors)
-       |    -> src/systems/shop.js       (getUpgradeValue for stat initialization)
+       |    -> src/systems/shop.js       (getUpgradeValue for stat + weapon initialization)
        |    -> src/systems/persistence.js (saveGame after runCount increment)
        |    -> src/systems/random.js     (shared seeded PRNG)
        |
@@ -50,7 +51,7 @@ index.html
        -> src/systems/persistence.js  (loadGame on boot, saveGame on lifecycle events)
 
   game.registry (cross-scene in-memory state, backed by localStorage):
-    shopState  -> { gold, upgrades: { battery, flashlight, health, speed } }
+    shopState  -> { gold, upgrades: { battery, flashlight, health, speed, weaponDamage, fireRate, bulletRange } }
     runCount   -> incrementing integer used as level seed
 
   localStorage (cross-session persistence via persistence.js):

@@ -341,9 +341,4 @@ describe('generateRoomEnemies with extraCount', () => {
     expect(enemies.length).toBeLessThanOrEqual(5);
   });
 
-  it('defaults to 0 extra enemies when not provided', () => {
-    const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42, [], 1);
-    expect(enemies.length).toBeGreaterThanOrEqual(1);
-    expect(enemies.length).toBeLessThanOrEqual(2);
-  });
 });

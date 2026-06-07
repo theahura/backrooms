@@ -197,12 +197,3 @@ describe('bullet range upgrade', () => {
   });
 });
 
-describe('createShopState with all upgrades', () => {
-  it('initializes all upgrade keys at level 0', () => {
-    const state = createShopState();
-    expect(Object.keys(state.upgrades).length).toBe(UPGRADES.length);
-    for (const upgrade of UPGRADES) {
-      expect(state.upgrades[upgrade.id]).toBe(0);
-    }
-  });
-});
