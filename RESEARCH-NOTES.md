@@ -983,3 +983,108 @@ SPITTER_PROJECTILE_RANGE = 400
 ### Key Design Constraint
 - `onEnemyContact()` currently accepts no arguments (line 671 in GameScene). Phaser overlap callbacks pass `(obj1, obj2)` but the function ignores them. Must change to `onEnemyContact(player, enemySprite)` to look up per-enemy damage.
 - Alternatively, store `contactDamage` as a property on the enemy state and look up by sprite reference (same pattern as `onBulletHitEnemy` finding `enemyState`)
+
+## Stairs / Vertical Room Connections Research
+
+### Design Decision: Multi-Floor in Same Scene (Teleportation)
+
+The APPLICATION_SPEC says "rooms are connected to each other in a variety of ways, including stairs." Since the game requires the player to return to the exit before battery dies, stairs must be bidirectional — the player can go down and come back up. This rules out the one-way "scene restart per floor" approach used by Binding of Isaac/Enter the Gungeon.
+
+**Approach:** Generate multiple floors in the same Phaser scene, offset far apart in world space. Stairs are overlap zones (like the exit zone) that teleport the player with a camera fade transition.
+
+### Floor Generation Strategy
+
+- Each floor is generated independently by calling `generateLevel(seed + floor * 1000, roomCount)`
+- Floor 0: 4 rooms (room 0 is the furniture store start)
+- Floor 1: 3 rooms (deeper backrooms — more dangerous, no safe starting room)
+- Room IDs offset per floor to remain globally unique
+- Floor separation: `FLOOR_Y_OFFSET = 10000` pixels (floors never visually overlap)
+- Room data extended with `floor` field for filtering
+
+### Stair Connection Architecture
+
+- 1 stair pair connects floor 0 to floor 1 (bidirectional)
+- Stair placement: pick a non-room-0 room on floor 0, pick any room on floor 1
+- Use seeded PRNG (seed offset +50000) for deterministic stair placement
+- Stair zones are 60x60 overlap areas (same pattern as exit zone)
+- Each stair has a counterpart: "stairs down" on floor 0, "stairs up" on floor 1
+
+### Teleportation Pattern (from Phaser 3 research)
+
+```javascript
+onStairEnter(player, stairZone) {
+  if (this.isTeleporting || this.dayEnding) return;
+  this.isTeleporting = true;
+  player.body.stop();
+  player.body.enable = false;
+
+  this.cameras.main.fadeOut(300, 0, 0, 0);
+  this.cameras.main.once('camerafadeoutcomplete', () => {
+    // Reposition player to destination stair
+    player.body.reset(destX, destY);
+    player.body.enable = true;
+    this.cameras.main.fadeIn(300, 0, 0, 0);
+    this.cameras.main.once('camerafadeincomplete', () => {
+      this.isTeleporting = false;
+    });
+  });
+}
+```
+
+Key notes:
+- `body.reset(x, y)` is critical (not `setPosition`) — clears velocity delta
+- `body.enable = false` during transition prevents collision glitches
+- Boolean flag `isTeleporting` prevents repeated overlap triggers
+- Camera already follows player via `startFollow` — auto-snaps after reset
+
+### Minimap Changes
+
+- `getMinimapData` must filter rooms by current floor
+- `levelBounds` computed per-floor (not across all floors) for proper scaling
+- Floor indicator ("B1", "B2") shown on minimap
+- Stair positions shown as markers on minimap
+
+### Stair Visual Design
+
+- "Stairs down" on floor 0: dark rectangular hole with diagonal lines (4-5 parallel lines suggesting steps descending)
+- "Stairs up" on floor 1: same but lines go the other way
+- Pulsing dim purple glow around stair edges (similar to crack glow but purple = deeper, more ominous)
+- Rendered at depth 2 (same as crack — below darkness, visible in flashlight and lit rooms)
+- Interaction prompt: "Press SPACE to descend" / "Press SPACE to ascend" when near
+
+### Architecture: Pure Module `stairs.js`
+
+- `FLOOR_Y_OFFSET = 10000`
+- `STAIR_WIDTH = 60`, `STAIR_HEIGHT = 60`
+- `FLOOR_ROOM_COUNTS = [4, 3]` — rooms per floor
+- `generateMultiFloorLevel(seed, floorRoomCounts)` → `{ rooms, wallSegments, stairs }`
+  - Calls `generateLevel` per floor, offsets room IDs and Y positions
+  - Creates stair connections between floors
+  - Returns combined data
+- `createStairConnections(rooms, seed)` → `[{ id, fromRoomId, toRoomId, fromPos, toPos, floor }]`
+- `getStairPosition(room)` → center of room (avoiding furniture zone)
+- `getFloorBounds(rooms, floor)` → `{ minX, minY, maxX, maxY }` for a specific floor
+
+### Integration Points
+
+- `GameScene.create()`: Use `generateMultiFloorLevel` instead of `generateLevel`
+- `GameScene.create()`: Create stair zones after exit zone
+- `GameScene.setupCamera()`: Use full level bounds (both floors) for camera/physics bounds
+- `GameScene.updateDarkness()`: Darkness rect covers full level bounds (already does this)
+- `GameScene.update()`: Track current floor, pass to minimap
+- `exploration.js`: Add `currentFloor` to state, filter `getMinimapData` by floor
+- HUD: Add floor indicator text ("B1" / "B2")
+
+### Performance Considerations
+
+- Wall segments from both floors in `this.wallSegments`: ~200 total for 7 rooms — negligible for raycasting
+- Physics world bounds span both floors but Phaser RTree handles spatial indexing efficiently
+- Darkness rect size increases but is just a single fill operation
+- Enemy AI only checks nearby segments (detection range ~300px) — floor 2 segments 10000px away are never relevant
+
+### Known Limitations for MVP
+
+- Only 2 floors for now (easily extensible to 3+ later via FLOOR_ROOM_COUNTS array)
+- Stairs always auto-teleport on overlap (no confirmation prompt needed — simpler interaction)
+- Enemies do not follow player between floors (they stay on their floor)
+- Battery continues draining during stair transition (intentional tension)

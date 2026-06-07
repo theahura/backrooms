@@ -44,7 +44,7 @@ export function updateExploration(state, playerX, playerY, rooms) {
   return { visitedRoomIds, currentRoomId: room.id };
 }
 
-export function getMinimapData(state, rooms, levelBounds, playerPos, exitPos, screenWidth) {
+export function getMinimapData(state, rooms, levelBounds, playerPos, exitPos, screenWidth, floorFilter) {
   const worldW = levelBounds.maxX - levelBounds.minX;
   const worldH = levelBounds.maxY - levelBounds.minY;
 
@@ -74,6 +74,7 @@ export function getMinimapData(state, rooms, levelBounds, playerPos, exitPos, sc
   const roomRects = [];
   for (const room of rooms) {
     if (!state.visitedRoomIds.has(room.id)) continue;
+    if (floorFilter != null && room.floor !== floorFilter) continue;
     const pos = toMinimap(room.x, room.y);
     roomRects.push({
       x: pos.x,

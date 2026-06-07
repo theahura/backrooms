@@ -209,4 +209,36 @@ describe('getMinimapData', () => {
     expect(data.playerDot.x).toBeLessThanOrEqual(bg.x + bg.w);
     expect(data.roomRects.length).toBe(1);
   });
+
+  it('filters rooms by floor when floorFilter is provided', () => {
+    const rooms = [
+      makeRoom(0, 0, 0, { floor: 0 }),
+      makeRoom(1, 1, 0, { floor: 0 }),
+      makeRoom(2, 0, 10, { floor: 1 }),
+      makeRoom(3, 1, 10, { floor: 1 }),
+    ];
+    const bounds = makeLevelBounds(rooms.filter(r => r.floor === 0));
+    let state = createExplorationState();
+    state = updateExploration(state, 600, 500, rooms);
+    state = updateExploration(state, 1800, 500, rooms);
+    state = updateExploration(state, 600, 10500, rooms);
+    // All 3 rooms visited, but filter to floor 0 should show only 2
+    const data = getMinimapData(state, rooms, bounds, { x: 600, y: 500 }, { x: 48, y: 48 }, 800, 0);
+    expect(data.roomRects.length).toBe(2);
+  });
+
+  it('shows all visited rooms when floorFilter is null', () => {
+    const rooms = [
+      makeRoom(0, 0, 0, { floor: 0 }),
+      makeRoom(1, 1, 0, { floor: 0 }),
+      makeRoom(2, 0, 10, { floor: 1 }),
+    ];
+    const bounds = makeLevelBounds(rooms);
+    let state = createExplorationState();
+    state = updateExploration(state, 600, 500, rooms);
+    state = updateExploration(state, 1800, 500, rooms);
+    state = updateExploration(state, 600, 10500, rooms);
+    const data = getMinimapData(state, rooms, bounds, { x: 600, y: 500 }, { x: 48, y: 48 }, 800, null);
+    expect(data.roomRects.length).toBe(3);
+  });
 });

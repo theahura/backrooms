@@ -1,8 +1,8 @@
 # Current Progress
 
-## Status: Multiple Enemy Types Added
+## Status: Multi-Floor Level with Stairs
 
-Added two new enemy types (crawler and spitter) alongside the existing basic zombie. Crawlers are fast, fragile melee enemies (112 chase speed, 30 HP). Spitters are slower ranged enemies (60 chase speed, 40 HP) that stop and fire projectiles at the player when within 250px. Enemy type distribution is run-gated: run 0 is basic-only, run 1 introduces crawlers (20%), run 2+ adds spitters (50/25/25 split). Each type has distinct visuals (red/purple/blue), per-type HP, contact damage, and scaled chase speed. Enemy projectile system mirrors the player bullet pattern (physics group pooling, wall/furniture collision, range expiry). Per-enemy contact damage replaces the previous uniform damage value.
+Added multi-floor level generation with bidirectional stairs connecting floors. Level now generates 2 floors (4 rooms on floor 0, 3 rooms on floor 1 = 7 total rooms). Floors are separated by 10000px in world-space Y. One stair connection links a non-starting room on floor 0 to a room on floor 1. Stairs are overlap zones that trigger camera fade teleportation (300ms fade out, reposition, 300ms fade in). Minimap shows only the current floor's visited rooms with a "B1"/"B2" floor indicator. Stair visuals: dark rectangles with step lines and pulsing purple glow. Player input/physics frozen during teleport via `isTeleporting` flag.
 
 ## Completed
 - Application spec written
@@ -165,7 +165,24 @@ Added two new enemy types (crawler and spitter) alongside the existing basic zom
   - Projectile constants: `SPITTER_PROJECTILE_SPEED=200`, `SPITTER_PROJECTILE_RANGE=400` in `shooting.js`
   - Distinct textures: basic=red 20px, crawler=purple 14px, spitter=blue 20px with mouth detail
   - 17 new unit tests covering type assignment, spawn typing, crawler speeds, spitter attack state machine
-- 278 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, weapon upgrades, and enemy types
+- Multi-floor level generation with bidirectional stairs
+  - Pure function module `stairs.js`: `generateMultiFloorLevel`, `getFloorBounds`, `createStairConnections`
+  - Level generates 2 floors: 4 rooms (floor 0) + 3 rooms (floor 1) = 7 total
+  - Floors separated by `FLOOR_Y_OFFSET = 10000` in world-space Y — no physics/visibility bleed
+  - One stair pair connects a non-room-0 room on floor 0 to a room on floor 1
+  - Stair placement uses seeded PRNG (seed offset +50000) for determinism
+  - Stairs are overlap zones (same pattern as exit zone) triggering camera fade teleportation
+  - 300ms fade out → `body.reset(destX, destY)` → 300ms fade in
+  - `isTeleporting` flag freezes player input/physics during transition
+  - Stair visuals: dark rectangles with diagonal step lines + pulsing purple glow (depth 1-2)
+  - Minimap shows only current floor, uses `getFloorBounds()` for per-floor scaling
+  - `getMinimapData()` accepts `floorFilter` parameter to filter rooms by floor
+  - Floor indicator ("B1"/"B2") shown below minimap
+  - Room objects extended with `floor` field (integer)
+  - Room IDs globally unique across floors (floor 1 IDs offset by floor 0 count)
+  - 12 new unit tests covering multi-floor generation, stair connections, ID uniqueness, bounds, determinism
+  - 2 new exploration tests for floor filtering
+- 291 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, weapon upgrades, enemy types, and stairs
 - Documentation (docs.md files for root, src, systems, scenes)
 - Bug fix: flashlight mouse tracking drift during WASD movement
   - Root cause: Phaser 3 `pointer.worldX`/`worldY` are cached properties only refreshed on mouse events, not camera scroll
@@ -173,7 +190,7 @@ Added two new enemy types (crawler and spitter) alongside the existing basic zom
   - Also fixes bullet direction when shooting while moving
 
 ## Architecture
-- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop, doors, lightswitch, hiding, persistence, exploration, startroom, scaling) — testable without Phaser
+- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop, doors, lightswitch, hiding, persistence, exploration, startroom, scaling, stairs) — testable without Phaser
 - `src/scenes/` — Phaser scene classes that wire systems together for rendering (GameScene for gameplay, ShopScene for upgrades between runs)
 - Darkness uses BitmapMask with invertAlpha on a Graphics overlay
 - Furniture segments use the same `{x1,y1,x2,y2}` format as walls — concatenated into `wallSegments` for raycasting with zero visibility code changes
@@ -211,10 +228,14 @@ Added two new enemy types (crawler and spitter) alongside the existing basic zom
 - Room 0 is permanently lit by unconditionally adding it to `litRoomIds` in both `updateDarkness()` and `updateEnemies()` — same mechanism as light switch lit rooms
 - Crack visual uses two Graphics objects: static crack line at depth 2 (baked once in `create()`) and animated glow at depth 1 (redrawn per frame with time-based sine-wave alpha)
 - Exit zone position computed by `getExitPosition()` from `startroom.js` — center-north of room 0 (store entrance)
+- Multi-floor level: `stairs.js` wraps `generateLevel()` per floor, offsets room IDs and Y positions, then creates stair connections. `generateMultiFloorLevel` replaces direct `generateLevel` call in GameScene.
+- Stair zones use identical overlap + camera fade pattern as exit zone — `onStairEnter()` mirrors `onDayComplete()` structure with `body.reset()` instead of scene transition
+- `getMinimapData(state, rooms, bounds, playerPos, exitPos, screenWidth, floorFilter)` — 7th param filters rooms by floor; null/undefined shows all (backward compatible)
+- Seed offset scheme: furniture +0, enemies +10000, items +20000, doors +30000, switches +40000, stairs +50000, floor seed +1000*floorIndex
 
 ## Next Steps
-- Add stairs / vertical room connections
 - Add weapons switching (Q/E to switch weapons, multiple weapon types)
 - Add backpack / storage capacity upgrades
 - Add different exit locations (spec: discovering alternate exits leads to different locations)
 - Add lore items in rooms
+- Add more floors (extend FLOOR_ROOM_COUNTS array) for later runs

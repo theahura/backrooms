@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { calculateVelocity } from '../systems/movement.js';
 import { createFurnitureSegments, generateRoomFurniture } from '../systems/furniture.js';
 import { getFlashlightPolygon } from '../systems/visibility.js';
-import { generateLevel } from '../systems/level.js';
+import { generateMultiFloorLevel, getFloorBounds, FLOOR_ROOM_COUNTS, STAIR_SIZE } from '../systems/stairs.js';
 import { generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_CHASE, CRAWLER_CHASE_SPEED, SPITTER_CHASE_SPEED } from '../systems/enemy.js';
 import { createCombatState, applyDamage, updateCombat, getHealthFraction, isInvulnerable, applyEnemyDamage, isEnemyDead, ENEMY_CONTACT_DAMAGE, ENEMY_MAX_HP, CRAWLER_MAX_HP, SPITTER_MAX_HP, CRAWLER_CONTACT_DAMAGE, SPITTER_CONTACT_DAMAGE, SPITTER_PROJECTILE_DAMAGE } from '../systems/combat.js';
 import { calculateBulletVelocity, canFire, updateFireCooldown, isBulletExpired, BULLET_SPEED, SPITTER_PROJECTILE_SPEED, SPITTER_PROJECTILE_RANGE } from '../systems/shooting.js';
@@ -19,7 +19,6 @@ import { createExplorationState, updateExploration, getMinimapData, MINIMAP_COLO
 import { generateStoreLayout, generateCrackPoints, getExitPosition, STORE_FLOOR_COLOR, STORE_WALL_COLOR } from '../systems/startroom.js';
 
 const WALL_THICKNESS = 16;
-const ROOM_COUNT = 6;
 
 export class GameScene extends Phaser.Scene {
   constructor() {
@@ -56,7 +55,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   create() {
-    this.level = generateLevel(this.levelSeed, ROOM_COUNT);
+    this.level = generateMultiFloorLevel(this.levelSeed, FLOOR_ROOM_COUNTS);
     this.walls = this.physics.add.staticGroup();
     this.furnitureGroup = this.physics.add.staticGroup();
     this.wallSegments = [...this.level.wallSegments];
@@ -67,6 +66,8 @@ export class GameScene extends Phaser.Scene {
     this.inventoryState = createInventoryState();
     this.fireCooldown = 0;
     this.dayEnding = false;
+    this.isTeleporting = false;
+    this.currentFloor = 0;
     this.hidingState = createHidingState();
     this.explorationState = createExplorationState();
 
@@ -80,6 +81,7 @@ export class GameScene extends Phaser.Scene {
     this.createBullets();
     this.createEnemyBullets();
     this.createExitZone();
+    this.createStairs();
     this.createCrackVisual();
     this.setupInput();
     this.setupCamera();
@@ -613,6 +615,14 @@ export class GameScene extends Phaser.Scene {
     });
     this.treasureText.setScrollFactor(0);
     this.treasureText.setDepth(1000);
+
+    this.floorText = this.add.text(this.cameras.main.width - 180, 145, 'B1', {
+      fontSize: '12px',
+      color: '#aaaaaa',
+      fontFamily: 'monospace',
+    });
+    this.floorText.setScrollFactor(0);
+    this.floorText.setDepth(1000);
   }
 
   createExitZone() {
@@ -706,6 +716,105 @@ export class GameScene extends Phaser.Scene {
     const hw = this.crackGlowSize.w / 2;
     const hh = this.crackGlowSize.h / 2;
     this.crackGlowGraphics.fillRect(cx - hw, cy - hh, hw * 2, hh * 2);
+  }
+
+  createStairs() {
+    this.stairGlowGraphics = this.add.graphics();
+    this.stairGlowGraphics.setDepth(1);
+    this.stairZones = [];
+
+    for (const stair of this.level.stairs) {
+      const stairGfx = this.add.graphics();
+      stairGfx.setDepth(2);
+
+      this.drawStairVisual(stairGfx, stair.fromPos.x, stair.fromPos.y, 'down');
+      this.drawStairVisual(stairGfx, stair.toPos.x, stair.toPos.y, 'up');
+
+      const fromZone = this.add.zone(
+        stair.fromPos.x + STAIR_SIZE / 2,
+        stair.fromPos.y + STAIR_SIZE / 2,
+        STAIR_SIZE, STAIR_SIZE
+      );
+      this.physics.add.existing(fromZone, true);
+      fromZone.setData('destX', stair.toPos.x + STAIR_SIZE / 2);
+      fromZone.setData('destY', stair.toPos.y + STAIR_SIZE / 2);
+      fromZone.setData('destFloor', 1);
+      this.physics.add.overlap(this.player, fromZone, this.onStairEnter, null, this);
+      this.stairZones.push(fromZone);
+
+      const toZone = this.add.zone(
+        stair.toPos.x + STAIR_SIZE / 2,
+        stair.toPos.y + STAIR_SIZE / 2,
+        STAIR_SIZE, STAIR_SIZE
+      );
+      this.physics.add.existing(toZone, true);
+      toZone.setData('destX', stair.fromPos.x + STAIR_SIZE / 2);
+      toZone.setData('destY', stair.fromPos.y + STAIR_SIZE / 2);
+      toZone.setData('destFloor', 0);
+      this.physics.add.overlap(this.player, toZone, this.onStairEnter, null, this);
+      this.stairZones.push(toZone);
+    }
+  }
+
+  drawStairVisual(gfx, x, y, direction) {
+    gfx.fillStyle(0x111111, 0.9);
+    gfx.fillRect(x, y, STAIR_SIZE, STAIR_SIZE);
+
+    gfx.lineStyle(2, 0x555555, 0.8);
+    const stepCount = 5;
+    const stepH = STAIR_SIZE / stepCount;
+    for (let i = 0; i < stepCount; i++) {
+      const sy = direction === 'down' ? y + i * stepH : y + STAIR_SIZE - (i + 1) * stepH;
+      const indent = i * 3;
+      gfx.beginPath();
+      gfx.moveTo(x + indent, sy + stepH);
+      gfx.lineTo(x + STAIR_SIZE - indent, sy + stepH);
+      gfx.strokePath();
+    }
+
+    gfx.lineStyle(1, 0x7733aa, 0.6);
+    gfx.strokeRect(x, y, STAIR_SIZE, STAIR_SIZE);
+  }
+
+  updateStairGlow(time) {
+    if (!this.stairGlowGraphics) return;
+    this.stairGlowGraphics.clear();
+    const alpha = 0.1 + 0.1 * Math.sin(time * 0.004);
+    this.stairGlowGraphics.fillStyle(0x7733aa, alpha);
+    for (const stair of this.level.stairs) {
+      const pad = 6;
+      this.stairGlowGraphics.fillRect(
+        stair.fromPos.x - pad, stair.fromPos.y - pad,
+        STAIR_SIZE + pad * 2, STAIR_SIZE + pad * 2
+      );
+      this.stairGlowGraphics.fillRect(
+        stair.toPos.x - pad, stair.toPos.y - pad,
+        STAIR_SIZE + pad * 2, STAIR_SIZE + pad * 2
+      );
+    }
+  }
+
+  onStairEnter(player, stairZone) {
+    if (this.isTeleporting || this.dayEnding) return;
+    this.isTeleporting = true;
+    player.body.stop();
+    player.body.enable = false;
+
+    const destX = stairZone.getData('destX');
+    const destY = stairZone.getData('destY') + STAIR_SIZE / 2 + 20;
+    const destFloor = stairZone.getData('destFloor');
+
+    this.cameras.main.fadeOut(300, 0, 0, 0);
+    this.cameras.main.once('camerafadeoutcomplete', () => {
+      player.body.reset(destX, destY);
+      player.body.enable = true;
+      this.currentFloor = destFloor;
+
+      this.cameras.main.fadeIn(300, 0, 0, 0);
+      this.cameras.main.once('camerafadeincomplete', () => {
+        this.isTeleporting = false;
+      });
+    });
   }
 
   onDayComplete() {
@@ -915,13 +1024,15 @@ export class GameScene extends Phaser.Scene {
     const gfx = this.minimapGraphics;
     gfx.clear();
 
+    const floorBounds = getFloorBounds(this.level.rooms, this.currentFloor);
     const data = getMinimapData(
       this.explorationState,
       this.level.rooms,
-      this.levelBounds,
+      floorBounds,
       { x: this.player.x, y: this.player.y },
       this.exitPosition,
-      this.cameras.main.width
+      this.cameras.main.width,
+      this.currentFloor
     );
 
     gfx.fillStyle(MINIMAP_COLORS.background, MINIMAP_COLORS.backgroundAlpha);
@@ -936,11 +1047,17 @@ export class GameScene extends Phaser.Scene {
       gfx.fillRect(rect.x, rect.y, rect.w, rect.h);
     }
 
-    gfx.fillStyle(MINIMAP_COLORS.exit, 1);
-    gfx.fillCircle(data.exitDot.x, data.exitDot.y, 3);
+    if (this.currentFloor === 0) {
+      gfx.fillStyle(MINIMAP_COLORS.exit, 1);
+      gfx.fillCircle(data.exitDot.x, data.exitDot.y, 3);
+    }
 
     gfx.fillStyle(MINIMAP_COLORS.player, 1);
     gfx.fillCircle(data.playerDot.x, data.playerDot.y, 2);
+
+    if (this.floorText) {
+      this.floorText.setText(`B${this.currentFloor + 1}`);
+    }
   }
 
   setupInput() {
@@ -1059,7 +1176,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(time, delta) {
-    if (this.combatState.isDead || this.dayEnding) return;
+    if (this.combatState.isDead || this.dayEnding || this.isTeleporting) return;
 
     const pointer = this.input.activePointer;
     pointer.updateWorldPoint(this.cameras.main);
@@ -1120,6 +1237,7 @@ export class GameScene extends Phaser.Scene {
     this.drawPlayer();
     this.updateDarkness(time);
     this.updateCrackGlow(time);
+    this.updateStairGlow(time);
     this.drawDoors();
     this.drawSwitches();
     this.explorationState = updateExploration(this.explorationState, this.player.x, this.player.y, this.level.rooms);
