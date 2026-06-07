@@ -250,4 +250,51 @@ describe('updateEnemyAI', () => {
 
     expect(updated.state).toBe('chase');
   });
+
+  it('idle enemy does not chase visible player when playerHidden is true', () => {
+    const enemy = createEnemy({ state: 'idle' });
+    const player = { x: 200, y: 100 };
+    const segments = [];
+
+    const updated = updateEnemyAI(enemy, player, segments, 16, true);
+
+    expect(updated.state).toBe('idle');
+  });
+
+  it('chasing enemy transitions to search when player hides', () => {
+    const enemy = createEnemy({ state: 'chase' });
+    const player = { x: 200, y: 100 };
+    const segments = [];
+
+    const updated = updateEnemyAI(enemy, player, segments, 16, true);
+
+    expect(updated.state).toBe('search');
+    expect(updated.lastKnownX).toBe(200);
+    expect(updated.lastKnownY).toBe(100);
+  });
+
+  it('searching enemy does not reacquire chase when player is hidden', () => {
+    const enemy = createEnemy({
+      state: 'search',
+      lastKnownX: 300,
+      lastKnownY: 100,
+      searchTimer: 1000,
+    });
+    const player = { x: 200, y: 100 };
+    const segments = [];
+
+    const updated = updateEnemyAI(enemy, player, segments, 16, true);
+
+    expect(updated.state).toBe('search');
+  });
+
+  it('omitting playerHidden preserves existing behavior', () => {
+    const enemy = createEnemy({ state: 'idle' });
+    const player = { x: 200, y: 100 };
+    const segments = [];
+
+    const updated = updateEnemyAI(enemy, player, segments, 16);
+
+    expect(updated.state).toBe('chase');
+  });
 });

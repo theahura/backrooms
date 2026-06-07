@@ -30,3 +30,6 @@ the player character should be a simple character 'model' (pixel art / shapes ar
 Fill out any details that are missing, e.g. the theming around where the player is getting their upgraded equipment from, what kind of valuables are discovered, the design / feel of the rooms, the design / feel of the enemies, and so on
 
 The old flash game Motherload is the direct inspiration for this game if that helps.
+
+Known bugs:
+- right now the flashlight doesnt properly track the mouse. Specifically, as the user moves around using WASD, especially as they change direction, the flashlight starts to drift to a different location than where the actual mouse is. So if the mouse is in one place, it should keep pointing the flashlight in the right spot

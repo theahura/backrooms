@@ -72,8 +72,8 @@ export function generateRoomEnemies(roomX, roomY, roomWidth, roomHeight, wallThi
   return placed;
 }
 
-export function updateEnemyAI(enemy, playerPos, segments, delta) {
-  const canSee = hasLineOfSight(enemy, playerPos, segments, DETECTION_RANGE);
+export function updateEnemyAI(enemy, playerPos, segments, delta, playerHidden = false) {
+  const canSee = !playerHidden && hasLineOfSight(enemy, playerPos, segments, DETECTION_RANGE);
   const result = { ...enemy };
 
   switch (enemy.state) {

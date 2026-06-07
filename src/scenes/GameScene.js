@@ -12,6 +12,7 @@ import { createInventoryState, pickupItem, useBattery } from '../systems/invento
 import { getUpgradeValue } from '../systems/shop.js';
 import { createDoorStates, toggleDoor, getDoorCenter, findNearestDoor, DOOR_INTERACT_RANGE } from '../systems/doors.js';
 import { createSwitchStates, toggleSwitch, findNearestSwitch, getLitRoomIds, isPointInRoom, SWITCH_INTERACT_RANGE } from '../systems/lightswitch.js';
+import { createHidingState, enterHiding, exitHiding, findNearestHideable, HIDE_INTERACT_RANGE } from '../systems/hiding.js';
 
 const WALL_THICKNESS = 16;
 const ROOM_COUNT = 6;
@@ -46,6 +47,7 @@ export class GameScene extends Phaser.Scene {
     this.inventoryState = createInventoryState();
     this.fireCooldown = 0;
     this.dayEnding = false;
+    this.hidingState = createHidingState();
 
     this.createRooms();
     this.createDoors();
@@ -290,33 +292,40 @@ export class GameScene extends Phaser.Scene {
       this.player.x, this.player.y,
       SWITCH_INTERACT_RANGE
     );
+    const nearestHideable = findNearestHideable(
+      this.roomFurniture,
+      this.player.x, this.player.y,
+      HIDE_INTERACT_RANGE
+    );
 
-    let target = null;
-    let targetPos = null;
+    const candidates = [];
 
-    if (nearestDoor && nearestSwitch) {
-      const doorCenter = getDoorCenter(nearestDoor, this.level.rooms);
-      const dDoor = Math.hypot(this.player.x - doorCenter.x, this.player.y - doorCenter.y);
-      const dSwitch = Math.hypot(this.player.x - nearestSwitch.x, this.player.y - nearestSwitch.y);
-      if (dDoor <= dSwitch) {
-        target = { type: 'door', item: nearestDoor };
-        targetPos = doorCenter;
-      } else {
-        target = { type: 'switch', item: nearestSwitch };
-        targetPos = { x: nearestSwitch.x, y: nearestSwitch.y };
-      }
-    } else if (nearestDoor) {
-      target = { type: 'door', item: nearestDoor };
-      targetPos = getDoorCenter(nearestDoor, this.level.rooms);
-    } else if (nearestSwitch) {
-      target = { type: 'switch', item: nearestSwitch };
-      targetPos = { x: nearestSwitch.x, y: nearestSwitch.y };
+    if (nearestDoor) {
+      const pos = getDoorCenter(nearestDoor, this.level.rooms);
+      const dist = Math.hypot(this.player.x - pos.x, this.player.y - pos.y);
+      candidates.push({ type: 'door', item: nearestDoor, pos, dist });
+    }
+    if (nearestSwitch) {
+      const pos = { x: nearestSwitch.x, y: nearestSwitch.y };
+      const dist = Math.hypot(this.player.x - pos.x, this.player.y - pos.y);
+      candidates.push({ type: 'switch', item: nearestSwitch, pos, dist });
+    }
+    if (nearestHideable) {
+      candidates.push({
+        type: 'furniture',
+        item: nearestHideable.furniture,
+        pos: nearestHideable.center,
+        dist: nearestHideable.dist,
+      });
     }
 
-    this.nearestInteractable = target;
+    candidates.sort((a, b) => a.dist - b.dist);
+    const winner = candidates[0] || null;
 
-    if (target) {
-      this.interactText.setPosition(targetPos.x - 30, targetPos.y - 30);
+    this.nearestInteractable = winner ? { type: winner.type, item: winner.item } : null;
+
+    if (winner) {
+      this.interactText.setPosition(winner.pos.x - 30, winner.pos.y - 30);
       this.interactText.setVisible(true);
     } else {
       this.interactText.setVisible(false);
@@ -555,6 +564,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   onEnemyContact() {
+    if (this.hidingState.isHiding) return;
+
     const before = this.combatState;
     this.combatState = applyDamage(before, ENEMY_CONTACT_DAMAGE);
 
@@ -592,7 +603,7 @@ export class GameScene extends Phaser.Scene {
         continue;
       }
 
-      const updated = updateEnemyAI(es, playerPos, this.wallSegments, delta);
+      const updated = updateEnemyAI(es, playerPos, this.wallSegments, delta, this.hidingState.isHiding);
 
       es.state = updated.state;
       es.velocityX = updated.velocityX;
@@ -614,12 +625,27 @@ export class GameScene extends Phaser.Scene {
     this.playerGraphics.setRotation(this.playerAngle || 0);
 
     const hurt = isInvulnerable(this.combatState);
-    const alpha = hurt ? 0.5 : 1;
+    const hiding = this.hidingState.isHiding;
+    let alpha, bodyColor, indicatorColor;
 
-    this.playerGraphics.fillStyle(hurt ? 0xcc4444 : 0x44aa44, alpha);
+    if (hiding) {
+      alpha = 0.3;
+      bodyColor = 0x336633;
+      indicatorColor = 0x558855;
+    } else if (hurt) {
+      alpha = 0.5;
+      bodyColor = 0xcc4444;
+      indicatorColor = 0xee8888;
+    } else {
+      alpha = 1;
+      bodyColor = 0x44aa44;
+      indicatorColor = 0x88ee88;
+    }
+
+    this.playerGraphics.fillStyle(bodyColor, alpha);
     this.playerGraphics.fillCircle(0, 0, 10);
 
-    this.playerGraphics.fillStyle(hurt ? 0xee8888 : 0x88ee88, alpha);
+    this.playerGraphics.fillStyle(indicatorColor, alpha);
     this.playerGraphics.fillTriangle(5, -4, 5, 4, 14, 0);
   }
 
@@ -673,7 +699,7 @@ export class GameScene extends Phaser.Scene {
 
     this.input.mouse.disableContextMenu();
     this.input.on('pointerdown', (pointer) => {
-      if (pointer.rightButtonDown() && !this.combatState.isDead && !this.dayEnding) {
+      if (pointer.rightButtonDown() && !this.combatState.isDead && !this.dayEnding && !this.hidingState.isHiding) {
         this.onUseBattery();
       }
     });
@@ -779,16 +805,6 @@ export class GameScene extends Phaser.Scene {
   update(time, delta) {
     if (this.combatState.isDead || this.dayEnding) return;
 
-    const keyState = {
-      up: this.keys.W.isDown,
-      down: this.keys.S.isDown,
-      left: this.keys.A.isDown,
-      right: this.keys.D.isDown,
-    };
-
-    const velocity = calculateVelocity(keyState, this.playerSpeed);
-    this.player.setVelocity(velocity.x, velocity.y);
-
     const pointer = this.input.activePointer;
     this.playerAngle = Phaser.Math.Angle.Between(
       this.player.x,
@@ -797,11 +813,30 @@ export class GameScene extends Phaser.Scene {
       pointer.worldY
     );
 
+    const keyState = {
+      up: this.keys.W.isDown,
+      down: this.keys.S.isDown,
+      left: this.keys.A.isDown,
+      right: this.keys.D.isDown,
+    };
+    const anyMovement = keyState.up || keyState.down || keyState.left || keyState.right;
+
+    if (this.hidingState.isHiding && anyMovement) {
+      this.hidingState = exitHiding(this.hidingState);
+    }
+
+    if (this.hidingState.isHiding) {
+      this.player.setVelocity(0, 0);
+    } else {
+      const velocity = calculateVelocity(keyState, this.playerSpeed);
+      this.player.setVelocity(velocity.x, velocity.y);
+    }
+
     this.combatState = updateCombat(this.combatState, delta);
     this.batteryState = updateBattery(this.batteryState, delta);
     this.fireCooldown = updateFireCooldown(this.fireCooldown, delta);
 
-    if (pointer.leftButtonDown() && canFire(this.fireCooldown)) {
+    if (!this.hidingState.isHiding && pointer.leftButtonDown() && canFire(this.fireCooldown)) {
       this.fireBullet();
       this.fireCooldown = FIRE_RATE_MS;
     }
@@ -809,11 +844,15 @@ export class GameScene extends Phaser.Scene {
     this.updateInteractPrompt();
 
     if (Phaser.Input.Keyboard.JustDown(this.keys.E)) {
-      if (this.nearestInteractable) {
+      if (this.hidingState.isHiding) {
+        this.hidingState = exitHiding(this.hidingState);
+      } else if (this.nearestInteractable) {
         if (this.nearestInteractable.type === 'door') {
           this.onToggleDoor(this.nearestInteractable.item.id);
         } else if (this.nearestInteractable.type === 'switch') {
           this.onToggleSwitch(this.nearestInteractable.item.id);
+        } else if (this.nearestInteractable.type === 'furniture') {
+          this.hidingState = enterHiding(this.hidingState, this.nearestInteractable.item);
         }
       }
     }

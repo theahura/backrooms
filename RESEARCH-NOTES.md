@@ -487,3 +487,54 @@ project/
 - `updateDarkness()`: add lit room rectangles to mask after flashlight polygon
 - `updateInteractPrompt()`: check nearest door OR switch, show prompt for whichever is closer
 - New `onToggleSwitch(switchId)`: toggle state, despawn enemies in room, update visuals
+
+## Hiding Mechanics Research
+
+### Design Pattern: Binary State Flag + E-Key Interaction
+- Games like Outlast use binary hiding: explicit button prompts near hiding spots (lockers, beds, barrels). Player enters a fixed position, flagged as fully hidden.
+- Amnesia uses non-binary hiding with LOS occlusion, but that's more complex and less reliable for a top-down game.
+- Best approach for this game: binary state flag (`isHiding`) toggled via E-key near `canHide` furniture. Clean, testable, fits existing interaction system.
+
+### Architecture: Pure Module `hiding.js`
+- `src/systems/hiding.js` — pure functions for hiding state management
+- Follow the doors.js/lightswitch.js pattern: named exports, constants, query functions
+- Constants: `HIDE_INTERACT_RANGE = 80` (same as doors/switches)
+- `findNearestHideable(furnitureByRoom, px, py, maxRange)` — finds closest `canHide` furniture across all rooms, returns `{ roomId, furniture, center: {x, y}, dist }` or null
+- `createHidingState()` returns `{ isHiding: false, furnitureRef: null }`
+- `enterHiding(state, furnitureRef)` returns updated state with `isHiding: true`
+- `exitHiding(state)` returns state with `isHiding: false`
+
+### Enemy AI Integration
+- Add `playerHidden` parameter to `updateEnemyAI(enemy, playerPos, segments, delta, playerHidden)`
+- When `playerHidden` is true, force `canSee = false` regardless of LOS
+- This preserves all state machine behavior: a chasing enemy loses sight → transitions to search → eventually idles
+- No changes needed to `hasLineOfSight()` itself
+
+### GameScene Integration Points
+- `updateInteractPrompt()` (line 282): Add third interactable type `'furniture'` to resolution
+- E-key handler (line 811): Add `'furniture'` branch → toggle hiding
+- `update()` (line 779-790): When `isHiding`, skip movement (zero velocity) and skip shooting
+- `updateEnemies()` (line 595): Pass `this.isHiding` flag to `updateEnemyAI()`
+- `drawPlayer()` (line 610): Change alpha/color when hiding (0.3 alpha, darker color)
+- `onEnemyContact()` (line 557): Skip damage while hiding (enemies can't see/reach you inside furniture)
+
+### Visual Feedback
+- Player alpha reduced to 0.3 when hiding (already have alpha change pattern for invulnerability)
+- Player color changes to a muted gray-green
+- "HIDDEN" text shown in HUD area (subtle, not too prominent)
+- Interact prompt changes to "Press E to hide" / "Press E to unhide"
+
+### Input Restrictions While Hiding
+- Movement disabled (velocity zeroed)
+- Shooting disabled (left-click ignored)
+- Right-click (battery use) disabled
+- Mouse aiming still allowed (player can look around but not act)
+- Any WASD key press auto-exits hiding (for quick escape)
+- E key toggles hiding off
+
+### Existing Furniture Data
+- `FURNITURE_TYPES` in furniture.js: table (canHide: true), desk (canHide: true), shelf (false), bookcase (false)
+- Furniture data stored in `this.roomFurniture` (Map from roomId to array of furniture items)
+- Each item: `{ type, x, y, width, height, color, canHide }`
+- Furniture center for interaction: `x + width/2`, `y + height/2`
+- Furniture zones in `this.furnitureGroup` do NOT carry metadata — must cross-reference with `roomFurniture`
