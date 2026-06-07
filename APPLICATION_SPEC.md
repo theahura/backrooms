@@ -31,5 +31,9 @@ Fill out any details that are missing, e.g. the theming around where the player 
 
 The old flash game Motherload is the direct inspiration for this game if that helps.
 
+Next things to build:
+- more variety in the room design -- some rooms should feel more maze like
+-
+
 Known bugs:
-- right now the flashlight doesnt properly track the mouse. Specifically, as the user moves around using WASD, especially as they change direction, the flashlight starts to drift to a different location than where the actual mouse is. So if the mouse is in one place, it should keep pointing the flashlight in the right spot
+- NA
