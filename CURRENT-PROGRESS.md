@@ -1,8 +1,8 @@
 # Current Progress
 
-## Status: Closable Doors Complete
+## Status: Light Switches Complete
 
-The game now has interactive closable doors on some room connections. Approximately 50% of door connections (determined by seeded PRNG) have closable doors that start closed. The player can press E when near a door (within 80px) to toggle it open/closed. Closed doors block player/enemy/bullet movement (via physics bodies), flashlight rays (via wall segments in the raycasting array), and enemy line-of-sight. A "Press E" prompt appears when the player is near an interactable door. This adds tactical depth — players can close doors behind them to block pursuing zombies.
+The game now has interactive light switches in some rooms. Approximately 40% of non-starting rooms (determined by seeded PRNG, seed offset +40000) have a light switch placed on a random wall near the wall center. The player can press E when near a switch (within 80px) to toggle it on. When a light switch is activated, the entire room becomes fully illuminated (darkness mask removed via fillRect in the BitmapMask), all enemies inside the room are despawned, and enemies that wander into lit rooms are frozen in place. The E-key interaction system now resolves between doors and switches by nearest Euclidean distance. This adds strategic depth — players can create safe zones by finding and activating light switches.
 
 ## Completed
 - Application spec written
@@ -92,11 +92,19 @@ The game now has interactive closable doors on some room connections. Approximat
   - Door graphics rendered at depth 50, interaction prompt at depth 1000
   - Pure function module `doors.js`: createDoorStates, toggleDoor, getClosedDoorSegments, getDoorCenter, findNearestDoor
   - Colliders for player, enemies, and bullets vs door group
-- 154 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, and doors
+- Light switches in rooms
+  - ~40% of non-room-0 rooms (seeded PRNG, seed+40000 offset) have a light switch on a random wall
+  - Press E within 80px to toggle on/off
+  - When ON: entire room illuminated (darkness mask removed via fillRect in BitmapMask)
+  - When ON: all enemies in the room despawned, enemies freeze if they enter a lit room
+  - Switch visual: small rectangle on wall (gray when off, yellow when on) at depth 50
+  - Pure function module `lightswitch.js`: createSwitchStates, toggleSwitch, findNearestSwitch, getLitRoomIds, isPointInRoom
+  - E-key interaction resolves nearest interactable (door vs switch) by Euclidean distance
+- 174 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, and light switches
 - Documentation (docs.md files for root, src, systems, scenes)
 
 ## Architecture
-- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop, doors) — testable without Phaser
+- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop, doors, lightswitch) — testable without Phaser
 - `src/scenes/` — Phaser scene classes that wire systems together for rendering (GameScene for gameplay, ShopScene for upgrades between runs)
 - Darkness uses BitmapMask with invertAlpha on a Graphics overlay
 - Furniture segments use the same `{x1,y1,x2,y2}` format as walls — concatenated into `wallSegments` for raycasting with zero visibility code changes
@@ -107,8 +115,10 @@ The game now has interactive closable doors on some room connections. Approximat
 - Combat/shooting/battery/inventory are pure function modules (`combat.js`, `shooting.js`, `battery.js`, `inventory.js`) — same architecture pattern as enemy/movement
 - Items system (`items.js`) follows same spawning pattern as enemy.js: seeded PRNG, furniture overlap avoidance, skip room 0
 - Player combat, battery, inventory, and shop states are immutable objects; enemy health is a mutable field on the enemy state (asymmetry: player state is passed through pure functions, enemy health is mutated in-place in the scene callback)
-- Item spawning uses seed offset +20000 (furniture: +0, enemies: +10000, doors: +30000) to avoid correlation
+- Item spawning uses seed offset +20000 (furniture: +0, enemies: +10000, items: +20000, doors: +30000, switches: +40000) to avoid correlation
 - Closable door segments are dynamically pushed/spliced from `wallSegments` — same mutable array pattern as furniture, but toggled at runtime via `body.enable` on Phaser static bodies
+- Light switch lit rooms are drawn as fillRect into maskGraphics (same BitmapMask as flashlight) — drawn before the flashlight early-return so lit rooms stay visible even when battery is dead
+- E-key interaction resolves nearest interactable (door or switch) by Euclidean distance via `nearestInteractable` computed in `updateInteractPrompt()`
 - Shop state persists in `game.registry` — survives scene transitions but not browser reloads
 - GameScene `init()` reads upgrade levels from registry and computes stat values via `getUpgradeValue()`
 - ShopScene `init(data)` receives `treasureEarned` via scene start data, adds to registry gold balance
@@ -120,7 +130,6 @@ The game now has interactive closable doors on some room connections. Approximat
 
 ## Next Steps
 - Add starting room (furniture store with crack in wall)
-- Add light switches that prevent enemy spawning
 - Add hiding mechanics (interact with canHide furniture to become invisible to enemies)
 - Add compass/map that fills in as the player explores
 - Add localStorage persistence for cross-session save/load

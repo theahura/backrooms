@@ -11,6 +11,7 @@ import { generateRoomItems, ITEM_TYPES } from '../systems/items.js';
 import { createInventoryState, pickupItem, useBattery } from '../systems/inventory.js';
 import { getUpgradeValue } from '../systems/shop.js';
 import { createDoorStates, toggleDoor, getDoorCenter, findNearestDoor, DOOR_INTERACT_RANGE } from '../systems/doors.js';
+import { createSwitchStates, toggleSwitch, findNearestSwitch, getLitRoomIds, isPointInRoom, SWITCH_INTERACT_RANGE } from '../systems/lightswitch.js';
 
 const WALL_THICKNESS = 16;
 const ROOM_COUNT = 6;
@@ -48,6 +49,7 @@ export class GameScene extends Phaser.Scene {
 
     this.createRooms();
     this.createDoors();
+    this.createSwitches();
     this.createPlayer();
     this.createEnemies();
     this.createItemTextures();
@@ -206,6 +208,34 @@ export class GameScene extends Phaser.Scene {
     this.interactText.setVisible(false);
   }
 
+  createSwitches() {
+    this.switchStates = createSwitchStates(this.level.rooms, this.levelSeed, WALL_THICKNESS);
+    this.switchGraphics = this.add.graphics();
+    this.switchGraphics.setDepth(50);
+  }
+
+  onToggleSwitch(switchId) {
+    this.switchStates = toggleSwitch(this.switchStates, switchId);
+    const sw = this.switchStates.find(s => s.id === switchId);
+    if (!sw || !sw.isOn) return;
+
+    const room = this.level.rooms.find(r => r.id === sw.roomId);
+    if (!room) return;
+
+    const toRemove = this.enemyStates.filter(es =>
+      isPointInRoom(room, es.sprite.x, es.sprite.y)
+    );
+    for (const es of toRemove) {
+      es.sprite.setActive(false);
+      es.sprite.setVisible(false);
+      es.sprite.body.stop();
+      es.sprite.body.enable = false;
+    }
+    this.enemyStates = this.enemyStates.filter(es =>
+      !toRemove.includes(es)
+    );
+  }
+
   onToggleDoor(doorId) {
     const door = this.doorStates.find(d => d.id === doorId);
     if (!door) return;
@@ -241,16 +271,52 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  drawSwitches() {
+    this.switchGraphics.clear();
+    for (const sw of this.switchStates) {
+      this.switchGraphics.fillStyle(sw.isOn ? 0xffff44 : 0xcccccc, 1);
+      this.switchGraphics.fillRect(sw.x - 5, sw.y - 7, 10, 14);
+    }
+  }
+
   updateInteractPrompt() {
-    const nearest = findNearestDoor(
+    const nearestDoor = findNearestDoor(
       this.doorStates, this.level.rooms,
       this.player.x, this.player.y,
       DOOR_INTERACT_RANGE
     );
+    const nearestSwitch = findNearestSwitch(
+      this.switchStates,
+      this.player.x, this.player.y,
+      SWITCH_INTERACT_RANGE
+    );
 
-    if (nearest) {
-      const center = getDoorCenter(nearest, this.level.rooms);
-      this.interactText.setPosition(center.x - 30, center.y - 30);
+    let target = null;
+    let targetPos = null;
+
+    if (nearestDoor && nearestSwitch) {
+      const doorCenter = getDoorCenter(nearestDoor, this.level.rooms);
+      const dDoor = Math.hypot(this.player.x - doorCenter.x, this.player.y - doorCenter.y);
+      const dSwitch = Math.hypot(this.player.x - nearestSwitch.x, this.player.y - nearestSwitch.y);
+      if (dDoor <= dSwitch) {
+        target = { type: 'door', item: nearestDoor };
+        targetPos = doorCenter;
+      } else {
+        target = { type: 'switch', item: nearestSwitch };
+        targetPos = { x: nearestSwitch.x, y: nearestSwitch.y };
+      }
+    } else if (nearestDoor) {
+      target = { type: 'door', item: nearestDoor };
+      targetPos = getDoorCenter(nearestDoor, this.level.rooms);
+    } else if (nearestSwitch) {
+      target = { type: 'switch', item: nearestSwitch };
+      targetPos = { x: nearestSwitch.x, y: nearestSwitch.y };
+    }
+
+    this.nearestInteractable = target;
+
+    if (target) {
+      this.interactText.setPosition(targetPos.x - 30, targetPos.y - 30);
       this.interactText.setVisible(true);
     } else {
       this.interactText.setVisible(false);
@@ -513,10 +579,18 @@ export class GameScene extends Phaser.Scene {
 
   updateEnemies(delta) {
     const playerPos = { x: this.player.x, y: this.player.y };
+    const litRoomIds = getLitRoomIds(this.switchStates);
+    const litRooms = litRoomIds.map(id => this.level.rooms.find(r => r.id === id)).filter(Boolean);
 
     for (const es of this.enemyStates) {
       es.x = es.sprite.x;
       es.y = es.sprite.y;
+
+      const inLitRoom = litRooms.some(room => isPointInRoom(room, es.x, es.y));
+      if (inLitRoom) {
+        es.sprite.setVelocity(0, 0);
+        continue;
+      }
 
       const updated = updateEnemyAI(es, playerPos, this.wallSegments, delta);
 
@@ -659,6 +733,16 @@ export class GameScene extends Phaser.Scene {
     this.darkGraphics.fillStyle(0x000000, 0.95);
     this.darkGraphics.fillRect(minX - 100, minY - 100, maxX - minX + 200, maxY - minY + 200);
 
+    const litRoomIds = getLitRoomIds(this.switchStates);
+    for (const roomId of litRoomIds) {
+      const room = this.level.rooms.find(r => r.id === roomId);
+      if (!room) continue;
+      this.maskGraphics.fillStyle(0xffffff);
+      this.maskGraphics.fillRect(room.x, room.y, room.width, room.height);
+      this.lightGraphics.fillStyle(0xffffcc, 0.05);
+      this.lightGraphics.fillRect(room.x, room.y, room.width, room.height);
+    }
+
     const coneAngle = getFlashlightConeAngle(this.batteryState, this.flashlightAngle);
     if (coneAngle <= 0 || shouldFlicker(this.batteryState, time)) return;
 
@@ -722,14 +806,15 @@ export class GameScene extends Phaser.Scene {
       this.fireCooldown = FIRE_RATE_MS;
     }
 
+    this.updateInteractPrompt();
+
     if (Phaser.Input.Keyboard.JustDown(this.keys.E)) {
-      const nearest = findNearestDoor(
-        this.doorStates, this.level.rooms,
-        this.player.x, this.player.y,
-        DOOR_INTERACT_RANGE
-      );
-      if (nearest) {
-        this.onToggleDoor(nearest.id);
+      if (this.nearestInteractable) {
+        if (this.nearestInteractable.type === 'door') {
+          this.onToggleDoor(this.nearestInteractable.item.id);
+        } else if (this.nearestInteractable.type === 'switch') {
+          this.onToggleSwitch(this.nearestInteractable.item.id);
+        }
       }
     }
 
@@ -738,7 +823,7 @@ export class GameScene extends Phaser.Scene {
     this.drawPlayer();
     this.updateDarkness(time);
     this.drawDoors();
-    this.updateInteractPrompt();
+    this.drawSwitches();
     this.drawHUD();
   }
 }

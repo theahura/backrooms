@@ -432,3 +432,58 @@ project/
 - Closed door: filled rectangle at door position with door color (0x664422 — dark wood)
 - Open door: no rectangle drawn (gap visible as normal)
 - Redraw door graphics each frame based on state
+
+## Light Switch System Research
+
+### Architecture: Pure Module `lightswitch.js`
+- `src/systems/lightswitch.js` — pure functions for light switch state management
+- Follow doors.js pattern: named exports, constants, state factory, toggle, query functions
+- State: array of `{ id, roomId, x, y, isOn }` objects
+- `createSwitchStates(rooms, seed)` — determines which rooms get switches, places them on walls
+- `toggleSwitch(switchStates, switchId)` — returns new array with toggled switch (immutable)
+- `findNearestSwitch(switchStates, px, py, maxRange)` — finds closest interactable switch
+- `getSwitchPosition(room, wall, offset)` — computes world position from room + wall placement
+
+### Room Eligibility
+- Room 0 (spawn room) should NOT have a light switch — it's the safe starting area
+- Not all rooms get switches — use seeded PRNG (~40-50% chance) for variety
+- Seed offset: +40000 (furniture: +0, enemies: +10000, items: +20000, doors: +30000, switches: +40000)
+
+### Switch Placement
+- Place on room walls, near midpoint — similar to real-world light switch placement
+- Pick a random wall (north/south/east/west) and place at wall_thickness inset from wall
+- Position: on the wall face, player stands next to it and presses E
+- Visual: small rectangle on wall (e.g., 10x14px) in light gray/white color
+
+### Lit Room Effects
+1. **Visibility**: Draw the entire room rectangle into `maskGraphics` with white fill — same Graphics object used for flashlight polygon. With `invertAlpha = true`, this punches a rectangular hole in the darkness overlay for the entire room.
+2. **Light tint**: Draw room rectangle into `lightGraphics` with warm yellow tint (same pattern as flashlight glow)
+3. **Enemy behavior**: Enemies in lit rooms should flee or be cleared. Simplest approach: when a room is lit, kill/despawn all enemies currently in that room and prevent new enemies from entering. Since enemies don't track roomId at runtime, use AABB check (point-in-room-bounds) to find enemies within the newly lit room.
+4. **Enemy AI modification**: Enemies should avoid entering lit rooms. Add lit room bounds to the AI check — if an enemy's chase target would take them into a lit room, they stop at the boundary.
+
+### Darkness/Mask Integration
+- `updateDarkness()` in GameScene currently draws flashlight polygon into `maskGraphics`
+- After drawing flashlight, iterate `switchStates` and for each `isOn` switch, draw `fillRect(room.x, room.y, room.width, room.height)` into `maskGraphics`
+- Also draw same rect into `lightGraphics` with warm tint (0xffffcc, 0.05)
+- Multiple shapes in a single Graphics object all contribute to the BitmapMask — confirmed by Phaser docs
+
+### E-Key Interaction Changes
+- Current E-key handler only checks doors. Need to also check switches.
+- Priority: check nearest of either type (door or switch), interact with whichever is closer
+- Alternative: check switch first, then door (simpler, works if switches are never near doors)
+- Interaction range: same 80px as doors (SWITCH_INTERACT_RANGE = 80)
+- Prompt text: reuse existing "Press E" text, position at nearest interactable (door or switch)
+
+### Enemy Despawn on Light Toggle
+- When switch is turned ON: iterate `enemyStates`, find enemies within room AABB, remove them
+- Same destruction pattern as `onBulletHitEnemy`: `setActive(false)`, `setVisible(false)`, `body.enable = false`, filter from `enemyStates`
+- Thematic justification: backrooms creatures flee from light (similar to Alan Wake pattern)
+
+### Phaser Integration Points
+- Import `createSwitchStates`, `toggleSwitch`, `findNearestSwitch` in GameScene
+- `create()`: add `this.createSwitches()` after `createDoors()`
+- `createSwitches()`: create switch states, draw switch visuals, no physics bodies needed (no collision)
+- `update()`: modify E-key handler to check both doors and switches
+- `updateDarkness()`: add lit room rectangles to mask after flashlight polygon
+- `updateInteractPrompt()`: check nearest door OR switch, show prompt for whichever is closer
+- New `onToggleSwitch(switchId)`: toggle state, despawn enemies in room, update visuals
