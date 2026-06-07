@@ -1282,3 +1282,69 @@ Add to UPGRADES array:
 
 - 8 upgrades total: reduce rowHeight further if needed (currently 60px → try 55px)
 - Canvas height 768px, 8 rows × 55 = 440, plus title + button = ~540px total (fits)
+
+## Maze-Like Room Design Research
+
+### Approach: Recursive Division for Internal Walls
+- Start with room interior bounds (inset from walls by wallThickness + margin)
+- Recursively subdivide with horizontal/vertical walls that have gaps (passage openings)
+- Each wall becomes 1-2 `{x1,y1,x2,y2}` segments (wall minus gap)
+- Connectivity guaranteed by construction: every wall added has a passage opening
+- Terminate when sub-region is below minimum size (~200px)
+- Use seeded PRNG for determinism (seed offset +70000 for internal walls)
+
+### Room Variety Strategy
+- Not all rooms should be maze-like. Use seeded PRNG to determine room type:
+  - ~40% open (current behavior, no internal walls)
+  - ~30% maze-like (recursive division, 2-3 depth)
+  - ~30% columns (grid of small pillars creating shadow patterns)
+- Room 0 (furniture store) is never maze-like — uses hand-crafted layout
+- Floor 1 rooms have higher chance of maze-like (deeper = more labyrinthine)
+
+### Column Pattern
+- Small square pillars (24x24px) in a staggered grid (spacing ~200px)
+- Each column = 4 wall segments for raycasting
+- Creates interesting shadow interplay with flashlight
+- Staggered grid prevents player from seeing long straight corridors
+
+### Tables Not Blocking Light
+- Current: ALL furniture types generate wall segments via `createFurnitureSegments()`
+- Fix: Add `blocksLight` property to FURNITURE_TYPES
+- Tables and desks are low furniture — light passes over them (blocksLight: false)
+- Shelves and bookcases are tall — they still block light (blocksLight: true)
+- In GameScene line 219: conditionally skip pushing segments for non-blocking furniture
+- Physics collision still applies (player can't walk through tables)
+
+### More Doors Between Rooms
+- Current: exactly 1 door per room connection (parent-child during generation)
+- Fix: post-placement pass in `generateLevel()` — check all grid-adjacent room pairs
+- For each adjacent pair without a door: ~50% chance to add an extra door
+- Extra doors use same format: `{ wall, offset, width, targetRoomId }`
+- This creates loops in the level graph (more navigability, less dead-ends)
+
+### More Stair Connections
+- Current: exactly 1 stair between floor 0 and floor 1
+- Fix: create 2 stair connections per floor pair
+- Pick 2 distinct rooms on each floor
+- Gives player more routing options between floors
+
+### Architecture: New Pure Module `maze.js`
+- `src/systems/maze.js` — pure functions for internal room generation
+- `generateMazeWalls(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, doors)` — returns array of wall segments
+- `generateColumns(roomX, roomY, roomWidth, roomHeight, wallThickness, seed)` — returns array of column descriptors
+- `getRoomType(seed)` — returns 'open' | 'maze' | 'columns' based on seeded random
+- Each column: `{ x, y, size }` → converted to segments via existing `createFurnitureSegments`
+- Internal walls avoid overlapping door zones (need door positions as input)
+
+### Performance Considerations
+- Raycasting is O(rays × segments). Adding ~20-30 internal segments per maze room across 7 rooms = ~150 extra segments worst case.
+- With current 6-ray system this is negligible.
+- Physics uses RTree spatial indexing — hundreds of extra static bodies are fine.
+
+### Integration Points
+- `furniture.js`: Add `blocksLight` to FURNITURE_TYPES
+- `level.js`: Add post-placement door pass before generating wall segments
+- `stairs.js`: Modify `createStairConnections` to create 2 stairs
+- `GameScene.js` line 219: Check `blocksLight` before pushing segments
+- `GameScene.js`: After `createRoomFurniture`, call maze wall generation and push to wallSegments + create physics zones
+- New `maze.js`: Room type determination, recursive division, column generation

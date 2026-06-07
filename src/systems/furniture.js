@@ -1,10 +1,10 @@
 import { mulberry32 } from './random.js';
 
 export const FURNITURE_TYPES = {
-  table: { width: 80, height: 50, color: 0x5c3a21, canHide: true },
-  shelf: { width: 100, height: 20, color: 0x6b4e2a, canHide: false },
-  desk: { width: 60, height: 40, color: 0x3a3a3a, canHide: true },
-  bookcase: { width: 30, height: 80, color: 0x4a2c17, canHide: false },
+  table: { width: 80, height: 50, color: 0x5c3a21, canHide: true, blocksLight: false },
+  shelf: { width: 100, height: 20, color: 0x6b4e2a, canHide: false, blocksLight: true },
+  desk: { width: 60, height: 40, color: 0x3a3a3a, canHide: true, blocksLight: false },
+  bookcase: { width: 30, height: 80, color: 0x4a2c17, canHide: false, blocksLight: true },
 };
 
 const TYPE_KEYS = Object.keys(FURNITURE_TYPES);

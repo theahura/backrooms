@@ -32,8 +32,15 @@ Fill out any details that are missing, e.g. the theming around where the player 
 The old flash game Motherload is the direct inspiration for this game if that helps.
 
 Next things to build:
-- more variety in the room design -- some rooms should feel more maze like
--
+- more variety in the room design -- some rooms should feel more maze like, with walls and columns and different shapes
+- tables shouldnt block light
+- there should be more doors and stairs per room
+- the map should not be available immediately (it should be very expensive)
+- player shouldnt start with a gun
+- guns should have ammo
+- the starting location should have a standard entry -- that entry shouldnt move; and the 'shop' should be in the center of the 'furniture shop' and not in the edge blocking the door
+- the player should be able to move around under a table while hidden
+- most rooms should NOT have light switches
 
 Known bugs:
 - NA

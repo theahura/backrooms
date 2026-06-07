@@ -74,6 +74,8 @@ export function generateLevel(seed, roomCount) {
     }
   }
 
+  addExtraDoors(rooms, grid, seed);
+
   const wallSegments = [];
   for (const room of rooms) {
     const roomWalls = createRoomWalls(room.x, room.y, room.width, room.height, room.doors);
@@ -81,4 +83,28 @@ export function generateLevel(seed, roomCount) {
   }
 
   return { rooms, wallSegments };
+}
+
+function addExtraDoors(rooms, grid, seed) {
+  const rand = mulberry32(seed + 80000);
+
+  for (const room of rooms) {
+    for (const dir of DIRECTIONS) {
+      const neighborKey = `${room.gridX + dir.dx},${room.gridY + dir.dy}`;
+      const neighbor = grid.get(neighborKey);
+      if (!neighbor) continue;
+      if (neighbor.id <= room.id) continue;
+
+      const alreadyConnected = room.doors.some(d => d.targetRoomId === neighbor.id);
+      if (alreadyConnected) continue;
+
+      if (rand() < 0.5) {
+        const maxOffset = getDoorMaxOffset(dir.wall);
+        const doorOffset = DOOR_MIN_OFFSET + Math.floor(rand() * (maxOffset - DOOR_MIN_OFFSET + 1));
+
+        room.doors.push({ wall: dir.wall, offset: doorOffset, width: DOOR_WIDTH, targetRoomId: neighbor.id });
+        neighbor.doors.push({ wall: dir.oppositeWall, offset: doorOffset, width: DOOR_WIDTH, targetRoomId: room.id });
+      }
+    }
+  }
 }

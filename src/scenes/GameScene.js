@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { calculateVelocity } from '../systems/movement.js';
-import { createFurnitureSegments, generateRoomFurniture } from '../systems/furniture.js';
+import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES } from '../systems/furniture.js';
+import { generateMazeWalls } from '../systems/maze.js';
 import { getFlashlightPolygon } from '../systems/visibility.js';
 import { generateMultiFloorLevel, getFloorBounds, FLOOR_ROOM_COUNTS, STAIR_SIZE } from '../systems/stairs.js';
 import { generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_CHASE, CRAWLER_CHASE_SPEED, SPITTER_CHASE_SPEED } from '../systems/enemy.js';
@@ -117,6 +118,9 @@ export class GameScene extends Phaser.Scene {
       this.drawRoom(gfx, room);
       this.createRoomPhysics(room);
       this.createRoomFurniture(furnitureGfx, room);
+      if (room.id !== 0) {
+        this.createRoomMaze(gfx, room);
+      }
     }
 
     this.drawDoorways(gfx);
@@ -216,8 +220,36 @@ export class GameScene extends Phaser.Scene {
       );
       this.furnitureGroup.add(zone);
 
-      const segments = createFurnitureSegments(item.x, item.y, item.width, item.height);
-      this.wallSegments.push(...segments);
+      if (FURNITURE_TYPES[item.type] && FURNITURE_TYPES[item.type].blocksLight) {
+        const segments = createFurnitureSegments(item.x, item.y, item.width, item.height);
+        this.wallSegments.push(...segments);
+      }
+    }
+  }
+
+  createRoomMaze(gfx, room) {
+    const mazeSegments = generateMazeWalls(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed, room.doors);
+    for (const seg of mazeSegments) {
+      this.wallSegments.push(seg);
+
+      const isHorizontal = Math.abs(seg.y2 - seg.y1) < 1;
+      const length = Math.sqrt((seg.x2 - seg.x1) ** 2 + (seg.y2 - seg.y1) ** 2);
+      if (isHorizontal) {
+        const cx = (seg.x1 + seg.x2) / 2;
+        const cy = seg.y1;
+        this.walls.add(this.add.zone(cx, cy, length, WALL_THICKNESS));
+      } else {
+        const cx = seg.x1;
+        const cy = (seg.y1 + seg.y2) / 2;
+        this.walls.add(this.add.zone(cx, cy, WALL_THICKNESS, length));
+      }
+
+      gfx.fillStyle(0x555555, 1);
+      if (isHorizontal) {
+        gfx.fillRect(Math.min(seg.x1, seg.x2), seg.y1 - WALL_THICKNESS / 2, length, WALL_THICKNESS);
+      } else {
+        gfx.fillRect(seg.x1 - WALL_THICKNESS / 2, Math.min(seg.y1, seg.y2), WALL_THICKNESS, length);
+      }
     }
   }
 

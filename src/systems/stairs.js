@@ -47,19 +47,32 @@ function createStairConnections(rooms, seed) {
 
   if (floor0Rooms.length === 0 || floor1Rooms.length === 0) return [];
 
-  const fromRoom = floor0Rooms[Math.floor(rand() * floor0Rooms.length)];
-  const toRoom = floor1Rooms[Math.floor(rand() * floor1Rooms.length)];
+  const stairs = [];
+  const targetCount = Math.min(2, floor0Rooms.length, floor1Rooms.length);
+  const usedFrom = new Set();
+  const usedTo = new Set();
 
-  const fromPos = getStairPosition(fromRoom);
-  const toPos = getStairPosition(toRoom);
+  for (let i = 0; i < targetCount; i++) {
+    const availableFrom = floor0Rooms.filter(r => !usedFrom.has(r.id));
+    const availableTo = floor1Rooms.filter(r => !usedTo.has(r.id));
+    if (availableFrom.length === 0 || availableTo.length === 0) break;
 
-  return [{
-    id: 0,
-    fromRoomId: fromRoom.id,
-    toRoomId: toRoom.id,
-    fromPos,
-    toPos,
-  }];
+    const fromRoom = availableFrom[Math.floor(rand() * availableFrom.length)];
+    const toRoom = availableTo[Math.floor(rand() * availableTo.length)];
+
+    usedFrom.add(fromRoom.id);
+    usedTo.add(toRoom.id);
+
+    stairs.push({
+      id: i,
+      fromRoomId: fromRoom.id,
+      toRoomId: toRoom.id,
+      fromPos: getStairPosition(fromRoom),
+      toPos: getStairPosition(toRoom),
+    });
+  }
+
+  return stairs;
 }
 
 function getStairPosition(room) {

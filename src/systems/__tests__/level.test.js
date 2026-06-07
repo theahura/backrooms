@@ -95,6 +95,38 @@ describe('generateLevel', () => {
   });
 });
 
+describe('extra door connections', () => {
+  it('levels with many rooms have more door connections than minimum spanning tree', () => {
+    // A minimum spanning tree of N rooms needs N-1 connections
+    // With extra doors, total unique connections should exceed N-1 for larger levels
+    const level = generateLevel(1, 8);
+    const connections = new Set();
+    for (const room of level.rooms) {
+      for (const door of room.doors) {
+        const key = [Math.min(room.id, door.targetRoomId), Math.max(room.id, door.targetRoomId)].join('-');
+        connections.add(key);
+      }
+    }
+    // 8 rooms needs minimum 7 connections (spanning tree), expect more with extra doors
+    expect(connections.size).toBeGreaterThan(level.rooms.length - 1);
+  });
+
+  it('extra doors connect grid-adjacent rooms', () => {
+    const level = generateLevel(42, 6);
+    const roomById = new Map(level.rooms.map(r => [r.id, r]));
+
+    for (const room of level.rooms) {
+      for (const door of room.doors) {
+        const target = roomById.get(door.targetRoomId);
+        const dx = Math.abs(room.gridX - target.gridX);
+        const dy = Math.abs(room.gridY - target.gridY);
+        // Rooms connected by a door must be grid-adjacent (Manhattan distance 1)
+        expect(dx + dy).toBe(1);
+      }
+    }
+  });
+});
+
 describe('flashlight through doorway', () => {
   it('light passes through a doorway into an adjacent room', () => {
     const level = generateLevel(42, 2);

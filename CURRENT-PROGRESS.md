@@ -1,6 +1,10 @@
 # Current Progress
 
-## Status: Backpack / Inventory Capacity
+## Status: Room Variety, Light-Transparent Furniture, More Connections
+
+Added three level design improvements: (1) Maze-like room variety via new `maze.js` module — ~40% of non-starting rooms remain open, ~30% get recursive-division internal walls with passage gaps, ~30% get staggered column grids that create interesting flashlight shadow patterns. (2) Tables and desks no longer block flashlight rays — only tall furniture (shelves, bookcases) blocks light via new `blocksLight` property on `FURNITURE_TYPES`. Physics collision still applies to all furniture. (3) Level connectivity increased — extra doors are probabilistically added between grid-adjacent rooms not already connected (~50% chance), and 2 stair connections now link floors instead of 1 (using distinct rooms).
+
+## Previous: Backpack / Inventory Capacity
 
 Added inventory capacity system. Players now have a limited number of item slots (base 8). When full, items remain on the ground instead of being auto-picked up. Using a battery frees a slot (dual-purpose: flashlight recharge + inventory management). New "Backpack Size" shop upgrade adds +4 capacity per level (8→12→16→20 at max). HUD shows `[itemCount/maxItems]` indicator that turns red when full.
 
@@ -209,7 +213,30 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
   - `createInventoryState(maxItems)` accepts capacity from upgrade level
   - Backward compatible: old saves without `backpack` key default to level 0 via spread pattern
   - 8 unit tests covering capacity limits, canPickupItem boundaries, and backpack shop upgrade values
-- 323 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, weapon upgrades, enemy types, stairs, weapons, and inventory capacity
+- Maze-like room variety
+  - Pure function module `maze.js`: getRoomType, generateMazeWalls, generateColumns
+  - Room type determination: seeded PRNG (seed+70000) → 'open' (40%), 'maze' (30%), 'columns' (30%)
+  - Maze rooms: recursive division with depth-2, gaps of 80px for passage, door zone avoidance
+  - Column rooms: staggered 24x24 pillars at 200px spacing creating shadow interplay
+  - Room 0 (store) never gets maze treatment
+  - Internal walls integrate with existing raycasting and physics systems
+  - 12 unit tests covering type assignment, segment generation, bounds, gaps, door avoidance, determinism
+- Tables/desks no longer block flashlight
+  - `FURNITURE_TYPES` gains `blocksLight` property: false for tables/desks, true for shelves/bookcases
+  - GameScene conditionally pushes wall segments only for `blocksLight: true` furniture
+  - Physics collision still applies to all furniture types
+  - 2 new behavioral tests verifying tables don't block and shelves do block
+- Extra door connections between rooms
+  - Post-placement pass in `level.js` (`addExtraDoors`) checks all grid-adjacent room pairs
+  - ~50% chance per unconnected neighbor pair (seeded PRNG with offset +80000)
+  - Doors are bidirectional (added to both rooms' doors arrays)
+  - Creates loops in the level graph for more navigability
+  - 3 new unit tests covering extra connections, bidirectionality, and grid-adjacency
+- Two stair connections between floors
+  - `createStairConnections` in `stairs.js` creates 2 stairs using distinct rooms per floor
+  - Falls back to fewer if not enough rooms available
+  - 2 new unit tests covering count and room distinctness
+- 341 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, weapon upgrades, enemy types, stairs, weapons, inventory capacity, maze generation, and room connections
 - Documentation (docs.md files for root, src, systems, scenes)
 - Bug fix: flashlight mouse tracking drift during WASD movement
   - Root cause: Phaser 3 `pointer.worldX`/`worldY` are cached properties only refreshed on mouse events, not camera scroll
@@ -217,7 +244,7 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
   - Also fixes bullet direction when shooting while moving
 
 ## Architecture
-- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop, doors, lightswitch, hiding, persistence, exploration, startroom, scaling, stairs, weapons) — testable without Phaser
+- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop, doors, lightswitch, hiding, persistence, exploration, startroom, scaling, stairs, weapons, maze) — testable without Phaser
 - `src/scenes/` — Phaser scene classes that wire systems together for rendering (GameScene for gameplay, ShopScene for upgrades between runs)
 - Darkness uses BitmapMask with invertAlpha on a Graphics overlay
 - Furniture segments use the same `{x1,y1,x2,y2}` format as walls — concatenated into `wallSegments` for raycasting with zero visibility code changes
@@ -229,7 +256,7 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
 - Combat/shooting/battery/inventory/hiding/exploration/startroom/scaling/weapons are pure function modules (`combat.js`, `shooting.js`, `battery.js`, `inventory.js`, `hiding.js`, `exploration.js`, `startroom.js`, `scaling.js`, `weapons.js`) — same architecture pattern as enemy/movement
 - Items system (`items.js`) follows same spawning pattern as enemy.js: seeded PRNG, furniture overlap avoidance, skip room 0
 - Player combat, battery, inventory, hiding, exploration, weapon, and shop states are immutable objects; enemy health is a mutable field on the enemy state (asymmetry: player state is passed through pure functions, enemy health is mutated in-place in the scene callback)
-- Item spawning uses seed offset +20000 (furniture: +0, enemies: +10000, items: +20000, doors: +30000, switches: +40000, weapons: +60000) to avoid correlation
+- Item spawning uses seed offset +20000 (furniture: +0, enemies: +10000, items: +20000, doors: +30000, switches: +40000, weapons: +60000, maze: +70000, extra doors: +80000) to avoid correlation
 - Closable door segments are dynamically pushed/spliced from `wallSegments` — same mutable array pattern as furniture, but toggled at runtime via `body.enable` on Phaser static bodies
 - Light switch lit rooms are drawn as fillRect into maskGraphics (same BitmapMask as flashlight) — drawn before the flashlight early-return so lit rooms stay visible even when battery is dead
 - E-key interaction resolves nearest interactable (door, switch, hideable furniture, or weapon pickup) via distance-sorted candidates array in `updateInteractPrompt()`
@@ -260,8 +287,12 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
 - Stair zones use identical overlap + camera fade pattern as exit zone — `onStairEnter()` mirrors `onDayComplete()` structure with `body.reset()` instead of scene transition
 - `getMinimapData(state, rooms, bounds, playerPos, exitPos, screenWidth, floorFilter)` — 7th param filters rooms by floor; null/undefined shows all (backward compatible)
 - Weapon system: `weapons.js` defines WEAPON_TYPES (pistol, shotgun, rifle) with per-weapon stats. `createWeaponState()` returns 2-slot inventory (pistol default + one pickup slot). Upgrade bonuses computed as deltas from pistol base values and applied additively to any weapon via `getEffectiveStats()`. Q-key cycles `activeSlot`, E-key on weapon pickup calls `pickupWeapon()` which fills empty slot or swaps.
-- Seed offset scheme: furniture +0, enemies +10000, items +20000, doors +30000, switches +40000, stairs +50000, weapons +60000, floor seed +1000*floorIndex
+- Seed offset scheme: furniture +0, enemies +10000, items +20000, doors +30000, switches +40000, stairs +50000, weapons +60000, maze +70000, extra doors +80000, floor seed +1000*floorIndex
 - Inventory capacity: `inventory.js` exports `canPickupItem(state)` predicate. State now includes `itemCount` (incremented on pickup, decremented on battery use) and `maxItems` (set from backpack upgrade at run start). GameScene checks predicate before destroying item sprites — items stay on ground when full. Constants: `BASE_INVENTORY_CAPACITY=8`, `INVENTORY_CAPACITY_PER_LEVEL=4`.
+- Maze/room variety: `maze.js` classifies rooms into types (open/maze/columns) using seeded PRNG. Maze rooms use recursive division (depth 2) to place internal wall segments with 80px passage gaps. Column rooms use a staggered grid of 24x24 pillars at 200px spacing. Both types produce `{x1,y1,x2,y2}` segments that integrate directly into the existing `wallSegments` array — no raycasting changes needed. `generateMazeWalls()` accepts the room's `doors` array and avoids placing walls that would block door entry zones.
+- Furniture light-blocking: `FURNITURE_TYPES` has `blocksLight` field. GameScene checks `FURNITURE_TYPES[item.type].blocksLight` before pushing furniture segments to `wallSegments`. Low furniture (tables, desks) has physics collision but doesn't cast shadows. Items with unknown types (store furniture like 'counter', 'couch') fall through gracefully (no segments pushed — irrelevant since room 0 is always lit).
+- Extra doors: `addExtraDoors(rooms, grid, seed)` in `level.js` iterates all rooms post-placement, checks each of 4 directions for grid-adjacent rooms without existing connections, and adds doors with 50% probability. Uses `alreadyConnected` check to prevent duplicates. Doors are always bidirectional.
+- Multiple stairs: `createStairConnections` now uses a `usedFrom`/`usedTo` Set to pick distinct rooms for each stair pair. Falls back to fewer stairs if insufficient rooms are available.
 
 ## Next Steps
 - Add different exit locations (spec: discovering alternate exits leads to different locations)

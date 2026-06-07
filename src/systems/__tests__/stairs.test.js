@@ -33,9 +33,17 @@ describe('generateMultiFloorLevel', () => {
     expect(floor1MinY - floor0MaxY).toBeGreaterThan(0);
   });
 
-  it('creates at least one stair connection between floors', () => {
+  it('creates at least two stair connections between floors', () => {
     const { stairs } = generateMultiFloorLevel(seed, floorRoomCounts);
-    expect(stairs.length).toBeGreaterThanOrEqual(1);
+    expect(stairs.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('stair connections use distinct rooms on each floor', () => {
+    const { stairs } = generateMultiFloorLevel(seed, floorRoomCounts);
+    if (stairs.length >= 2) {
+      expect(stairs[0].fromRoomId).not.toBe(stairs[1].fromRoomId);
+      expect(stairs[0].toRoomId).not.toBe(stairs[1].toRoomId);
+    }
   });
 
   it('stair fromRoomId is never room 0 (starting room)', () => {
