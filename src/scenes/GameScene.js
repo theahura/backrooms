@@ -814,6 +814,7 @@ export class GameScene extends Phaser.Scene {
     if (this.combatState.isDead || this.dayEnding) return;
 
     const pointer = this.input.activePointer;
+    pointer.updateWorldPoint(this.cameras.main);
     this.playerAngle = Phaser.Math.Angle.Between(
       this.player.x,
       this.player.y,

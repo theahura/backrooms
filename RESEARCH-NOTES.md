@@ -628,3 +628,27 @@ function isStorageAvailable() {
 - `ShopScene.init()` line 19: Already has `|| createShopState()` fallback — works naturally with persistence
 - `GameScene.init()` line 33: Already has `?? 0` fallback for runCount — works naturally
 - Alternative: load in a Boot scene, but current architecture doesn't have one — adding to main.js is simpler
+
+## Flashlight Mouse Tracking Bug Research
+
+### Root Cause: Stale `pointer.worldX`/`worldY`
+- In Phaser 3, `pointer.worldX` and `pointer.worldY` are **stored properties** (not getters) — only updated when an actual input event fires (mouse move, button down/up)
+- When the player moves with WASD and the camera follows via `startFollow()`, the camera scrolls but no mouse event fires — `worldX`/`worldY` remain stale
+- The camera lerp of 0.1 compounds the issue: camera takes ~10 frames to catch up, each frame widening the gap between stale world coordinates and actual mouse position
+- Confirmed Phaser bug: [GitHub #4216](https://github.com/photonstorm/phaser/issues/4216), [GitHub #4658](https://github.com/photonstorm/phaser/issues/4658)
+
+### Affected Code Locations (GameScene.js)
+1. **`update()` lines 816-822**: `this.playerAngle` computed from `pointer.worldX`/`worldY` — controls flashlight direction and player rotation
+2. **`fireBullet()` lines 534-538**: `calculateBulletVelocity()` uses `pointer.worldX`/`worldY` — bullets fire in wrong direction when values are stale
+
+### Fix: `pointer.updateWorldPoint(camera)`
+- `Pointer.updateWorldPoint(camera)` (added Phaser 3.19) recalculates `worldX`/`worldY` from screen position and current camera matrix
+- Call at start of `update()`, before any `pointer.worldX`/`worldY` reads
+- Handles zoom, rotation, and scroll via full matrix inversion
+- Alternative: `camera.getWorldPoint(pointer.x, pointer.y)` returns a Vector2 without mutating the pointer
+- **Do NOT use** `pointer.x + camera.scrollX` — breaks with camera zoom or rotation
+
+### Why `pointer.updateWorldPoint` is Preferred
+- Single call refreshes `pointer.worldX`/`worldY` for all subsequent reads in the same frame
+- No need to change `fireBullet()` or any other code that reads `pointer.worldX`/`worldY`
+- Negligible performance cost (sin/cos + matrix operations, once per frame)

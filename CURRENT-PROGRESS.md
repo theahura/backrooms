@@ -1,8 +1,8 @@
 # Current Progress
 
-## Status: localStorage Persistence Complete
+## Status: Flashlight Mouse Tracking Bug Fixed
 
-Game progress now persists across browser sessions via localStorage. A new pure function module `persistence.js` saves shop state (gold, upgrade levels) and run counter to localStorage at every mutation point. On game boot, `main.js` loads saved state and populates the Phaser registry before any scene starts. Browser lifecycle listeners (`visibilitychange`, `beforeunload`) act as safety nets for unexpected tab closures. All localStorage access is try-catch wrapped for graceful degradation in restricted environments (Safari private browsing, storage full). The save format is versioned (`{ version, shopState, runCount }`) to support future migrations.
+Fixed a bug where the flashlight drifted away from the mouse cursor when the player moved with WASD while the mouse was stationary. Root cause: Phaser 3's `pointer.worldX`/`worldY` are stored properties that only update on mouse input events, not when the camera scrolls. Added `pointer.updateWorldPoint(this.cameras.main)` at the start of `GameScene.update()` to refresh world coordinates each frame. This also fixes bullet direction when shooting while moving.
 
 ## Completed
 - Application spec written
@@ -116,6 +116,10 @@ Game progress now persists across browser sessions via localStorage. A new pure 
   - 11 unit tests covering round-trip, corruption, version validation, shape validation, missing field defaults, and unavailable storage
 - 205 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, and persistence
 - Documentation (docs.md files for root, src, systems, scenes)
+- Bug fix: flashlight mouse tracking drift during WASD movement
+  - Root cause: Phaser 3 `pointer.worldX`/`worldY` are cached properties only refreshed on mouse events, not camera scroll
+  - Fix: `pointer.updateWorldPoint(this.cameras.main)` called at start of `update()` each frame
+  - Also fixes bullet direction when shooting while moving
 
 ## Architecture
 - `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop, doors, lightswitch, hiding, persistence) — testable without Phaser
@@ -141,6 +145,7 @@ Game progress now persists across browser sessions via localStorage. A new pure 
 - HUD uses `setScrollFactor(0)` at depth 1000 to stay fixed on screen above all game layers
 - Battery feeds into flashlight rendering: `getFlashlightConeAngle()` scales the cone angle passed to `getFlashlightPolygon()` — no changes to the visibility system itself
 - Exit zone uses Phaser's zone + overlap detection pattern (same as enemy contact)
+- `pointer.updateWorldPoint(this.cameras.main)` at the top of `update()` ensures `pointer.worldX`/`worldY` are current before all downstream reads (aim angle, bullet velocity)
 
 ## Next Steps
 - Add starting room (furniture store with crack in wall)
