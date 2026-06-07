@@ -8,7 +8,7 @@ export function enterHiding(state, furnitureRef) {
   return { isHiding: true, furnitureRef };
 }
 
-export function exitHiding() {
+export function exitHiding(state) {
   return { isHiding: false, furnitureRef: null };
 }
 

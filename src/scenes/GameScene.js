@@ -282,6 +282,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   updateInteractPrompt() {
+    if (this.hidingState.isHiding) {
+      this.interactText.setVisible(false);
+      this.nearestInteractable = null;
+      return;
+    }
+
     const nearestDoor = findNearestDoor(
       this.doorStates, this.level.rooms,
       this.player.x, this.player.y,
