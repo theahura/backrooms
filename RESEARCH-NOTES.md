@@ -1194,3 +1194,91 @@ function calculateShotgunSpread(originX, originY, targetX, targetY, speed, bulle
 - `GameScene.updateInteractPrompt()`: add weapon pickup as candidate type
 - `GameScene.drawHUD()`: add weapon indicator text
 - `shooting.js`: add `calculateShotgunSpread()` export
+
+## Backpack / Inventory Capacity Research
+
+### Design Decision: Counted Capacity System
+
+Based on analysis of Motherload (direct inspiration), RE4, Enter the Gungeon, and Binding of Isaac:
+
+- **Motherload pattern**: cargo capacity limits how many minerals you can carry per trip. Fuel/repair items DO count against capacity. Starting capacity is small (~7), upgradeable in shop.
+- **RE4 pattern**: grid-based, "inventory full" blocks pickup (items stay on ground).
+- **This game**: items are auto-pickup on overlap with no slots (just counters). Simplest approach: count total items picked up.
+
+### Capacity Design
+
+**Base capacity**: 8 items per run
+- 6 rooms × ~3.5 items avg = ~21 items available per run
+- 8/21 = ~38% collection rate at base — forces meaningful decisions
+- Battery items count against capacity (creates utility vs profit tension)
+- Using a battery frees a slot (consumed items decrement count)
+
+**Upgrade tiers** (Backpack upgrade in shop):
+- Level 0: 8 capacity (base)
+- Level 1: 12 capacity (+4)
+- Level 2: 16 capacity (+4)
+- Level 3: 20 capacity (+4)
+
+At max (20/21), player can grab nearly everything — reward for investment.
+Cost: [100, 300, 800] (same as other upgrades).
+
+**When full**: items remain on ground, NOT destroyed. Player sees but cannot pick up.
+- This is the RE4/Motherload pattern — no permanent item loss, just capacity constraint
+- Prevents frustration from accidentally losing valuable gems
+
+### Architecture: Modify Existing `inventory.js`
+
+**State change:**
+```javascript
+{
+  batteries: 0,
+  treasureValue: 0,
+  itemCount: 0,     // NEW: current items in inventory
+  maxItems: 8,      // NEW: capacity limit (from backpack upgrade)
+}
+```
+
+**New functions:**
+- `createInventoryState(maxItems = 8)` — accepts capacity from upgrade level
+- `canPickupItem(state)` — returns `state.itemCount < state.maxItems`
+- `pickupItem(state, item)` — now also increments `itemCount`
+- `useBattery(state)` — now also decrements `itemCount` (frees a slot)
+
+**New constant:**
+- `BASE_INVENTORY_CAPACITY = 8`
+- `INVENTORY_CAPACITY_PER_LEVEL = 4`
+
+### Shop Integration
+
+Add to UPGRADES array:
+```javascript
+{
+  id: 'backpack',
+  name: 'Backpack Size',
+  description: 'Carry more items per run',
+  maxLevel: 3,
+  costs: [100, 300, 800],
+  base: 8,
+  perLevel: 4,
+}
+```
+
+`createShopState()` auto-adds `backpack: 0` to upgrades object.
+
+### GameScene Integration
+
+- `init()`: read backpack upgrade level, compute `maxItems = getUpgradeValue('backpack', level)`
+- `createInventoryState(maxItems)` called with computed capacity
+- `onItemPickup()`: check `canPickupItem()` before pickup — if false, skip destroy and return early
+- `drawHUD()`: add capacity indicator text (e.g., "4/8" near treasure display)
+
+### HUD Display
+
+- Add capacity text after treasure text: `"[4/8]"` in white/gray
+- When full: text turns red to signal "inventory full"
+- Position: after treasureText at x ~220, y 66 (same row as battery/treasure)
+
+### ShopScene Layout
+
+- 8 upgrades total: reduce rowHeight further if needed (currently 60px → try 55px)
+- Canvas height 768px, 8 rows × 55 = 440, plus title + button = ~540px total (fits)

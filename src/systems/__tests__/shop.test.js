@@ -197,3 +197,17 @@ describe('bullet range upgrade', () => {
   });
 });
 
+describe('backpack upgrade', () => {
+  it('returns base capacity of 8 at level 0', () => {
+    expect(getUpgradeValue('backpack', 0)).toBe(8);
+  });
+
+  it('returns capacity of 12 at level 1', () => {
+    expect(getUpgradeValue('backpack', 1)).toBe(12);
+  });
+
+  it('returns capacity of 20 at max level 3', () => {
+    expect(getUpgradeValue('backpack', 3)).toBe(20);
+  });
+});
+

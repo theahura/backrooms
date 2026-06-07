@@ -10,7 +10,7 @@ import { WEAPON_TYPES, createWeaponState, switchWeapon, pickupWeapon, getActiveW
 import { getEnemyHP, getEnemyCount, getEnemyChaseSpeed, getEnemyDamage } from '../systems/scaling.js';
 import { createBatteryState, updateBattery, getBatteryFraction, getFlashlightConeAngle, shouldFlicker, rechargeBattery, BATTERY_RECHARGE_AMOUNT } from '../systems/battery.js';
 import { generateRoomItems, ITEM_TYPES } from '../systems/items.js';
-import { createInventoryState, pickupItem, useBattery } from '../systems/inventory.js';
+import { createInventoryState, pickupItem, useBattery, canPickupItem } from '../systems/inventory.js';
 import { getUpgradeValue, createShopState } from '../systems/shop.js';
 import { createDoorStates, toggleDoor, getDoorCenter, findNearestDoor, DOOR_INTERACT_RANGE } from '../systems/doors.js';
 import { createSwitchStates, toggleSwitch, findNearestSwitch, getLitRoomIds, isPointInRoom, SWITCH_INTERACT_RANGE } from '../systems/lightswitch.js';
@@ -39,6 +39,7 @@ export class GameScene extends Phaser.Scene {
       fireRate: getUpgradeValue('fireRate', levels.fireRate) - 200,
       range: getUpgradeValue('bulletRange', levels.bulletRange) - 600,
     };
+    this.maxItems = getUpgradeValue('backpack', levels.backpack);
     this.weaponState = createWeaponState();
     this.updateWeaponStats();
 
@@ -80,7 +81,7 @@ export class GameScene extends Phaser.Scene {
     this.roomFurniture = new Map();
     this.combatState = createCombatState(this.maxHp);
     this.batteryState = createBatteryState(this.maxCharge);
-    this.inventoryState = createInventoryState();
+    this.inventoryState = createInventoryState(this.maxItems);
     this.fireCooldown = 0;
     this.dayEnding = false;
     this.isTeleporting = false;
@@ -440,6 +441,7 @@ export class GameScene extends Phaser.Scene {
 
   onItemPickup(player, itemSprite) {
     if (!itemSprite.active) return;
+    if (!canPickupItem(this.inventoryState)) return;
     this.inventoryState = pickupItem(this.inventoryState, {
       type: itemSprite.getData('itemType'),
       value: itemSprite.getData('itemValue'),
@@ -675,6 +677,14 @@ export class GameScene extends Phaser.Scene {
     });
     this.treasureText.setScrollFactor(0);
     this.treasureText.setDepth(1000);
+
+    this.capacityText = this.add.text(220, 66, '', {
+      fontSize: '14px',
+      color: '#cccccc',
+      fontFamily: 'monospace',
+    });
+    this.capacityText.setScrollFactor(0);
+    this.capacityText.setDepth(1000);
 
     this.weaponText = this.add.text(20, 86, '', {
       fontSize: '14px',
@@ -1106,6 +1116,9 @@ export class GameScene extends Phaser.Scene {
 
     this.batteryCountText.setText(`BAT x${this.inventoryState.batteries}`);
     this.treasureText.setText(`$${this.inventoryState.treasureValue}`);
+    const isFull = !canPickupItem(this.inventoryState);
+    this.capacityText.setColor(isFull ? '#ff4444' : '#cccccc');
+    this.capacityText.setText(`[${this.inventoryState.itemCount}/${this.inventoryState.maxItems}]`);
 
     const weapon = getActiveWeapon(this.weaponState);
     const colorHex = '#' + weapon.color.toString(16).padStart(6, '0');

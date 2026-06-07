@@ -62,6 +62,15 @@ export const UPGRADES = [
     base: 600,
     perLevel: 100,
   },
+  {
+    id: 'backpack',
+    name: 'Backpack Size',
+    description: 'Carry more items per run',
+    maxLevel: 3,
+    costs: [100, 300, 800],
+    base: 8,
+    perLevel: 4,
+  },
 ];
 
 export function createShopState() {

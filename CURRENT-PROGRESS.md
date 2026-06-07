@@ -1,6 +1,10 @@
 # Current Progress
 
-## Status: Weapon Switching System
+## Status: Backpack / Inventory Capacity
+
+Added inventory capacity system. Players now have a limited number of item slots (base 8). When full, items remain on the ground instead of being auto-picked up. Using a battery frees a slot (dual-purpose: flashlight recharge + inventory management). New "Backpack Size" shop upgrade adds +4 capacity per level (8→12→16→20 at max). HUD shows `[itemCount/maxItems]` indicator that turns red when full.
+
+## Previous: Weapon Switching System
 
 Added multi-floor level generation with bidirectional stairs connecting floors. Level now generates 2 floors (4 rooms on floor 0, 3 rooms on floor 1 = 7 total rooms). Floors are separated by 10000px in world-space Y. One stair connection links a non-starting room on floor 0 to a room on floor 1. Stairs are overlap zones that trigger camera fade teleportation (300ms fade out, reposition, 300ms fade in). Minimap shows only the current floor's visited rooms with a "B1"/"B2" floor indicator. Stair visuals: dark rectangles with step lines and pulsing purple glow. Player input/physics frozen during teleport via `isTeleporting` flag.
 
@@ -196,7 +200,16 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
   - HUD shows current weapon name in weapon color, with [Q] indicator when second weapon is held
   - Bullet pool increased from 20 to 30 to accommodate shotgun bursts
   - 22 unit tests covering weapon state, switching, pickup/swap, effective stats, shotgun spread, and spawn logic
-- 313 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, weapon upgrades, enemy types, stairs, and weapons
+- Inventory capacity system
+  - Base capacity 8 items per run, upgradeable via "Backpack Size" shop upgrade (+4/level, max 20)
+  - `canPickupItem(state)` predicate: returns false when `itemCount >= maxItems`
+  - Items remain on ground when inventory is full (not destroyed)
+  - Battery consumption frees a slot (`itemCount` decremented on use)
+  - HUD capacity indicator `[N/M]` turns red when full
+  - `createInventoryState(maxItems)` accepts capacity from upgrade level
+  - Backward compatible: old saves without `backpack` key default to level 0 via spread pattern
+  - 8 unit tests covering capacity limits, canPickupItem boundaries, and backpack shop upgrade values
+- 323 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, weapon upgrades, enemy types, stairs, weapons, and inventory capacity
 - Documentation (docs.md files for root, src, systems, scenes)
 - Bug fix: flashlight mouse tracking drift during WASD movement
   - Root cause: Phaser 3 `pointer.worldX`/`worldY` are cached properties only refreshed on mouse events, not camera scroll
@@ -248,9 +261,10 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
 - `getMinimapData(state, rooms, bounds, playerPos, exitPos, screenWidth, floorFilter)` — 7th param filters rooms by floor; null/undefined shows all (backward compatible)
 - Weapon system: `weapons.js` defines WEAPON_TYPES (pistol, shotgun, rifle) with per-weapon stats. `createWeaponState()` returns 2-slot inventory (pistol default + one pickup slot). Upgrade bonuses computed as deltas from pistol base values and applied additively to any weapon via `getEffectiveStats()`. Q-key cycles `activeSlot`, E-key on weapon pickup calls `pickupWeapon()` which fills empty slot or swaps.
 - Seed offset scheme: furniture +0, enemies +10000, items +20000, doors +30000, switches +40000, stairs +50000, weapons +60000, floor seed +1000*floorIndex
+- Inventory capacity: `inventory.js` exports `canPickupItem(state)` predicate. State now includes `itemCount` (incremented on pickup, decremented on battery use) and `maxItems` (set from backpack upgrade at run start). GameScene checks predicate before destroying item sprites — items stay on ground when full. Constants: `BASE_INVENTORY_CAPACITY=8`, `INVENTORY_CAPACITY_PER_LEVEL=4`.
 
 ## Next Steps
-- Add backpack / storage capacity upgrades
 - Add different exit locations (spec: discovering alternate exits leads to different locations)
 - Add lore items in rooms
 - Add more floors (extend FLOOR_ROOM_COUNTS array) for later runs
+- Add compass/map upgrades for minimap enhancement
