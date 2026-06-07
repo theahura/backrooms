@@ -1,8 +1,8 @@
 # Current Progress
 
-## Status: Light Switches Complete
+## Status: Hiding Mechanics Complete
 
-The game now has interactive light switches in some rooms. Approximately 40% of non-starting rooms (determined by seeded PRNG, seed offset +40000) have a light switch placed on a random wall near the wall center. The player can press E when near a switch (within 80px) to toggle it on. When a light switch is activated, the entire room becomes fully illuminated (darkness mask removed via fillRect in the BitmapMask), all enemies inside the room are despawned, and enemies that wander into lit rooms are frozen in place. The E-key interaction system now resolves between doors and switches by nearest Euclidean distance. This adds strategic depth — players can create safe zones by finding and activating light switches.
+The game now has hiding mechanics. Players can press E near tables and desks (furniture with `canHide: true`) to hide inside them. While hidden, the player becomes invisible to enemy line-of-sight detection, cannot move or shoot, is immune to contact damage, and is rendered semi-transparent (alpha 0.3). Pressing any WASD key or E exits hiding immediately. The E-key interaction system now resolves between three interactable types (doors, switches, furniture) using a distance-sorted candidates array. Enemy AI gained an optional `playerHidden` parameter — when true, `canSee` is forced false regardless of actual LOS, causing chasing enemies to naturally transition to search state.
 
 ## Completed
 - Application spec written
@@ -100,11 +100,18 @@ The game now has interactive light switches in some rooms. Approximately 40% of 
   - Switch visual: small rectangle on wall (gray when off, yellow when on) at depth 50
   - Pure function module `lightswitch.js`: createSwitchStates, toggleSwitch, findNearestSwitch, getLitRoomIds, isPointInRoom
   - E-key interaction resolves nearest interactable (door vs switch) by Euclidean distance
-- 174 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, and light switches
+- Hiding mechanics (interact with canHide furniture to become invisible to enemies)
+  - Press E within 80px of a table or desk to hide
+  - While hidden: movement disabled, shooting disabled, contact damage immune, semi-transparent (alpha 0.3)
+  - Enemies cannot detect hidden player (playerHidden flag forces canSee=false in updateEnemyAI)
+  - Exit hiding: press any WASD key or E
+  - Pure function module `hiding.js`: createHidingState, enterHiding, exitHiding, findNearestHideable
+  - E-key interaction resolves nearest of three interactable types (door, switch, furniture) via distance-sorted candidates
+- 194 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, and hiding
 - Documentation (docs.md files for root, src, systems, scenes)
 
 ## Architecture
-- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop, doors, lightswitch) — testable without Phaser
+- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop, doors, lightswitch, hiding) — testable without Phaser
 - `src/scenes/` — Phaser scene classes that wire systems together for rendering (GameScene for gameplay, ShopScene for upgrades between runs)
 - Darkness uses BitmapMask with invertAlpha on a Graphics overlay
 - Furniture segments use the same `{x1,y1,x2,y2}` format as walls — concatenated into `wallSegments` for raycasting with zero visibility code changes
@@ -112,13 +119,13 @@ The game now has interactive light switches in some rooms. Approximately 40% of 
 - Doorways are gaps in wall segments — the visibility system naturally handles light passing through without any changes
 - Enemy LOS reuses `raySegmentIntersection` from visibility.js — single ray from enemy to player, checked against wall segments
 - Enemy AI is a pure function state machine — takes state in, returns updated state with velocity
-- Combat/shooting/battery/inventory are pure function modules (`combat.js`, `shooting.js`, `battery.js`, `inventory.js`) — same architecture pattern as enemy/movement
+- Combat/shooting/battery/inventory/hiding are pure function modules (`combat.js`, `shooting.js`, `battery.js`, `inventory.js`, `hiding.js`) — same architecture pattern as enemy/movement
 - Items system (`items.js`) follows same spawning pattern as enemy.js: seeded PRNG, furniture overlap avoidance, skip room 0
-- Player combat, battery, inventory, and shop states are immutable objects; enemy health is a mutable field on the enemy state (asymmetry: player state is passed through pure functions, enemy health is mutated in-place in the scene callback)
+- Player combat, battery, inventory, hiding, and shop states are immutable objects; enemy health is a mutable field on the enemy state (asymmetry: player state is passed through pure functions, enemy health is mutated in-place in the scene callback)
 - Item spawning uses seed offset +20000 (furniture: +0, enemies: +10000, items: +20000, doors: +30000, switches: +40000) to avoid correlation
 - Closable door segments are dynamically pushed/spliced from `wallSegments` — same mutable array pattern as furniture, but toggled at runtime via `body.enable` on Phaser static bodies
 - Light switch lit rooms are drawn as fillRect into maskGraphics (same BitmapMask as flashlight) — drawn before the flashlight early-return so lit rooms stay visible even when battery is dead
-- E-key interaction resolves nearest interactable (door or switch) by Euclidean distance via `nearestInteractable` computed in `updateInteractPrompt()`
+- E-key interaction resolves nearest interactable (door, switch, or hideable furniture) via distance-sorted candidates array in `updateInteractPrompt()`
 - Shop state persists in `game.registry` — survives scene transitions but not browser reloads
 - GameScene `init()` reads upgrade levels from registry and computes stat values via `getUpgradeValue()`
 - ShopScene `init(data)` receives `treasureEarned` via scene start data, adds to registry gold balance
@@ -130,7 +137,6 @@ The game now has interactive light switches in some rooms. Approximately 40% of 
 
 ## Next Steps
 - Add starting room (furniture store with crack in wall)
-- Add hiding mechanics (interact with canHide furniture to become invisible to enemies)
 - Add compass/map that fills in as the player explores
 - Add localStorage persistence for cross-session save/load
 - Add more upgrade categories (weapon damage, fire rate, bullet range)
