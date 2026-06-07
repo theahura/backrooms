@@ -2,6 +2,9 @@ export const BULLET_SPEED = 500;
 export const FIRE_RATE_MS = 200;
 export const BULLET_MAX_RANGE = 600;
 
+export const SPITTER_PROJECTILE_SPEED = 200;
+export const SPITTER_PROJECTILE_RANGE = 400;
+
 export function calculateBulletVelocity(originX, originY, targetX, targetY, speed) {
   const dx = targetX - originX;
   const dy = targetY - originY;

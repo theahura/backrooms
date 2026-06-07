@@ -4,6 +4,12 @@ export const DAMAGE_COOLDOWN_MS = 1000;
 export const ENEMY_MAX_HP = 50;
 export const BULLET_DAMAGE = 25;
 
+export const CRAWLER_MAX_HP = 30;
+export const SPITTER_MAX_HP = 40;
+export const CRAWLER_CONTACT_DAMAGE = 15;
+export const SPITTER_CONTACT_DAMAGE = 10;
+export const SPITTER_PROJECTILE_DAMAGE = 15;
+
 export function createCombatState(maxHp = PLAYER_MAX_HP) {
   return {
     hp: maxHp,

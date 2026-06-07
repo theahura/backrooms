@@ -1,8 +1,8 @@
 # Current Progress
 
-## Status: Enemy Scaling & Weapon Upgrades Added
+## Status: Multiple Enemy Types Added
 
-Added enemy difficulty scaling per run and three new weapon upgrade categories. Enemies get progressively harder each run (more HP, more per room, faster chase speed, higher contact damage) with hard caps on each parameter. Players can now purchase weapon damage (+10/level, one-shots base enemies at max), fire rate (-30ms/level cooldown, 9.1 shots/sec at max), and bullet range (+100px/level) upgrades in the shop. Pure function module `scaling.js` provides capped scaling formulas. GameScene reads upgrade values and scaled enemy stats at init. Shop UI compacted to fit 7 upgrade categories. Old saves seamlessly gain default values for new upgrade keys.
+Added two new enemy types (crawler and spitter) alongside the existing basic zombie. Crawlers are fast, fragile melee enemies (112 chase speed, 30 HP). Spitters are slower ranged enemies (60 chase speed, 40 HP) that stop and fire projectiles at the player when within 250px. Enemy type distribution is run-gated: run 0 is basic-only, run 1 introduces crawlers (20%), run 2+ adds spitters (50/25/25 split). Each type has distinct visuals (red/purple/blue), per-type HP, contact damage, and scaled chase speed. Enemy projectile system mirrors the player bullet pattern (physics group pooling, wall/furniture collision, range expiry). Per-enemy contact damage replaces the previous uniform damage value.
 
 ## Completed
 - Application spec written
@@ -150,7 +150,22 @@ Added enemy difficulty scaling per run and three new weapon upgrade categories. 
   - GameScene uses `this.bulletDamage`, `this.fireRate`, `this.bulletRange` instead of hardcoded constants
   - Upgrade level fallback uses `createShopState().upgrades` spread for save compatibility
   - ShopScene layout compacted (row height 80→60px) to fit 7 upgrades in 768px canvas
-- 263 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, and weapon upgrades
+- Multiple enemy types (crawler and spitter alongside basic zombie)
+  - Crawler: fast melee (112 chase, 50 wander speed), low HP (30), lower contact damage (15), smaller purple circle (14px)
+  - Spitter: ranged (60 chase, 20 wander speed), moderate HP (40), low contact damage (10), fires projectiles at player
+  - Spitter AI adds `attack` state: stops at 250px range, fires after cooldown (300ms telegraph, 2000ms between shots)
+  - Enemy projectile system: separate `enemyBulletGroup` with pooling (maxSize 30), red texture, 200px/s speed, 400px range, 15 damage
+  - Projectiles collide with walls, furniture, and doors; overlap with player triggers damage
+  - Run-gated type distribution: run 0 = basic only, run 1 = 80/20 basic/crawler, run 2+ = 50/25/25 basic/crawler/spitter
+  - `getEnemyType(rand, runCount)` pure function for type assignment in `enemy.js`
+  - Per-enemy `contactDamage` stored on enemy state, looked up in `onEnemyContact(player, enemySprite)`
+  - Type-specific scaled chase speeds computed in `init()` via `getEnemyChaseSpeed()` with per-type base values
+  - Per-type HP constants: `CRAWLER_MAX_HP=30`, `SPITTER_MAX_HP=40` in `combat.js`
+  - Per-type contact damage: `CRAWLER_CONTACT_DAMAGE=15`, `SPITTER_CONTACT_DAMAGE=10` in `combat.js`
+  - Projectile constants: `SPITTER_PROJECTILE_SPEED=200`, `SPITTER_PROJECTILE_RANGE=400` in `shooting.js`
+  - Distinct textures: basic=red 20px, crawler=purple 14px, spitter=blue 20px with mouth detail
+  - 17 new unit tests covering type assignment, spawn typing, crawler speeds, spitter attack state machine
+- 278 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, weapon upgrades, and enemy types
 - Documentation (docs.md files for root, src, systems, scenes)
 - Bug fix: flashlight mouse tracking drift during WASD movement
   - Root cause: Phaser 3 `pointer.worldX`/`worldY` are cached properties only refreshed on mouse events, not camera scroll
@@ -165,7 +180,8 @@ Added enemy difficulty scaling per run and three new weapon upgrade categories. 
 - Level generation uses a growth algorithm on a logical grid — rooms placed in adjacent cells, connected via paired doorways
 - Doorways are gaps in wall segments — the visibility system naturally handles light passing through without any changes
 - Enemy LOS reuses `raySegmentIntersection` from visibility.js — single ray from enemy to player, checked against wall segments
-- Enemy AI is a pure function state machine — takes state in, returns updated state with velocity
+- Enemy AI is a pure function state machine — takes state in, returns updated state with velocity. Three enemy types (basic, crawler, spitter) share the same FSM with type-aware speed constants via `getTypeSpeeds()`. Spitters add a 4th `attack` state with `wantsToFire` signaling to the scene.
+- Enemy type is assigned at spawn time by `getEnemyType(rand, runCount)` — run-gated distribution ensures gradual introduction of new types
 - Combat/shooting/battery/inventory/hiding/exploration/startroom/scaling are pure function modules (`combat.js`, `shooting.js`, `battery.js`, `inventory.js`, `hiding.js`, `exploration.js`, `startroom.js`, `scaling.js`) — same architecture pattern as enemy/movement
 - Items system (`items.js`) follows same spawning pattern as enemy.js: seeded PRNG, furniture overlap avoidance, skip room 0
 - Player combat, battery, inventory, hiding, exploration, and shop states are immutable objects; enemy health is a mutable field on the enemy state (asymmetry: player state is passed through pure functions, enemy health is mutated in-place in the scene callback)
@@ -175,12 +191,14 @@ Added enemy difficulty scaling per run and three new weapon upgrade categories. 
 - E-key interaction resolves nearest interactable (door, switch, or hideable furniture) via distance-sorted candidates array in `updateInteractPrompt()`
 - Shop state persists in `game.registry` (in-memory, survives scene transitions) and is backed by localStorage via `persistence.js` (survives browser reloads)
 - GameScene `init()` reads upgrade levels from registry and computes stat values via `getUpgradeValue()` — spreads `createShopState().upgrades` as default for forward compatibility with new upgrade keys
-- Enemy stats (HP, count, chase speed, contact damage) are precomputed in `init()` via `scaling.js` functions and stored as instance properties — constants in `combat.js`/`shooting.js`/`enemy.js` serve as base values only
-- `generateRoomEnemies()` accepts optional `extraCount` parameter (default 0), capped at 5 total enemies per room
-- `updateEnemyAI()` accepts optional `chaseSpeed` parameter (defaults to `ENEMY_SPEED_CHASE` constant)
+- Enemy stats (HP, count, chase speed, contact damage) are precomputed per type in `init()` via `scaling.js` functions — `scaledEnemyHP`, `scaledCrawlerHP`, `scaledSpitterHP`, etc. Constants in `combat.js`/`shooting.js`/`enemy.js` serve as base values only
+- `generateRoomEnemies()` accepts optional `extraCount` (default 0) and `runCount` (default 0) parameters — type assigned per enemy via `getEnemyType()`
+- `updateEnemyAI()` reads `enemy.type` to select speeds via `getTypeSpeeds()` — the `chaseSpeed` parameter is used as fallback for basic type
+- Per-enemy `contactDamage` field on enemy state replaces uniform `scaledEnemyDamage` — `onEnemyContact(player, enemySprite)` looks up the enemy by sprite reference
 - ShopScene `init(data)` receives `treasureEarned` via scene start data, adds to registry gold balance
 - Two-scene flow: GameScene → (exit/death) → ShopScene → (enter backrooms) → GameScene
-- Bullet physics group uses Phaser's built-in pooling (`maxSize: 20`, `getFirstDead`)
+- Player bullet physics group uses Phaser's built-in pooling (`maxSize: 20`); enemy bullet group uses same pattern (`maxSize: 30`) with distinct red texture
+- `fireEnemyBullet()` in GameScene mirrors `fireBullet()` — spawned from spitter position toward player, uses `SPITTER_PROJECTILE_SPEED`/`SPITTER_PROJECTILE_RANGE` from `shooting.js`
 - HUD uses `setScrollFactor(0)` at depth 1000 to stay fixed on screen above all game layers
 - Battery feeds into flashlight rendering: `getFlashlightConeAngle()` scales the cone angle passed to `getFlashlightPolygon()` — no changes to the visibility system itself
 - Exit zone uses Phaser's zone + overlap detection pattern (same as enemy contact)
@@ -195,7 +213,6 @@ Added enemy difficulty scaling per run and three new weapon upgrade categories. 
 - Exit zone position computed by `getExitPosition()` from `startroom.js` — center-north of room 0 (store entrance)
 
 ## Next Steps
-- Add more enemy types (faster enemies, ranged enemies, etc.)
 - Add stairs / vertical room connections
 - Add weapons switching (Q/E to switch weapons, multiple weapon types)
 - Add backpack / storage capacity upgrades

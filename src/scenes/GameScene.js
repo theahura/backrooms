@@ -3,9 +3,9 @@ import { calculateVelocity } from '../systems/movement.js';
 import { createFurnitureSegments, generateRoomFurniture } from '../systems/furniture.js';
 import { getFlashlightPolygon } from '../systems/visibility.js';
 import { generateLevel } from '../systems/level.js';
-import { generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_CHASE } from '../systems/enemy.js';
-import { createCombatState, applyDamage, updateCombat, getHealthFraction, isInvulnerable, applyEnemyDamage, isEnemyDead, ENEMY_CONTACT_DAMAGE, ENEMY_MAX_HP } from '../systems/combat.js';
-import { calculateBulletVelocity, canFire, updateFireCooldown, isBulletExpired, BULLET_SPEED } from '../systems/shooting.js';
+import { generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_CHASE, CRAWLER_CHASE_SPEED, SPITTER_CHASE_SPEED } from '../systems/enemy.js';
+import { createCombatState, applyDamage, updateCombat, getHealthFraction, isInvulnerable, applyEnemyDamage, isEnemyDead, ENEMY_CONTACT_DAMAGE, ENEMY_MAX_HP, CRAWLER_MAX_HP, SPITTER_MAX_HP, CRAWLER_CONTACT_DAMAGE, SPITTER_CONTACT_DAMAGE, SPITTER_PROJECTILE_DAMAGE } from '../systems/combat.js';
+import { calculateBulletVelocity, canFire, updateFireCooldown, isBulletExpired, BULLET_SPEED, SPITTER_PROJECTILE_SPEED, SPITTER_PROJECTILE_RANGE } from '../systems/shooting.js';
 import { getEnemyHP, getEnemyCount, getEnemyChaseSpeed, getEnemyDamage } from '../systems/scaling.js';
 import { createBatteryState, updateBattery, getBatteryFraction, getFlashlightConeAngle, shouldFlicker, rechargeBattery, BATTERY_RECHARGE_AMOUNT } from '../systems/battery.js';
 import { generateRoomItems, ITEM_TYPES } from '../systems/items.js';
@@ -43,8 +43,14 @@ export class GameScene extends Phaser.Scene {
     this.levelSeed = runCount + 1;
     this.runCount = runCount;
     this.scaledEnemyHP = getEnemyHP(ENEMY_MAX_HP, runCount);
+    this.scaledCrawlerHP = getEnemyHP(CRAWLER_MAX_HP, runCount);
+    this.scaledSpitterHP = getEnemyHP(SPITTER_MAX_HP, runCount);
     this.scaledEnemyChaseSpeed = getEnemyChaseSpeed(ENEMY_SPEED_CHASE, runCount);
+    this.scaledCrawlerChaseSpeed = getEnemyChaseSpeed(CRAWLER_CHASE_SPEED, runCount);
+    this.scaledSpitterChaseSpeed = getEnemyChaseSpeed(SPITTER_CHASE_SPEED, runCount);
     this.scaledEnemyDamage = getEnemyDamage(ENEMY_CONTACT_DAMAGE, runCount);
+    this.scaledCrawlerDamage = getEnemyDamage(CRAWLER_CONTACT_DAMAGE, runCount);
+    this.scaledSpitterDamage = getEnemyDamage(SPITTER_CONTACT_DAMAGE, runCount);
     this.extraEnemyCount = getEnemyCount(runCount);
     saveGame(shopState || createShopState(), runCount + 1);
   }
@@ -72,6 +78,7 @@ export class GameScene extends Phaser.Scene {
     this.createItemTextures();
     this.createItems();
     this.createBullets();
+    this.createEnemyBullets();
     this.createExitZone();
     this.createCrackVisual();
     this.setupInput();
@@ -423,29 +430,56 @@ export class GameScene extends Phaser.Scene {
     this.physics.add.collider(this.player, this.doorGroup);
   }
 
+  createEnemyTextures() {
+    const basicGfx = this.make.graphics({ add: false });
+    basicGfx.fillStyle(0xcc3333, 1);
+    basicGfx.fillCircle(10, 10, 10);
+    basicGfx.fillStyle(0x992222, 1);
+    basicGfx.fillCircle(7, 7, 3);
+    basicGfx.fillCircle(13, 7, 3);
+    basicGfx.generateTexture('enemy', 20, 20);
+    basicGfx.destroy();
+
+    const crawlerGfx = this.make.graphics({ add: false });
+    crawlerGfx.fillStyle(0x9933cc, 1);
+    crawlerGfx.fillCircle(7, 7, 7);
+    crawlerGfx.generateTexture('crawler', 14, 14);
+    crawlerGfx.destroy();
+
+    const spitterGfx = this.make.graphics({ add: false });
+    spitterGfx.fillStyle(0x3399cc, 1);
+    spitterGfx.fillCircle(10, 10, 10);
+    spitterGfx.fillStyle(0x226688, 1);
+    spitterGfx.fillCircle(7, 7, 3);
+    spitterGfx.fillCircle(13, 7, 3);
+    spitterGfx.fillStyle(0x44bbdd, 1);
+    spitterGfx.fillCircle(10, 13, 3);
+    spitterGfx.generateTexture('spitter', 20, 20);
+    spitterGfx.destroy();
+  }
+
+  getEnemyStats(type) {
+    if (type === 'crawler') return { hp: this.scaledCrawlerHP, contactDamage: this.scaledCrawlerDamage, textureKey: 'crawler', bodySize: 12 };
+    if (type === 'spitter') return { hp: this.scaledSpitterHP, contactDamage: this.scaledSpitterDamage, textureKey: 'spitter', bodySize: 16 };
+    return { hp: this.scaledEnemyHP, contactDamage: this.scaledEnemyDamage, textureKey: 'enemy', bodySize: 16 };
+  }
+
   createEnemies() {
     this.enemyGroup = this.physics.add.group();
     this.enemyStates = [];
-
-    const gfx = this.make.graphics({ add: false });
-    gfx.fillStyle(0xcc3333, 1);
-    gfx.fillCircle(10, 10, 10);
-    gfx.fillStyle(0x992222, 1);
-    gfx.fillCircle(7, 7, 3);
-    gfx.fillCircle(13, 7, 3);
-    gfx.generateTexture('enemy', 20, 20);
-    gfx.destroy();
+    this.createEnemyTextures();
 
     for (const room of this.level.rooms) {
       const furniture = this.roomFurniture.get(room.id) || [];
       const spawnPoints = generateRoomEnemies(
         room.x, room.y, room.width, room.height,
-        WALL_THICKNESS, room.seed, furniture, room.id, this.extraEnemyCount
+        WALL_THICKNESS, room.seed, furniture, room.id, this.extraEnemyCount, this.runCount
       );
 
       for (const spawn of spawnPoints) {
-        const enemy = this.enemyGroup.create(spawn.x, spawn.y, 'enemy');
-        enemy.body.setSize(16, 16, true);
+        const stats = this.getEnemyStats(spawn.type);
+        const enemy = this.enemyGroup.create(spawn.x, spawn.y, stats.textureKey);
+        enemy.body.setSize(stats.bodySize, stats.bodySize, true);
         enemy.body.setCollideWorldBounds(true);
         enemy.setDepth(60);
 
@@ -453,6 +487,7 @@ export class GameScene extends Phaser.Scene {
           sprite: enemy,
           x: spawn.x,
           y: spawn.y,
+          type: spawn.type,
           state: 'idle',
           velocityX: 0,
           velocityY: 0,
@@ -461,7 +496,9 @@ export class GameScene extends Phaser.Scene {
           lastKnownX: 0,
           lastKnownY: 0,
           searchTimer: 0,
-          health: this.scaledEnemyHP,
+          attackCooldown: 0,
+          health: stats.hp,
+          contactDamage: stats.contactDamage,
         });
       }
     }
@@ -486,6 +523,70 @@ export class GameScene extends Phaser.Scene {
     this.physics.add.collider(this.bulletGroup, this.furnitureGroup, this.onBulletHitWall, null, this);
     this.physics.add.collider(this.bulletGroup, this.doorGroup, this.onBulletHitWall, null, this);
     this.physics.add.overlap(this.bulletGroup, this.enemyGroup, this.onBulletHitEnemy, null, this);
+  }
+
+  createEnemyBullets() {
+    const gfx = this.make.graphics({ add: false });
+    gfx.fillStyle(0xff4444, 1);
+    gfx.fillCircle(3, 3, 3);
+    gfx.generateTexture('enemyBullet', 6, 6);
+    gfx.destroy();
+
+    this.enemyBulletGroup = this.physics.add.group({ maxSize: 30 });
+
+    this.physics.add.collider(this.enemyBulletGroup, this.walls, this.onBulletHitWall, null, this);
+    this.physics.add.collider(this.enemyBulletGroup, this.furnitureGroup, this.onBulletHitWall, null, this);
+    this.physics.add.collider(this.enemyBulletGroup, this.doorGroup, this.onBulletHitWall, null, this);
+    this.physics.add.overlap(this.enemyBulletGroup, this.player, this.onEnemyBulletHitPlayer, null, this);
+  }
+
+  fireEnemyBullet(fromX, fromY, toX, toY) {
+    const bullet = this.enemyBulletGroup.get(fromX, fromY, 'enemyBullet');
+    if (!bullet) return;
+
+    bullet.setActive(true);
+    bullet.setVisible(true);
+    bullet.body.reset(fromX, fromY);
+    bullet.setDepth(150);
+    bullet.body.setSize(6, 6, true);
+
+    const { vx, vy } = calculateBulletVelocity(fromX, fromY, toX, toY, SPITTER_PROJECTILE_SPEED);
+    bullet.setVelocity(vx, vy);
+    bullet.setData('originX', fromX);
+    bullet.setData('originY', fromY);
+  }
+
+  onEnemyBulletHitPlayer(bullet) {
+    bullet.setActive(false);
+    bullet.setVisible(false);
+    bullet.body.stop();
+
+    if (this.hidingState.isHiding) return;
+
+    const before = this.combatState;
+    this.combatState = applyDamage(before, SPITTER_PROJECTILE_DAMAGE);
+
+    if (this.combatState.hp < before.hp) {
+      this.cameras.main.shake(100, 0.01);
+      this.cameras.main.flash(150, 255, 0, 0);
+
+      if (this.combatState.isDead) {
+        this.onPlayerDeath();
+      }
+    }
+  }
+
+  updateEnemyBullets() {
+    for (const bullet of this.enemyBulletGroup.getChildren()) {
+      if (!bullet.active) continue;
+      const originX = bullet.getData('originX');
+      const originY = bullet.getData('originY');
+      if (isBulletExpired(originX, originY, bullet.x, bullet.y, SPITTER_PROJECTILE_RANGE)) {
+        bullet.setActive(false);
+        bullet.setVisible(false);
+        bullet.body.stop();
+      }
+    }
   }
 
   createHUD() {
@@ -668,11 +769,14 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  onEnemyContact() {
+  onEnemyContact(player, enemySprite) {
     if (this.hidingState.isHiding) return;
 
+    const enemyState = this.enemyStates.find(es => es.sprite === enemySprite);
+    const damage = enemyState ? enemyState.contactDamage : this.scaledEnemyDamage;
+
     const before = this.combatState;
-    this.combatState = applyDamage(before, this.scaledEnemyDamage);
+    this.combatState = applyDamage(before, damage);
 
     if (this.combatState.hp < before.hp) {
       this.cameras.main.shake(100, 0.01);
@@ -693,6 +797,12 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  getScaledChaseSpeed(type) {
+    if (type === 'crawler') return this.scaledCrawlerChaseSpeed;
+    if (type === 'spitter') return this.scaledSpitterChaseSpeed;
+    return this.scaledEnemyChaseSpeed;
+  }
+
   updateEnemies(delta) {
     const playerPos = { x: this.player.x, y: this.player.y };
     const litRoomIds = getLitRoomIds(this.switchStates);
@@ -709,7 +819,8 @@ export class GameScene extends Phaser.Scene {
         continue;
       }
 
-      const updated = updateEnemyAI(es, playerPos, this.wallSegments, delta, this.hidingState.isHiding, this.scaledEnemyChaseSpeed);
+      const chaseSpeed = this.getScaledChaseSpeed(es.type);
+      const updated = updateEnemyAI(es, playerPos, this.wallSegments, delta, this.hidingState.isHiding, chaseSpeed);
 
       es.state = updated.state;
       es.velocityX = updated.velocityX;
@@ -719,6 +830,12 @@ export class GameScene extends Phaser.Scene {
       es.lastKnownX = updated.lastKnownX;
       es.lastKnownY = updated.lastKnownY;
       es.searchTimer = updated.searchTimer;
+      es.attackCooldown = updated.attackCooldown;
+
+      if (updated.wantsToFire) {
+        this.fireEnemyBullet(es.x, es.y, playerPos.x, playerPos.y);
+        es.wantsToFire = false;
+      }
 
       es.sprite.setVelocity(updated.velocityX, updated.velocityY);
     }
@@ -998,6 +1115,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.updateBullets();
+    this.updateEnemyBullets();
     this.updateEnemies(delta);
     this.drawPlayer();
     this.updateDarkness(time);

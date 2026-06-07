@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hasLineOfSight, generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_WANDER, ENEMY_SPEED_CHASE } from '../enemy.js';
+import { hasLineOfSight, generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_WANDER, ENEMY_SPEED_CHASE, getEnemyType, CRAWLER_CHASE_SPEED, CRAWLER_WANDER_SPEED, SPITTER_CHASE_SPEED, SPITTER_ATTACK_RANGE, SPITTER_ATTACK_COOLDOWN } from '../enemy.js';
 
 describe('hasLineOfSight', () => {
   it('returns true when no walls between enemy and player', () => {
@@ -341,4 +341,183 @@ describe('generateRoomEnemies with extraCount', () => {
     expect(enemies.length).toBeLessThanOrEqual(5);
   });
 
+});
+
+describe('getEnemyType', () => {
+  it('returns basic for all rolls at run 0', () => {
+    for (let i = 0; i < 100; i++) {
+      const roll = i / 100;
+      expect(getEnemyType(() => roll, 0)).toBe('basic');
+    }
+  });
+
+  it('returns basic or crawler at run 1, never spitter', () => {
+    const types = new Set();
+    for (let i = 0; i < 100; i++) {
+      types.add(getEnemyType(() => i / 100, 1));
+    }
+    expect(types.has('basic')).toBe(true);
+    expect(types.has('crawler')).toBe(true);
+    expect(types.has('spitter')).toBe(false);
+  });
+
+  it('returns all three types at run 2+', () => {
+    const types = new Set();
+    for (let i = 0; i < 100; i++) {
+      types.add(getEnemyType(() => i / 100, 2));
+    }
+    expect(types.has('basic')).toBe(true);
+    expect(types.has('crawler')).toBe(true);
+    expect(types.has('spitter')).toBe(true);
+  });
+
+});
+
+describe('generateRoomEnemies with types', () => {
+  const ROOM_X = 0;
+  const ROOM_Y = 0;
+  const ROOM_WIDTH = 1200;
+  const ROOM_HEIGHT = 1000;
+  const WALL_THICKNESS = 16;
+
+  it('returns spawn objects with a type field', () => {
+    const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42, [], 1, 0, 0);
+    expect(enemies.length).toBeGreaterThanOrEqual(1);
+    for (const e of enemies) {
+      expect(e).toHaveProperty('type');
+      expect(['basic', 'crawler', 'spitter']).toContain(e.type);
+    }
+  });
+
+  it('produces only basic type at run 0', () => {
+    for (let seed = 0; seed < 10; seed++) {
+      const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 0, 0);
+      for (const e of enemies) {
+        expect(e.type).toBe('basic');
+      }
+    }
+  });
+
+  it('can produce all three types at run 2+', () => {
+    const types = new Set();
+    for (let seed = 0; seed < 50; seed++) {
+      const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 0, 2);
+      for (const e of enemies) {
+        types.add(e.type);
+      }
+    }
+    expect(types.has('basic')).toBe(true);
+    expect(types.has('crawler')).toBe(true);
+    expect(types.has('spitter')).toBe(true);
+  });
+});
+
+function createTypedEnemy(overrides = {}) {
+  return {
+    x: 100,
+    y: 100,
+    state: 'idle',
+    type: 'basic',
+    velocityX: 0,
+    velocityY: 0,
+    wanderTimer: 0,
+    wanderAngle: 0,
+    lastKnownX: 0,
+    lastKnownY: 0,
+    searchTimer: 0,
+    attackCooldown: 0,
+    ...overrides,
+  };
+}
+
+describe('updateEnemyAI crawler behavior', () => {
+  it('crawler chases at CRAWLER_CHASE_SPEED', () => {
+    const enemy = createTypedEnemy({ type: 'crawler', state: 'idle' });
+    const player = { x: 200, y: 100 };
+    const updated = updateEnemyAI(enemy, player, [], 16);
+
+    expect(updated.state).toBe('chase');
+    const speed = Math.sqrt(updated.velocityX ** 2 + updated.velocityY ** 2);
+    expect(speed).toBeCloseTo(CRAWLER_CHASE_SPEED, 0);
+  });
+
+  it('crawler wanders at CRAWLER_WANDER_SPEED', () => {
+    const enemy = createTypedEnemy({ type: 'crawler', state: 'idle', wanderTimer: 0 });
+    const player = { x: 9999, y: 9999 };
+    const updated = updateEnemyAI(enemy, player, [], 16);
+
+    const speed = Math.sqrt(updated.velocityX ** 2 + updated.velocityY ** 2);
+    expect(speed).toBeCloseTo(CRAWLER_WANDER_SPEED, 0);
+  });
+});
+
+describe('updateEnemyAI spitter behavior', () => {
+  it('spitter transitions from chase to attack when within attack range', () => {
+    const enemy = createTypedEnemy({ type: 'spitter', state: 'chase', x: 100, y: 100 });
+    const player = { x: 100 + SPITTER_ATTACK_RANGE - 10, y: 100 };
+    const updated = updateEnemyAI(enemy, player, [], 16);
+
+    expect(updated.state).toBe('attack');
+  });
+
+  it('spitter in attack state has zero velocity', () => {
+    const enemy = createTypedEnemy({ type: 'spitter', state: 'attack', attackCooldown: 1000, x: 100, y: 100 });
+    const player = { x: 100 + SPITTER_ATTACK_RANGE - 10, y: 100 };
+    const updated = updateEnemyAI(enemy, player, [], 16);
+
+    expect(updated.velocityX).toBe(0);
+    expect(updated.velocityY).toBe(0);
+  });
+
+  it('spitter stays in attack and does not fire while cooldown is high', () => {
+    const enemy = createTypedEnemy({ type: 'spitter', state: 'attack', attackCooldown: 1000, x: 100, y: 100 });
+    const player = { x: 100 + SPITTER_ATTACK_RANGE - 10, y: 100 };
+    const updated = updateEnemyAI(enemy, player, [], 16);
+
+    expect(updated.state).toBe('attack');
+    expect(updated.wantsToFire).toBeFalsy();
+  });
+
+  it('spitter sets wantsToFire when enough time has passed', () => {
+    const enemy = createTypedEnemy({ type: 'spitter', state: 'attack', attackCooldown: 10, x: 100, y: 100 });
+    const player = { x: 100 + SPITTER_ATTACK_RANGE - 10, y: 100 };
+    const updated = updateEnemyAI(enemy, player, [], 16);
+
+    expect(updated.wantsToFire).toBe(true);
+  });
+
+  it('spitter transitions from attack to search when LOS is lost', () => {
+    const enemy = createTypedEnemy({ type: 'spitter', state: 'attack', attackCooldown: 1000, x: 100, y: 100 });
+    const player = { x: 200, y: 100 };
+    const wall = { x1: 150, y1: 0, x2: 150, y2: 200 };
+    const updated = updateEnemyAI(enemy, player, [wall], 16);
+
+    expect(updated.state).toBe('search');
+  });
+
+  it('spitter transitions from attack to chase when player exits attack range', () => {
+    const enemy = createTypedEnemy({ type: 'spitter', state: 'attack', attackCooldown: 1000, x: 100, y: 100 });
+    const player = { x: 100 + SPITTER_ATTACK_RANGE + 50, y: 100 };
+    const updated = updateEnemyAI(enemy, player, [], 16);
+
+    expect(updated.state).toBe('chase');
+  });
+
+  it('spitter in idle transitions to chase when LOS acquired (same as basic)', () => {
+    const enemy = createTypedEnemy({ type: 'spitter', state: 'idle' });
+    const player = { x: 200, y: 100 };
+    const updated = updateEnemyAI(enemy, player, [], 16);
+
+    expect(updated.state).toBe('chase');
+  });
+
+  it('spitter uses SPITTER_CHASE_SPEED when chasing', () => {
+    const enemy = createTypedEnemy({ type: 'spitter', state: 'idle' });
+    const player = { x: 100 + SPITTER_ATTACK_RANGE + 50, y: 100 };
+    const updated = updateEnemyAI(enemy, player, [], 16);
+
+    expect(updated.state).toBe('chase');
+    const speed = Math.sqrt(updated.velocityX ** 2 + updated.velocityY ** 2);
+    expect(speed).toBeCloseTo(SPITTER_CHASE_SPEED, 0);
+  });
 });

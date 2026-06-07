@@ -866,3 +866,120 @@ Costs: same [100, 300, 800] as existing upgrades.
 - `GameScene.updateBullets()`: use `this.bulletRange` instead of `BULLET_MAX_RANGE`
 - `enemy.js.generateRoomEnemies()`: add optional `extraCount` parameter
 - `ShopScene.js`: reduce rowHeight from 80 to 60 for 7 upgrades
+
+## Multiple Enemy Types Research
+
+### Enemy Type Design (from twin-stick shooter analysis)
+
+Based on research across Enter the Gungeon, Nuclear Throne, Binding of Isaac, and Hotline Miami:
+
+**Crawler (Fast Melee)**
+- Move speed: 110-150% of player speed in roguelikes — too fast for horror. Target: 140% of zombie chase speed (112 vs 80), still below player speed (200)
+- Low HP: 30 (vs 50 for zombie) — dies in 2 hits with base weapon, 1 hit at max damage upgrade
+- Lower contact damage: 15 (vs 20) — compensated by closing distance faster
+- Same AI state machine (idle/chase/search) — just with different speed constants
+- Design role: pressure the player to move, punish camping. Creates urgency.
+- Visual: smaller circle (14px diameter vs 20px), purple/magenta color — compact = fast-reading
+
+**Spitter (Ranged)**
+- Move speed: 60 chase, 20 wander — slower than zombie, less threatening up close
+- HP: 40 — slightly less than zombie, reward closing distance
+- Low contact damage: 10 — ranged enemy, contact should be less punishing
+- Projectile damage: 15 per hit
+- Projectile speed: 200px/s (1x player movement speed — dodge window of ~0.5s at typical range)
+- Attack range: 250px (slightly less than detection range of 300)
+- Attack cooldown: 2000ms between shots
+- Telegraph: 300ms pause before firing (visual cue: color flash)
+- Design role: zone control, force aggressive play to close distance
+- Visual: blue/cyan circle (20px), distinct from red zombie and purple crawler
+
+### Spitter AI State Machine
+Extended from base 3-state FSM with a 4th `attack` state:
+```
+idle → chase (when LOS acquired within detection range)
+chase → attack (when LOS + within attack range)
+chase → search (when LOS lost)
+attack → idle (when LOS lost AND no last known position)
+attack → search (when LOS lost)
+attack → chase (when player exits attack range but still in detection range)
+search → chase (when LOS reacquired)
+search → idle (when search timer expires or arrives at last known)
+```
+
+Attack state behavior:
+- velocity = 0 (stop moving)
+- Decrement attackCooldown by delta
+- When cooldown <= 0: set `wantsToFire = true` on return object, reset cooldown to SPITTER_ATTACK_COOLDOWN
+- Scene reads `wantsToFire` and spawns projectile, resets flag
+- If player exits attack range: transition back to chase
+- If LOS lost: transition to search
+
+### Enemy Type Distribution Per Run
+```javascript
+// Run 0: 100% basic zombies (introduction)
+// Run 1: 80% basic, 20% crawler (introduce fast enemy)
+// Run 2+: 50% basic, 25% crawler, 25% spitter (full mix)
+function getEnemyType(rand, runCount) {
+  const roll = rand();
+  if (runCount >= 2) {
+    if (roll < 0.50) return 'basic';
+    if (roll < 0.75) return 'crawler';
+    return 'spitter';
+  }
+  if (runCount >= 1) {
+    if (roll < 0.80) return 'basic';
+    return 'crawler';
+  }
+  return 'basic';
+}
+```
+
+### Enemy Projectile System (Phaser 3)
+- Mirrors existing player bullet pattern exactly
+- Separate physics group: `this.enemyBulletGroup = this.physics.add.group({ maxSize: 30 })`
+- Distinct red texture via `generateTexture('enemyBullet', ...)` with `fillStyle(0xff4444)`
+- Collision: `physics.add.overlap(enemyBulletGroup, player, onEnemyBulletHitPlayer)`
+- Wall collision: `physics.add.collider(enemyBulletGroup, walls, onEnemyBulletHitWall)`
+- Also collide with furniture and doors (same as player bullets)
+- Range expiry: same `isBulletExpired` function, checked in update loop
+- Enemy bullet range: 400px (shorter than player's 600px base)
+- Object pooling via `group.get(x, y, 'enemyBullet')` — same pattern as player bullets
+
+### Visual Differentiation
+| Type | Color | Size | Shape Notes |
+|---|---|---|---|
+| Basic (zombie) | Red (0xcc3333) | 20px circle | Two dark eye dots |
+| Crawler | Purple (0x9933cc) | 14px circle | Smaller, no eyes — alien/insect feel |
+| Spitter | Blue (0x3399cc) | 20px circle | Eye dots + lighter mouth area |
+
+### Constants Summary
+```javascript
+// Crawler
+CRAWLER_MAX_HP = 30
+CRAWLER_CONTACT_DAMAGE = 15
+CRAWLER_CHASE_SPEED = 112  // 140% of base 80
+CRAWLER_WANDER_SPEED = 50  // faster wander than basic 30
+
+// Spitter
+SPITTER_MAX_HP = 40
+SPITTER_CONTACT_DAMAGE = 10
+SPITTER_CHASE_SPEED = 60
+SPITTER_WANDER_SPEED = 20
+SPITTER_ATTACK_RANGE = 250
+SPITTER_ATTACK_COOLDOWN = 2000
+SPITTER_TELEGRAPH_MS = 300
+SPITTER_PROJECTILE_SPEED = 200
+SPITTER_PROJECTILE_DAMAGE = 15
+SPITTER_PROJECTILE_RANGE = 400
+```
+
+### Architecture Changes
+- `enemy.js`: Add type constants, `getEnemyType()`, extend `generateRoomEnemies` to return `type` field, extend `updateEnemyAI` with `attack` state for spitters and type-aware speeds
+- `combat.js`: Add per-type HP and damage constants
+- `scaling.js`: No changes — functions already accept base values as parameters
+- `GameScene.js`: Generate textures per type, create enemy bullet group, extend `onEnemyContact` to read per-enemy damage, add enemy bullet update/expiry/collision handlers
+- `shooting.js`: Add `ENEMY_BULLET_SPEED`, `ENEMY_BULLET_RANGE` constants (or keep in enemy.js)
+
+### Key Design Constraint
+- `onEnemyContact()` currently accepts no arguments (line 671 in GameScene). Phaser overlap callbacks pass `(obj1, obj2)` but the function ignores them. Must change to `onEnemyContact(player, enemySprite)` to look up per-enemy damage.
+- Alternatively, store `contactDamage` as a property on the enemy state and look up by sprite reference (same pattern as `onBulletHitEnemy` finding `enemyState`)
