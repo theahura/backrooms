@@ -1,0 +1,67 @@
+import { describe, it, expect } from 'vitest';
+import { createInventoryState, pickupItem, useBattery } from '../inventory.js';
+
+describe('createInventoryState', () => {
+  it('starts with 0 batteries and 0 treasure value', () => {
+    const state = createInventoryState();
+    expect(state.batteries).toBe(0);
+    expect(state.treasureValue).toBe(0);
+  });
+});
+
+describe('pickupItem', () => {
+  it('increments battery count when picking up a battery', () => {
+    const state = createInventoryState();
+    const updated = pickupItem(state, { type: 'battery', value: 0 });
+    expect(updated.batteries).toBe(1);
+    expect(updated.treasureValue).toBe(0);
+  });
+
+  it('adds value to treasureValue when picking up treasure', () => {
+    const state = createInventoryState();
+    const updated = pickupItem(state, { type: 'gold_coin', value: 200 });
+    expect(updated.batteries).toBe(0);
+    expect(updated.treasureValue).toBe(200);
+  });
+
+  it('accumulates multiple pickups correctly', () => {
+    let state = createInventoryState();
+    state = pickupItem(state, { type: 'battery', value: 0 });
+    state = pickupItem(state, { type: 'battery', value: 0 });
+    state = pickupItem(state, { type: 'battery', value: 0 });
+    state = pickupItem(state, { type: 'copper_coin', value: 10 });
+    state = pickupItem(state, { type: 'gold_coin', value: 200 });
+    state = pickupItem(state, { type: 'gem', value: 1000 });
+
+    expect(state.batteries).toBe(3);
+    expect(state.treasureValue).toBe(1210);
+  });
+});
+
+describe('useBattery', () => {
+  it('returns used=true and decrements battery count when batteries available', () => {
+    let state = createInventoryState();
+    state = pickupItem(state, { type: 'battery', value: 0 });
+    state = pickupItem(state, { type: 'battery', value: 0 });
+
+    const result = useBattery(state);
+    expect(result.used).toBe(true);
+    expect(result.state.batteries).toBe(1);
+  });
+
+  it('returns used=false and unchanged state when no batteries', () => {
+    const state = createInventoryState();
+    const result = useBattery(state);
+    expect(result.used).toBe(false);
+    expect(result.state.batteries).toBe(0);
+  });
+
+  it('does not affect treasure value when using a battery', () => {
+    let state = createInventoryState();
+    state = pickupItem(state, { type: 'battery', value: 0 });
+    state = pickupItem(state, { type: 'gold_coin', value: 200 });
+
+    const result = useBattery(state);
+    expect(result.state.treasureValue).toBe(200);
+  });
+});

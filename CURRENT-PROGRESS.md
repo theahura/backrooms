@@ -1,0 +1,137 @@
+# Current Progress
+
+## Status: Light Switches Complete
+
+The game now has interactive light switches in some rooms. Approximately 40% of non-starting rooms (determined by seeded PRNG, seed offset +40000) have a light switch placed on a random wall near the wall center. The player can press E when near a switch (within 80px) to toggle it on. When a light switch is activated, the entire room becomes fully illuminated (darkness mask removed via fillRect in the BitmapMask), all enemies inside the room are despawned, and enemies that wander into lit rooms are frozen in place. The E-key interaction system now resolves between doors and switches by nearest Euclidean distance. This adds strategic depth — players can create safe zones by finding and activating light switches.
+
+## Completed
+- Application spec written
+- Project scaffolding: Phaser 3 + Vite + Vitest
+- Player character (green circle with direction indicator) with WASD movement
+- Mouse-based aiming (player/flashlight follows mouse cursor)
+- Camera follows player with smooth lerp
+- Single room with physics walls (player collides with walls)
+- 2D raycasting visibility system (rays cast to wall segment endpoints)
+- Flashlight cone (90-degree cone clipped from visibility polygon)
+- Darkness overlay with BitmapMask (only flashlight area is visible)
+- Player rendered above darkness layer (always visible)
+- Room furniture/obstacles (tables, shelves, desks, bookcases) that block flashlight rays and provide physics collision
+- Seeded PRNG for deterministic furniture placement (4-8 items per room, no overlaps)
+- Furniture marked with `canHide` flag for future hiding mechanics
+- Multi-room level generation with seeded growth algorithm (6 connected rooms)
+- Doorways between rooms (gaps in wall segments that allow light and movement)
+- Paired door system (if room A connects to room B, room B connects back)
+- Room wall segments support door specifications (split segments with gaps)
+- Shared seeded PRNG module (`random.js`) for deterministic level generation
+- Camera and physics bounds dynamically computed from all room positions
+- Each room gets its own furniture with a unique seed
+- Zombie enemies with line-of-sight AI
+  - LOS detection reuses `raySegmentIntersection` from visibility system (single ray from enemy to player)
+  - Three-state AI: idle (wander randomly), chase (pursue player), search (go to last known position then give up)
+  - 1-2 enemies spawn per room (except starting room), placed avoiding furniture with seeded PRNG
+  - Enemy physics: dynamic group with wall/furniture/enemy colliders and player overlap detection
+  - Enemies render at depth 60 (below darkness at 100) — automatically hidden by flashlight mask
+  - Camera shake on player-enemy contact (placeholder for future damage system)
+  - `generateTexture` creates red circle sprite for enemies
+- Player health/damage system
+  - 100 HP, 20 damage per enemy contact, 1 second invulnerability cooldown after hit
+  - Camera shake + red flash on damage, player turns red/translucent during invulnerability
+  - Death at 0 HP: camera fade to black, scene restart
+  - HUD health bar (top-left, always visible above darkness)
+- Shooting mechanics
+  - Left-click fires yellow projectile bullets toward mouse cursor
+  - Bullet speed 500, max range 600px, fire rate 200ms cooldown
+  - Bullets collide with walls and furniture (destroyed on impact)
+  - Bullets damage enemies (25 per hit, 2 shots to kill)
+  - Object pooling via Phaser physics group (max 20 active bullets)
+  - Bullets render at depth 150 (visible above darkness layer)
+- Enemy health system
+  - 50 HP per zombie, killed after 2 bullet hits
+  - Dead enemies removed from physics and AI updates
+- Flashlight battery drain system
+  - 90-second full drain, battery depletes linearly over time
+  - Flashlight cone angle scales from 100% to 25% of base as battery drains
+  - Below 25% battery: deterministic sine-wave flickering effect
+  - At 0% battery: flashlight dies completely (total darkness)
+  - HUD battery bar below health bar (yellow > orange > red color transitions)
+- Exit zone and day/exit cycle
+  - Green exit marker in top-left of room 0 (starting room)
+  - Overlap detection triggers day completion (camera fadeout + scene restart)
+  - `dayEnding` flag freezes game state during exit transition
+- Items and inventory system
+  - 5 item types with weighted rarity: battery (15%), copper coin (40%), silver coin (25%), gold coin (15%), gem (5%)
+  - Seeded PRNG spawning (seed + 20000 offset) with furniture overlap avoidance
+  - 2-5 items per room, no items in room 0 (starting room)
+  - Auto-pickup via overlap detection, items destroyed on contact
+  - Inventory tracks battery count and treasure value total
+  - Right-click uses a stored battery to recharge flashlight by 30%
+  - Browser context menu disabled for right-click input
+  - HUD shows battery count (yellow) and treasure value (gold) below the bars
+  - Items render at depth 5 (hidden by darkness, only visible in flashlight)
+  - Item textures generated once per type (rect for coins/batteries, triangle for gems)
+- Battery recharge system
+  - `rechargeBattery(state, amount)` restores flashlight charge, capped at max
+  - Recharging a depleted battery restores functionality (resets isDepleted)
+  - BATTERY_RECHARGE_AMOUNT = 30 (restores ~27 seconds of flashlight)
+- Shop/upgrade system between runs
+  - ShopScene appears after exiting or dying in the backrooms
+  - 4 upgrade categories: Battery Capacity, Flashlight Width, Max Health, Movement Speed
+  - Each upgrade has 3 tiers priced at 100/300/800 gold (~3x multiplier)
+  - Upgrades apply via parameterized state creation: `createCombatState(maxHp)`, `createBatteryState(maxCharge)`
+  - GameScene reads upgrade levels from `game.registry` in `init()` method
+  - Persistent state: shop state (gold + upgrade levels) and run counter stored in `game.registry`
+  - Death penalty: `treasureEarned: 0` passed to ShopScene (lose all treasure from that run)
+  - Level seed randomized per run via incrementing run counter
+  - Text-based UI with interactive buy buttons and level indicators
+- Closable doors on room connections
+  - ~50% of door connections (seeded PRNG, seed+30000 offset) have closable doors
+  - Doors start closed — player must open them to explore
+  - Press E within 80px to toggle open/closed
+  - Closed doors block movement (physics), flashlight (wall segments), and enemy LOS
+  - Deduplication: one physical door per connection (room.id < targetRoomId)
+  - Door graphics rendered at depth 50, interaction prompt at depth 1000
+  - Pure function module `doors.js`: createDoorStates, toggleDoor, getClosedDoorSegments, getDoorCenter, findNearestDoor
+  - Colliders for player, enemies, and bullets vs door group
+- Light switches in rooms
+  - ~40% of non-room-0 rooms (seeded PRNG, seed+40000 offset) have a light switch on a random wall
+  - Press E within 80px to toggle on/off
+  - When ON: entire room illuminated (darkness mask removed via fillRect in BitmapMask)
+  - When ON: all enemies in the room despawned, enemies freeze if they enter a lit room
+  - Switch visual: small rectangle on wall (gray when off, yellow when on) at depth 50
+  - Pure function module `lightswitch.js`: createSwitchStates, toggleSwitch, findNearestSwitch, getLitRoomIds, isPointInRoom
+  - E-key interaction resolves nearest interactable (door vs switch) by Euclidean distance
+- 174 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, and light switches
+- Documentation (docs.md files for root, src, systems, scenes)
+
+## Architecture
+- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop, doors, lightswitch) — testable without Phaser
+- `src/scenes/` — Phaser scene classes that wire systems together for rendering (GameScene for gameplay, ShopScene for upgrades between runs)
+- Darkness uses BitmapMask with invertAlpha on a Graphics overlay
+- Furniture segments use the same `{x1,y1,x2,y2}` format as walls — concatenated into `wallSegments` for raycasting with zero visibility code changes
+- Level generation uses a growth algorithm on a logical grid — rooms placed in adjacent cells, connected via paired doorways
+- Doorways are gaps in wall segments — the visibility system naturally handles light passing through without any changes
+- Enemy LOS reuses `raySegmentIntersection` from visibility.js — single ray from enemy to player, checked against wall segments
+- Enemy AI is a pure function state machine — takes state in, returns updated state with velocity
+- Combat/shooting/battery/inventory are pure function modules (`combat.js`, `shooting.js`, `battery.js`, `inventory.js`) — same architecture pattern as enemy/movement
+- Items system (`items.js`) follows same spawning pattern as enemy.js: seeded PRNG, furniture overlap avoidance, skip room 0
+- Player combat, battery, inventory, and shop states are immutable objects; enemy health is a mutable field on the enemy state (asymmetry: player state is passed through pure functions, enemy health is mutated in-place in the scene callback)
+- Item spawning uses seed offset +20000 (furniture: +0, enemies: +10000, items: +20000, doors: +30000, switches: +40000) to avoid correlation
+- Closable door segments are dynamically pushed/spliced from `wallSegments` — same mutable array pattern as furniture, but toggled at runtime via `body.enable` on Phaser static bodies
+- Light switch lit rooms are drawn as fillRect into maskGraphics (same BitmapMask as flashlight) — drawn before the flashlight early-return so lit rooms stay visible even when battery is dead
+- E-key interaction resolves nearest interactable (door or switch) by Euclidean distance via `nearestInteractable` computed in `updateInteractPrompt()`
+- Shop state persists in `game.registry` — survives scene transitions but not browser reloads
+- GameScene `init()` reads upgrade levels from registry and computes stat values via `getUpgradeValue()`
+- ShopScene `init(data)` receives `treasureEarned` via scene start data, adds to registry gold balance
+- Two-scene flow: GameScene → (exit/death) → ShopScene → (enter backrooms) → GameScene
+- Bullet physics group uses Phaser's built-in pooling (`maxSize: 20`, `getFirstDead`)
+- HUD uses `setScrollFactor(0)` at depth 1000 to stay fixed on screen above all game layers
+- Battery feeds into flashlight rendering: `getFlashlightConeAngle()` scales the cone angle passed to `getFlashlightPolygon()` — no changes to the visibility system itself
+- Exit zone uses Phaser's zone + overlap detection pattern (same as enemy contact)
+
+## Next Steps
+- Add starting room (furniture store with crack in wall)
+- Add hiding mechanics (interact with canHide furniture to become invisible to enemies)
+- Add compass/map that fills in as the player explores
+- Add localStorage persistence for cross-session save/load
+- Add more upgrade categories (weapon damage, fire rate, bullet range)
+- Add enemy scaling per run (more/tougher enemies as player gets stronger)
