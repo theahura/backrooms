@@ -384,3 +384,51 @@ project/
 - `combat.js`: `createCombatState(maxHp?)` — optional param, defaults to PLAYER_MAX_HP
 - `battery.js`: `createBatteryState(maxCharge?)` — optional param, defaults to BATTERY_MAX
 - GameScene: read `speed` and `flashlightAngle` from upgrade values instead of constants
+
+## Closable Doors Research
+
+### Architecture: Pure Module `doors.js`
+- `src/systems/doors.js` — pure functions for door state management
+- State: array of `{ id, roomId, wall, offset, width, isClosed, segment }` objects
+- `segment` is the `{ x1, y1, x2, y2 }` wall segment that blocks light/LOS when door is closed
+- `createDoorState(room, door, doorId)` — computes segment coordinates from room position + door wall/offset
+- `toggleDoor(doorStates, doorId)` — returns new array with toggled door
+- `getClosedDoorSegments(doorStates)` — returns all segments for closed doors
+- `findNearestDoor(doorStates, playerX, playerY, maxRange)` — finds closest interactable door
+
+### Door Segment Coordinates
+- North door: `{ x1: room.x + offset, y1: room.y, x2: room.x + offset + width, y2: room.y }`
+- South door: `{ x1: room.x + offset + width, y1: room.y + height, x2: room.x + offset, y2: room.y + height }`
+- East door: `{ x1: room.x + width, y1: room.y + offset, x2: room.x + width, y2: room.y + offset + width }`
+- West door: `{ x1: room.x, y1: room.y + offset + width, x2: room.x, y2: room.y + offset }`
+- South/west segments reversed to match `reverseSegments()` winding in room.js
+
+### Level Generation Changes
+- Not all doors get closable doors — use seeded PRNG to assign ~50% as closable
+- `assignClosableDoors(rooms, seed)` returns array of door state objects
+- Skip first door of room 0 to ensure player can always reach backrooms
+- Paired doors: each door connection appears in both rooms' door arrays, but we only create ONE physical door entity. Deduplicate by processing only when `room.id < door.targetRoomId`
+
+### Physics Integration
+- Separate `this.doorGroup = this.physics.add.staticGroup()` for door physics bodies
+- `body.enable = true/false` toggles collision — works for static bodies per Phaser source
+- Colliders: `collider(player, doorGroup)`, `collider(enemyGroup, doorGroup)`, `collider(bulletGroup, doorGroup)`
+- RTree: disabled bodies stay in RTree but are skipped during collision resolution (negligible overhead)
+
+### Visibility / LOS Integration
+- `wallSegments` is already mutable (furniture pushes into it)
+- On door close: push segment to `this.wallSegments`
+- On door open: splice segment out of `this.wallSegments`
+- Both `getFlashlightPolygon` and `updateEnemyAI` receive `this.wallSegments` by reference each frame — changes take effect immediately
+
+### Player Interaction
+- Press E to toggle nearest door within 80px range
+- `findNearestDoor()` returns the closest door entity to player position
+- Door center computed from room position + wall + offset + width/2
+- Visual prompt: "Press E" text shown when in range (HUD depth 1000)
+
+### Visual Rendering
+- Doors need their own Graphics object (can't selectively clear room Graphics)
+- Closed door: filled rectangle at door position with door color (0x664422 — dark wood)
+- Open door: no rectangle drawn (gap visible as normal)
+- Redraw door graphics each frame based on state

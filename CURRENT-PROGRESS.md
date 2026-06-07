@@ -1,8 +1,8 @@
 # Current Progress
 
-## Status: Shop/Upgrade System Complete
+## Status: Closable Doors Complete
 
-The game now has a shop/upgrade system between runs, completing the core Motherload-inspired gameplay loop. When the player exits the backrooms (reaches the green exit zone), they transition to a ShopScene that shows treasure earned and lets them purchase upgrades. Four upgrade categories available: Battery Capacity (+30 per level), Flashlight Width (+15 degrees per level), Max Health (+25 per level), and Movement Speed (+20 per level). Each has 3 tiers priced at 100/300/800 gold. On death, the player loses all treasure from that run (penalty). Persistent state stored in Phaser's game.registry. Level seed randomizes each run.
+The game now has interactive closable doors on some room connections. Approximately 50% of door connections (determined by seeded PRNG) have closable doors that start closed. The player can press E when near a door (within 80px) to toggle it open/closed. Closed doors block player/enemy/bullet movement (via physics bodies), flashlight rays (via wall segments in the raycasting array), and enemy line-of-sight. A "Press E" prompt appears when the player is near an interactable door. This adds tactical depth — players can close doors behind them to block pursuing zombies.
 
 ## Completed
 - Application spec written
@@ -83,11 +83,20 @@ The game now has a shop/upgrade system between runs, completing the core Motherl
   - Death penalty: `treasureEarned: 0` passed to ShopScene (lose all treasure from that run)
   - Level seed randomized per run via incrementing run counter
   - Text-based UI with interactive buy buttons and level indicators
-- 133 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, and shop
+- Closable doors on room connections
+  - ~50% of door connections (seeded PRNG, seed+30000 offset) have closable doors
+  - Doors start closed — player must open them to explore
+  - Press E within 80px to toggle open/closed
+  - Closed doors block movement (physics), flashlight (wall segments), and enemy LOS
+  - Deduplication: one physical door per connection (room.id < targetRoomId)
+  - Door graphics rendered at depth 50, interaction prompt at depth 1000
+  - Pure function module `doors.js`: createDoorStates, toggleDoor, getClosedDoorSegments, getDoorCenter, findNearestDoor
+  - Colliders for player, enemies, and bullets vs door group
+- 154 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, and doors
 - Documentation (docs.md files for root, src, systems, scenes)
 
 ## Architecture
-- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop) — testable without Phaser
+- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop, doors) — testable without Phaser
 - `src/scenes/` — Phaser scene classes that wire systems together for rendering (GameScene for gameplay, ShopScene for upgrades between runs)
 - Darkness uses BitmapMask with invertAlpha on a Graphics overlay
 - Furniture segments use the same `{x1,y1,x2,y2}` format as walls — concatenated into `wallSegments` for raycasting with zero visibility code changes
@@ -98,7 +107,8 @@ The game now has a shop/upgrade system between runs, completing the core Motherl
 - Combat/shooting/battery/inventory are pure function modules (`combat.js`, `shooting.js`, `battery.js`, `inventory.js`) — same architecture pattern as enemy/movement
 - Items system (`items.js`) follows same spawning pattern as enemy.js: seeded PRNG, furniture overlap avoidance, skip room 0
 - Player combat, battery, inventory, and shop states are immutable objects; enemy health is a mutable field on the enemy state (asymmetry: player state is passed through pure functions, enemy health is mutated in-place in the scene callback)
-- Item spawning uses seed offset +20000 (furniture: +0, enemies: +10000) to avoid correlation
+- Item spawning uses seed offset +20000 (furniture: +0, enemies: +10000, doors: +30000) to avoid correlation
+- Closable door segments are dynamically pushed/spliced from `wallSegments` — same mutable array pattern as furniture, but toggled at runtime via `body.enable` on Phaser static bodies
 - Shop state persists in `game.registry` — survives scene transitions but not browser reloads
 - GameScene `init()` reads upgrade levels from registry and computes stat values via `getUpgradeValue()`
 - ShopScene `init(data)` receives `treasureEarned` via scene start data, adds to registry gold balance
@@ -110,7 +120,6 @@ The game now has a shop/upgrade system between runs, completing the core Motherl
 
 ## Next Steps
 - Add starting room (furniture store with crack in wall)
-- Add closable doors to some room connections
 - Add light switches that prevent enemy spawning
 - Add hiding mechanics (interact with canHide furniture to become invisible to enemies)
 - Add compass/map that fills in as the player explores

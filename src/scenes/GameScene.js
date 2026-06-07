@@ -10,6 +10,7 @@ import { createBatteryState, updateBattery, getBatteryFraction, getFlashlightCon
 import { generateRoomItems, ITEM_TYPES } from '../systems/items.js';
 import { createInventoryState, pickupItem, useBattery } from '../systems/inventory.js';
 import { getUpgradeValue } from '../systems/shop.js';
+import { createDoorStates, toggleDoor, getDoorCenter, findNearestDoor, DOOR_INTERACT_RANGE } from '../systems/doors.js';
 
 const WALL_THICKNESS = 16;
 const ROOM_COUNT = 6;
@@ -46,6 +47,7 @@ export class GameScene extends Phaser.Scene {
     this.dayEnding = false;
 
     this.createRooms();
+    this.createDoors();
     this.createPlayer();
     this.createEnemies();
     this.createItemTextures();
@@ -167,6 +169,94 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  createDoors() {
+    this.doorStates = createDoorStates(this.level.rooms, this.levelSeed);
+    this.doorGroup = this.physics.add.staticGroup();
+    this.doorZones = new Map();
+    this.doorGraphics = this.add.graphics();
+    this.doorGraphics.setDepth(50);
+
+    for (const door of this.doorStates) {
+      const center = getDoorCenter(door, this.level.rooms);
+      const isHorizontal = door.wall === 'north' || door.wall === 'south';
+      const zoneW = isHorizontal ? door.width : WALL_THICKNESS;
+      const zoneH = isHorizontal ? WALL_THICKNESS : door.width;
+
+      const zone = this.add.zone(center.x, center.y, zoneW, zoneH);
+      this.doorGroup.add(zone);
+
+      if (door.isClosed) {
+        this.wallSegments.push(door.segment);
+      } else {
+        zone.body.enable = false;
+      }
+
+      this.doorZones.set(door.id, zone);
+    }
+
+    this.interactText = this.add.text(0, 0, 'Press E', {
+      fontSize: '14px',
+      color: '#ffffff',
+      fontFamily: 'monospace',
+      backgroundColor: '#000000aa',
+      padding: { x: 6, y: 3 },
+    });
+    this.interactText.setDepth(1000);
+    this.interactText.setScrollFactor(1);
+    this.interactText.setVisible(false);
+  }
+
+  onToggleDoor(doorId) {
+    const door = this.doorStates.find(d => d.id === doorId);
+    if (!door) return;
+
+    if (door.isClosed) {
+      const idx = this.wallSegments.indexOf(door.segment);
+      if (idx !== -1) this.wallSegments.splice(idx, 1);
+    }
+
+    this.doorStates = toggleDoor(this.doorStates, doorId);
+    const updatedDoor = this.doorStates.find(d => d.id === doorId);
+
+    const zone = this.doorZones.get(doorId);
+    if (updatedDoor.isClosed) {
+      zone.body.enable = true;
+      this.wallSegments.push(updatedDoor.segment);
+    } else {
+      zone.body.enable = false;
+    }
+  }
+
+  drawDoors() {
+    this.doorGraphics.clear();
+    for (const door of this.doorStates) {
+      if (!door.isClosed) continue;
+      const center = getDoorCenter(door, this.level.rooms);
+      const isHorizontal = door.wall === 'north' || door.wall === 'south';
+      const w = isHorizontal ? door.width : WALL_THICKNESS;
+      const h = isHorizontal ? WALL_THICKNESS : door.width;
+
+      this.doorGraphics.fillStyle(0x664422, 1);
+      this.doorGraphics.fillRect(center.x - w / 2, center.y - h / 2, w, h);
+    }
+  }
+
+  updateInteractPrompt() {
+    const nearest = findNearestDoor(
+      this.doorStates, this.level.rooms,
+      this.player.x, this.player.y,
+      DOOR_INTERACT_RANGE
+    );
+
+    if (nearest) {
+      const center = getDoorCenter(nearest, this.level.rooms);
+      this.interactText.setPosition(center.x - 30, center.y - 30);
+      this.interactText.setVisible(true);
+    } else {
+      this.interactText.setVisible(false);
+    }
+  }
+
   createItemTextures() {
     for (const itemType of ITEM_TYPES) {
       const gfx = this.make.graphics({ add: false });
@@ -229,6 +319,7 @@ export class GameScene extends Phaser.Scene {
 
     this.physics.add.collider(this.player, this.walls);
     this.physics.add.collider(this.player, this.furnitureGroup);
+    this.physics.add.collider(this.player, this.doorGroup);
   }
 
   createEnemies() {
@@ -276,6 +367,7 @@ export class GameScene extends Phaser.Scene {
 
     this.physics.add.collider(this.enemyGroup, this.walls);
     this.physics.add.collider(this.enemyGroup, this.furnitureGroup);
+    this.physics.add.collider(this.enemyGroup, this.doorGroup);
     this.physics.add.collider(this.enemyGroup, this.enemyGroup);
     this.physics.add.overlap(this.player, this.enemyGroup, this.onEnemyContact, null, this);
   }
@@ -291,6 +383,7 @@ export class GameScene extends Phaser.Scene {
 
     this.physics.add.collider(this.bulletGroup, this.walls, this.onBulletHitWall, null, this);
     this.physics.add.collider(this.bulletGroup, this.furnitureGroup, this.onBulletHitWall, null, this);
+    this.physics.add.collider(this.bulletGroup, this.doorGroup, this.onBulletHitWall, null, this);
     this.physics.add.overlap(this.bulletGroup, this.enemyGroup, this.onBulletHitEnemy, null, this);
   }
 
@@ -501,6 +594,7 @@ export class GameScene extends Phaser.Scene {
       A: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A),
       S: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S),
       D: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
+      E: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E),
     };
 
     this.input.mouse.disableContextMenu();
@@ -628,10 +722,23 @@ export class GameScene extends Phaser.Scene {
       this.fireCooldown = FIRE_RATE_MS;
     }
 
+    if (Phaser.Input.Keyboard.JustDown(this.keys.E)) {
+      const nearest = findNearestDoor(
+        this.doorStates, this.level.rooms,
+        this.player.x, this.player.y,
+        DOOR_INTERACT_RANGE
+      );
+      if (nearest) {
+        this.onToggleDoor(nearest.id);
+      }
+    }
+
     this.updateBullets();
     this.updateEnemies(delta);
     this.drawPlayer();
     this.updateDarkness(time);
+    this.drawDoors();
+    this.updateInteractPrompt();
     this.drawHUD();
   }
 }
