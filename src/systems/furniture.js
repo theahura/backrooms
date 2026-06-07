@@ -1,3 +1,5 @@
+import { mulberry32 } from './random.js';
+
 export const FURNITURE_TYPES = {
   table: { width: 80, height: 50, color: 0x5c3a21, canHide: true },
   shelf: { width: 100, height: 20, color: 0x6b4e2a, canHide: false },
@@ -14,16 +16,6 @@ export function createFurnitureSegments(x, y, width, height) {
     { x1: x + width, y1: y + height, x2: x, y2: y + height },
     { x1: x, y1: y + height, x2: x, y2: y },
   ];
-}
-
-function mulberry32(seed) {
-  let s = seed | 0;
-  return function () {
-    s = (s + 0x6d2b79f5) | 0;
-    let t = Math.imul(s ^ (s >>> 15), 1 | s);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
 }
 
 function rectsOverlap(a, b, padding) {

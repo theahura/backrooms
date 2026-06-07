@@ -92,3 +92,35 @@ project/
 - Shelf: 100x20, medium brown, blocks rays (tall), cannot hide
 - Desk: 60x40, dark gray, can hide under
 - Bookcase: 30x80, dark brown, blocks rays, cannot hide
+
+## Multi-Room / Level Generation Research
+
+### Algorithm Choice: Procedural Build (Growth)
+- Start from a center room, pick a wall, attach a new room through a doorway, repeat
+- Best fit for backrooms aesthetic — produces organically sprawling layouts
+- Simpler than BSP trees or WFC for a segment-based (non-tilemap) wall system
+- Grid-based placement prevents overlap: each cell in a logical grid holds at most one room
+
+### Doorways in Segment-Based Walls
+- Current `createRoomWalls()` returns 4 closed segments per room
+- Doorway = **gap in wall segment**: split one segment into two shorter segments with a gap between them
+- Example: top wall `{x1:0, y1:0, x2:100, y2:0}` with door at x=40-60 becomes `{x1:0, y1:0, x2:40, y2:0}` + `{x1:60, y1:0, x2:100, y2:0}`
+- Gaps naturally let flashlight rays pass through doorways — correct horror behavior
+- When two rooms share a wall, replace shared wall with split segments (not duplicated)
+
+### Phaser 3 Multi-Room Considerations
+- Camera: `setBounds()` to encompass full level dimensions, update dynamically if level grows
+- Physics: Arcade physics uses RTree spatial index for static bodies — hundreds of wall colliders are fine
+- Colliders: Use a single `staticGroup` for all walls across all rooms — RTree handles spatial partitioning
+- Rendering: Phaser doesn't auto-cull non-tilemap objects; for now, render all rooms (small level). Add culling later if needed
+
+### Level Data Structure
+- Room: `{ id, gridX, gridY, x, y, width, height, doors: [{wall, position, width}] }`
+- Level: array of rooms with connectivity encoded in the doors array
+- `wallSegments` stays as a single flat array for raycasting — concatenate all rooms' segments
+- Furniture: `generateRoomFurniture()` already accepts arbitrary room bounds; use room-specific seeds
+
+### Generation Strategy
+- Start with generating entire level at init (5-8 rooms) — simpler than on-demand
+- On-demand generation (infinite levels) is a future optimization
+- Seeded RNG (room seed derived from grid coordinates) for deterministic layouts

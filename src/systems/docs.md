@@ -3,35 +3,32 @@
 Path: @/src/systems
 
 ### Overview
-- Pure functions implementing game math: player movement, 2D raycasting visibility, room wall geometry, and furniture/obstacle placement
+- Pure functions implementing game math: player movement, 2D raycasting visibility, room wall geometry, multi-room level generation, furniture/obstacle placement, and seeded random number generation
 - Deliberately free of Phaser dependencies so they can be unit-tested in Node without a browser
 - Tests live in `@/src/systems/__tests__/`
 
 ### How it fits into the larger codebase
 - `@/src/scenes/GameScene.js` imports and calls all system modules during scene creation and on every frame during `update()`
+- At scene start, `GameScene` calls `generateLevel()` from `level.js`, which internally calls `createRoomWalls()` from `room.js` for each room. The returned `{ rooms, wallSegments }` structure drives all subsequent setup (rendering, physics, furniture)
+- Furniture segments from `furniture.js` are appended to the level's wall segments array so the visibility system treats them identically to walls
 - Movement system output (`{x, y}` velocity) is passed directly to `player.setVelocity()`
-- Room and furniture systems both produce segments as `{x1, y1, x2, y2}` objects -- these serve dual purpose: Phaser Arcade Physics static bodies for collision AND raycasting segments for the visibility system
 - Visibility system output (polygon as `{x, y}` point array) is drawn into a Phaser Graphics object used as a BitmapMask to punch a hole in the darkness overlay
-- The dependency flow is: `room.js` + `furniture.js` produce segments -> all segments are concatenated into a single array -> `visibility.js` consumes segments + player position -> `GameScene` renders the result
+- The dependency flow is: `level.js` calls `room.js` to produce wall segments -> `GameScene` adds furniture segments from `furniture.js` -> all segments are concatenated into a single array -> `visibility.js` consumes segments + player position -> `GameScene` renders the result
 
 ### Core Implementation
-- **Movement** (`@/src/systems/movement.js`): `calculateVelocity(keys, speed)` takes a key-state object `{up, down, left, right}` and a speed scalar, returns `{x, y}` velocity. Normalizes diagonal movement so it matches cardinal speed (prevents faster diagonal movement)
-- **Room geometry** (`@/src/systems/room.js`): `createRoomWalls(x, y, width, height)` returns four line segments forming a closed rectangular boundary. Segments are ordered clockwise: top, right, bottom, left. Each endpoint connects to the next segment's start point
-- **Furniture** (`@/src/systems/furniture.js`): two main exports:
-  - `createFurnitureSegments(x, y, width, height)` -- produces four `{x1,y1,x2,y2}` line segments forming a closed rectangle (same format as wall segments, so the visibility system handles them identically)
-  - `generateRoomFurniture(roomX, roomY, roomWidth, roomHeight, wallThickness, seed)` -- uses a seeded PRNG (mulberry32) to deterministically place furniture items within the room's inner bounds, enforcing no-overlap with 20px padding between items
-- **Visibility / raycasting** (`@/src/systems/visibility.js`): implements the "Sight and Light" 2D visibility algorithm:
-  1. `getVisibilityPolygon(origin, segments)` -- casts rays toward every segment endpoint plus tiny offset angles (plus/minus 0.00001 radians) to peek around corners, finds the closest intersection for each ray, sorts hits by angle to form a visibility polygon
-  2. `getFlashlightPolygon(origin, angle, coneAngle, segments)` -- computes the full visibility polygon then clips it to a cone defined by `angle` (center direction) and `coneAngle` (half-width). Also casts rays along the cone's left and right edges to find their wall intersections, adds the origin point, deduplicates, and sorts by angle
-  3. `raySegmentIntersection(ray, segment)` -- parametric ray-segment intersection test returning `{x, y, t}` or null. `t` is the ray parameter (distance along ray direction)
+- **Level generation** (`@/src/systems/level.js`): `generateLevel(seed, roomCount)` places rooms on a grid using a seeded growth algorithm. Starting from room 0 at grid position (0,0), each subsequent room picks a random existing room, picks a random cardinal direction, and places a new room in the adjacent grid cell if it is empty. Paired doorways are added to both rooms at the same wall offset. Returns `{ rooms, wallSegments }` where `wallSegments` is the flattened array of all room wall segments (with door gaps). This is a pure function -- no Phaser dependency
+- **Room geometry** (`@/src/systems/room.js`): `createRoomWalls(x, y, width, height, doors)` returns line segments forming a rectangular boundary with gaps for doorways. When `doors` is empty or omitted, it returns four simple wall segments (backward-compatible). When doors are present, each wall is split into sub-segments around the door gaps by `splitWall()`. Segments maintain clockwise winding order -- south and west walls are reversed via `reverseSegments()` so endpoint connectivity is preserved
+- **Random** (`@/src/systems/random.js`): exports `mulberry32(seed)` which returns a stateful function that produces deterministic floats in [0, 1). Used by both `level.js` and `furniture.js`
+- **Movement** (`@/src/systems/movement.js`): `calculateVelocity(keys, speed)` takes a key-state object and speed scalar, returns `{x, y}` velocity. Normalizes diagonal movement to match cardinal speed
+- **Furniture** (`@/src/systems/furniture.js`): `generateRoomFurniture()` uses a seeded PRNG to place furniture items within a room's inner bounds, enforcing no-overlap with 20px padding. `createFurnitureSegments()` produces four `{x1,y1,x2,y2}` segments per furniture item in the same format as wall segments
+- **Visibility / raycasting** (`@/src/systems/visibility.js`): `getFlashlightPolygon(origin, angle, coneAngle, segments)` casts rays toward every segment endpoint (plus tiny offset angles to peek around corners), finds closest intersections, clips to a cone, and returns a polygon. `getVisibilityPolygon()` is the full 360-degree version
 
 ### Things to Know
-- **Segment format is the universal integration contract**: any system that produces `{x1, y1, x2, y2}` segments can participate in the visibility/raycasting pipeline with zero changes to `visibility.js`. Furniture leverages this by producing segments in the same format as walls
+- **Segment format is the universal integration contract**: any system that produces `{x1, y1, x2, y2}` segments can participate in the visibility/raycasting pipeline with zero changes to `visibility.js`. Walls, furniture, and any future obstacles all share this format
+- **Door pairing invariant**: when `level.js` connects two rooms, both rooms receive a door entry at the same `offset` and `width` on their shared wall. The parent gets `{ wall: 'east', offset, width, targetRoomId }` and the child gets the corresponding `{ wall: 'west', offset, width, targetRoomId }`. This ensures the gaps in adjacent rooms' walls align perfectly, allowing flashlight rays and player movement to pass through
+- **Room coordinates are grid-based**: room pixel position is `gridX * ROOM_WIDTH` and `gridY * ROOM_HEIGHT`, so adjacent rooms share edges exactly. The level generator uses `ROOM_WIDTH = 1200` and `ROOM_HEIGHT = 1000` with `DOOR_WIDTH = 80`
 - The visibility algorithm casts three rays per segment endpoint (the endpoint angle, plus two tiny offsets) to handle the corner-peeking problem where a ray landing exactly on a corner would miss the space behind it
-- `getFlashlightPolygon` adds the player origin as a polygon point with angle `angle + PI` (opposite the aim direction) -- this ensures the polygon always closes back to the player position, creating a proper fan shape
-- `normalizeAngle` wraps angles to [-PI, PI] range; `isAngleInCone` uses this to correctly handle cones that straddle the -PI/+PI boundary
-- The `raySegmentIntersection` function rejects parallel rays (denominator near zero), rays pointing away from the segment (t1 < 0), and intersections outside the segment bounds (t2 < 0 or t2 > 1)
-- **Furniture placement uses a retry-based algorithm**: it attempts `count * 20` placements and discards any candidate that overlaps an already-placed item (with 20px padding). This means fewer items may be placed than requested if the room is small or densely packed
-- Furniture items carry a `canHide` boolean flag (tables and desks are hideable, shelves and bookcases are not) for future hiding mechanics -- this flag is not yet consumed by any game logic
+- **Furniture placement uses a retry-based algorithm**: it attempts `count * 20` placements and discards any candidate that overlaps an already-placed item. Fewer items may be placed than requested if the room is small or densely packed
+- `mulberry32` was extracted from `furniture.js` into `random.js` so that `level.js` could also use a seeded PRNG. Both modules import from the same source to avoid duplication
 
 Created and maintained by Nori.

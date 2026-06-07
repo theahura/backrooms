@@ -16,20 +16,23 @@ Path: @/src
 ### Core Implementation
 - **Game initialization** (`@/src/main.js`): creates a `Phaser.Game` with 1024x768 resolution, Arcade physics (zero gravity for top-down), and `GameScene` as the only registered scene
 - **Frame loop**: Phaser calls `GameScene.update()` every frame, which reads input, computes velocity via the movement system, updates physics, computes the flashlight polygon via the visibility system, and redraws the darkness overlay
+- **Level generation**: at scene creation, `GameScene` calls `generateLevel()` which produces a set of connected rooms with doorways. The scene then iterates over all rooms for rendering, physics setup, and furniture placement
 
 ```
 index.html
   -> src/main.js (Phaser.Game config)
        -> src/scenes/GameScene.js (create + update loop)
+            -> src/systems/level.js      (multi-room level generation)
             -> src/systems/movement.js   (velocity math)
             -> src/systems/visibility.js (raycasting)
-            -> src/systems/room.js       (wall segments)
+            -> src/systems/room.js       (wall segments with door support)
             -> src/systems/furniture.js  (obstacle segments + placement)
+            -> src/systems/random.js     (shared seeded PRNG)
 ```
 
 ### Things to Know
 - The player sprite uses `__DEFAULT` texture (Phaser built-in fallback) and is set invisible -- the actual player visual is drawn via a Graphics object (`playerGraphics`) so it can rotate with the aim direction
-- Camera follows the player with lerp 0.1 for smooth tracking, bounded to room dimensions
+- Camera follows the player with lerp 0.1 for smooth tracking, bounded to the full level extent (all rooms)
 - Mouse coordinates must use `pointer.worldX`/`worldY` (not `pointer.x`/`pointer.y`) because the camera moves with the player
 
 Created and maintained by Nori.

@@ -1,16 +1,14 @@
 import Phaser from 'phaser';
 import { calculateVelocity } from '../systems/movement.js';
-import { createRoomWalls } from '../systems/room.js';
 import { createFurnitureSegments, generateRoomFurniture } from '../systems/furniture.js';
 import { getFlashlightPolygon } from '../systems/visibility.js';
+import { generateLevel } from '../systems/level.js';
 
 const PLAYER_SPEED = 200;
-const ROOM_X = 0;
-const ROOM_Y = 0;
-const ROOM_WIDTH = 1200;
-const ROOM_HEIGHT = 1000;
 const WALL_THICKNESS = 16;
 const FLASHLIGHT_CONE_ANGLE = Math.PI / 4;
+const LEVEL_SEED = 42;
+const ROOM_COUNT = 6;
 
 export class GameScene extends Phaser.Scene {
   constructor() {
@@ -18,54 +16,108 @@ export class GameScene extends Phaser.Scene {
   }
 
   create() {
-    this.createRoom();
-    this.createFurniture();
+    this.level = generateLevel(LEVEL_SEED, ROOM_COUNT);
+    this.walls = this.physics.add.staticGroup();
+    this.furnitureGroup = this.physics.add.staticGroup();
+    this.wallSegments = [...this.level.wallSegments];
+
+    this.createRooms();
     this.createPlayer();
     this.setupInput();
     this.setupCamera();
     this.createDarknessOverlay();
   }
 
-  createRoom() {
+  createRooms() {
     const gfx = this.add.graphics();
-    gfx.fillStyle(0x333333, 1);
-    gfx.fillRect(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT);
+    const furnitureGfx = this.add.graphics();
+    furnitureGfx.setDepth(50);
 
-    gfx.fillStyle(0x555555, 1);
-    gfx.fillRect(ROOM_X, ROOM_Y, ROOM_WIDTH, WALL_THICKNESS);
-    gfx.fillRect(ROOM_X, ROOM_Y + ROOM_HEIGHT - WALL_THICKNESS, ROOM_WIDTH, WALL_THICKNESS);
-    gfx.fillRect(ROOM_X, ROOM_Y, WALL_THICKNESS, ROOM_HEIGHT);
-    gfx.fillRect(ROOM_X + ROOM_WIDTH - WALL_THICKNESS, ROOM_Y, WALL_THICKNESS, ROOM_HEIGHT);
+    for (const room of this.level.rooms) {
+      this.drawRoom(gfx, room);
+      this.createRoomPhysics(room);
+      this.createRoomFurniture(furnitureGfx, room);
+    }
 
-    this.walls = this.physics.add.staticGroup();
-
-    this.walls.add(
-      this.add.zone(ROOM_X + ROOM_WIDTH / 2, ROOM_Y + WALL_THICKNESS / 2, ROOM_WIDTH, WALL_THICKNESS)
-    );
-    this.walls.add(
-      this.add.zone(ROOM_X + ROOM_WIDTH / 2, ROOM_Y + ROOM_HEIGHT - WALL_THICKNESS / 2, ROOM_WIDTH, WALL_THICKNESS)
-    );
-    this.walls.add(
-      this.add.zone(ROOM_X + WALL_THICKNESS / 2, ROOM_Y + ROOM_HEIGHT / 2, WALL_THICKNESS, ROOM_HEIGHT)
-    );
-    this.walls.add(
-      this.add.zone(ROOM_X + ROOM_WIDTH - WALL_THICKNESS / 2, ROOM_Y + ROOM_HEIGHT / 2, WALL_THICKNESS, ROOM_HEIGHT)
-    );
-
-    this.wallSegments = createRoomWalls(
-      ROOM_X + WALL_THICKNESS,
-      ROOM_Y + WALL_THICKNESS,
-      ROOM_WIDTH - WALL_THICKNESS * 2,
-      ROOM_HEIGHT - WALL_THICKNESS * 2
-    );
+    this.drawDoorways(gfx);
   }
 
-  createFurniture() {
-    const furniture = generateRoomFurniture(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42);
-    const gfx = this.add.graphics();
-    gfx.setDepth(50);
+  drawRoom(gfx, room) {
+    gfx.fillStyle(0x333333, 1);
+    gfx.fillRect(room.x, room.y, room.width, room.height);
 
-    this.furnitureGroup = this.physics.add.staticGroup();
+    gfx.fillStyle(0x555555, 1);
+    gfx.fillRect(room.x, room.y, room.width, WALL_THICKNESS);
+    gfx.fillRect(room.x, room.y + room.height - WALL_THICKNESS, room.width, WALL_THICKNESS);
+    gfx.fillRect(room.x, room.y, WALL_THICKNESS, room.height);
+    gfx.fillRect(room.x + room.width - WALL_THICKNESS, room.y, WALL_THICKNESS, room.height);
+  }
+
+  drawDoorways(gfx) {
+    gfx.fillStyle(0x333333, 1);
+    for (const room of this.level.rooms) {
+      for (const door of room.doors) {
+        if (door.wall === 'north') {
+          gfx.fillRect(room.x + door.offset, room.y, door.width, WALL_THICKNESS);
+        } else if (door.wall === 'south') {
+          gfx.fillRect(room.x + door.offset, room.y + room.height - WALL_THICKNESS, door.width, WALL_THICKNESS);
+        } else if (door.wall === 'east') {
+          gfx.fillRect(room.x + room.width - WALL_THICKNESS, room.y + door.offset, WALL_THICKNESS, door.width);
+        } else if (door.wall === 'west') {
+          gfx.fillRect(room.x, room.y + door.offset, WALL_THICKNESS, door.width);
+        }
+      }
+    }
+  }
+
+  createRoomPhysics(room) {
+    const addHorizontalWall = (startX, y, wallLength, doors, thickness) => {
+      const sorted = [...doors].sort((a, b) => a.offset - b.offset);
+      let cursor = 0;
+      for (const door of sorted) {
+        if (door.offset > cursor) {
+          const segW = door.offset - cursor;
+          this.walls.add(this.add.zone(startX + cursor + segW / 2, y, segW, thickness));
+        }
+        cursor = door.offset + door.width;
+      }
+      if (cursor < wallLength) {
+        const segW = wallLength - cursor;
+        this.walls.add(this.add.zone(startX + cursor + segW / 2, y, segW, thickness));
+      }
+    };
+
+    const addVerticalWall = (x, startY, wallLength, doors, thickness) => {
+      const sorted = [...doors].sort((a, b) => a.offset - b.offset);
+      let cursor = 0;
+      for (const door of sorted) {
+        if (door.offset > cursor) {
+          const segH = door.offset - cursor;
+          this.walls.add(this.add.zone(x, startY + cursor + segH / 2, thickness, segH));
+        }
+        cursor = door.offset + door.width;
+      }
+      if (cursor < wallLength) {
+        const segH = wallLength - cursor;
+        this.walls.add(this.add.zone(x, startY + cursor + segH / 2, thickness, segH));
+      }
+    };
+
+    const northDoors = room.doors.filter(d => d.wall === 'north');
+    const southDoors = room.doors.filter(d => d.wall === 'south');
+    const eastDoors = room.doors.filter(d => d.wall === 'east');
+    const westDoors = room.doors.filter(d => d.wall === 'west');
+
+    addHorizontalWall(room.x, room.y + WALL_THICKNESS / 2, room.width, northDoors, WALL_THICKNESS);
+    addHorizontalWall(room.x, room.y + room.height - WALL_THICKNESS / 2, room.width, southDoors, WALL_THICKNESS);
+    addVerticalWall(room.x + room.width - WALL_THICKNESS / 2, room.y, room.height, eastDoors, WALL_THICKNESS);
+    addVerticalWall(room.x + WALL_THICKNESS / 2, room.y, room.height, westDoors, WALL_THICKNESS);
+  }
+
+  createRoomFurniture(gfx, room) {
+    const furniture = generateRoomFurniture(
+      room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed
+    );
 
     for (const item of furniture) {
       gfx.fillStyle(item.color, 1);
@@ -85,8 +137,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   createPlayer() {
-    const playerX = ROOM_X + ROOM_WIDTH / 2;
-    const playerY = ROOM_Y + ROOM_HEIGHT / 2;
+    const spawnRoom = this.level.rooms[0];
+    const playerX = spawnRoom.x + spawnRoom.width / 2;
+    const playerY = spawnRoom.y + spawnRoom.height / 2;
 
     this.player = this.physics.add.sprite(playerX, playerY, '__DEFAULT');
     this.player.setVisible(false);
@@ -122,8 +175,17 @@ export class GameScene extends Phaser.Scene {
   }
 
   setupCamera() {
+    const allRooms = this.level.rooms;
+    const minX = Math.min(...allRooms.map(r => r.x));
+    const minY = Math.min(...allRooms.map(r => r.y));
+    const maxX = Math.max(...allRooms.map(r => r.x + r.width));
+    const maxY = Math.max(...allRooms.map(r => r.y + r.height));
+
     this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
-    this.cameras.main.setBounds(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT);
+    this.cameras.main.setBounds(minX, minY, maxX - minX, maxY - minY);
+    this.physics.world.setBounds(minX, minY, maxX - minX, maxY - minY);
+
+    this.levelBounds = { minX, minY, maxX, maxY };
   }
 
   createDarknessOverlay() {
@@ -162,13 +224,9 @@ export class GameScene extends Phaser.Scene {
       this.wallSegments
     );
 
+    const { minX, minY, maxX, maxY } = this.levelBounds;
     this.darkGraphics.fillStyle(0x000000, 0.95);
-    this.darkGraphics.fillRect(
-      ROOM_X - 100,
-      ROOM_Y - 100,
-      ROOM_WIDTH + 200,
-      ROOM_HEIGHT + 200
-    );
+    this.darkGraphics.fillRect(minX - 100, minY - 100, maxX - minX + 200, maxY - minY + 200);
 
     if (polygon.length >= 3) {
       this.maskGraphics.fillStyle(0xffffff);
