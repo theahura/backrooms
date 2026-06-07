@@ -9,11 +9,9 @@ import { calculateBulletVelocity, canFire, updateFireCooldown, isBulletExpired, 
 import { createBatteryState, updateBattery, getBatteryFraction, getFlashlightConeAngle, shouldFlicker, rechargeBattery, BATTERY_RECHARGE_AMOUNT } from '../systems/battery.js';
 import { generateRoomItems, ITEM_TYPES } from '../systems/items.js';
 import { createInventoryState, pickupItem, useBattery } from '../systems/inventory.js';
+import { getUpgradeValue } from '../systems/shop.js';
 
-const PLAYER_SPEED = 200;
 const WALL_THICKNESS = 16;
-const FLASHLIGHT_CONE_ANGLE = Math.PI / 4;
-const LEVEL_SEED = 42;
 const ROOM_COUNT = 6;
 
 export class GameScene extends Phaser.Scene {
@@ -21,15 +19,28 @@ export class GameScene extends Phaser.Scene {
     super('GameScene');
   }
 
+  init() {
+    const shopState = this.registry.get('shopState');
+    const levels = shopState ? shopState.upgrades : { battery: 0, flashlight: 0, health: 0, speed: 0 };
+    this.maxCharge = getUpgradeValue('battery', levels.battery);
+    this.flashlightAngle = getUpgradeValue('flashlight', levels.flashlight);
+    this.maxHp = getUpgradeValue('health', levels.health);
+    this.playerSpeed = getUpgradeValue('speed', levels.speed);
+
+    const runCount = this.registry.get('runCount') ?? 0;
+    this.registry.set('runCount', runCount + 1);
+    this.levelSeed = runCount + 1;
+  }
+
   create() {
-    this.level = generateLevel(LEVEL_SEED, ROOM_COUNT);
+    this.level = generateLevel(this.levelSeed, ROOM_COUNT);
     this.walls = this.physics.add.staticGroup();
     this.furnitureGroup = this.physics.add.staticGroup();
     this.wallSegments = [...this.level.wallSegments];
 
     this.roomFurniture = new Map();
-    this.combatState = createCombatState();
-    this.batteryState = createBatteryState();
+    this.combatState = createCombatState(this.maxHp);
+    this.batteryState = createBatteryState(this.maxCharge);
     this.inventoryState = createInventoryState();
     this.fireCooldown = 0;
     this.dayEnding = false;
@@ -330,7 +341,7 @@ export class GameScene extends Phaser.Scene {
     this.player.body.enable = false;
     this.cameras.main.fadeOut(1000, 0, 0, 0);
     this.cameras.main.once('camerafadeoutcomplete', () => {
-      this.scene.restart();
+      this.scene.start('ShopScene', { treasureEarned: this.inventoryState.treasureValue });
     });
   }
 
@@ -403,7 +414,7 @@ export class GameScene extends Phaser.Scene {
     this.player.body.enable = false;
     this.cameras.main.fadeOut(500, 0, 0, 0);
     this.cameras.main.once('camerafadeoutcomplete', () => {
-      this.scene.restart();
+      this.scene.start('ShopScene', { treasureEarned: 0 });
     });
   }
 
@@ -554,7 +565,7 @@ export class GameScene extends Phaser.Scene {
     this.darkGraphics.fillStyle(0x000000, 0.95);
     this.darkGraphics.fillRect(minX - 100, minY - 100, maxX - minX + 200, maxY - minY + 200);
 
-    const coneAngle = getFlashlightConeAngle(this.batteryState, FLASHLIGHT_CONE_ANGLE);
+    const coneAngle = getFlashlightConeAngle(this.batteryState, this.flashlightAngle);
     if (coneAngle <= 0 || shouldFlicker(this.batteryState, time)) return;
 
     const origin = { x: this.player.x, y: this.player.y };
@@ -597,7 +608,7 @@ export class GameScene extends Phaser.Scene {
       right: this.keys.D.isDown,
     };
 
-    const velocity = calculateVelocity(keyState, PLAYER_SPEED);
+    const velocity = calculateVelocity(keyState, this.playerSpeed);
     this.player.setVelocity(velocity.x, velocity.y);
 
     const pointer = this.input.activePointer;

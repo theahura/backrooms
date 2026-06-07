@@ -4,10 +4,10 @@ export const DAMAGE_COOLDOWN_MS = 1000;
 export const ENEMY_MAX_HP = 50;
 export const BULLET_DAMAGE = 25;
 
-export function createCombatState() {
+export function createCombatState(maxHp = PLAYER_MAX_HP) {
   return {
-    hp: PLAYER_MAX_HP,
-    maxHp: PLAYER_MAX_HP,
+    hp: maxHp,
+    maxHp,
     damageCooldown: 0,
     isDead: false,
   };

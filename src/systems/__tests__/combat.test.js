@@ -15,6 +15,15 @@ describe('createCombatState', () => {
     expect(getHealthFraction(state)).toBe(1);
     expect(state.isDead).toBe(false);
   });
+
+  it('accepts custom max health', () => {
+    const state = createCombatState(150);
+    expect(getHealthFraction(state)).toBe(1);
+    expect(state.isDead).toBe(false);
+    const hit = applyDamage(state, 100);
+    expect(getHealthFraction(hit)).toBeGreaterThan(0);
+    expect(hit.isDead).toBe(false);
+  });
 });
 
 describe('applyDamage', () => {

@@ -320,3 +320,67 @@ project/
 - `src/systems/items.js` — item type definitions, room item generation (pure functions)
 - `src/systems/inventory.js` — inventory state creation, item pickup logic, battery use (pure functions)
 - `rechargeBattery` added to existing `src/systems/battery.js`
+
+## Shop/Upgrade System Research
+
+### Scene Flow Design
+- GameScene → ShopScene → GameScene (no separate summary scene — shop screen shows treasure earned)
+- Use `this.scene.start('ShopScene', data)` to pass treasure value on exit
+- Use `this.game.registry` for persistent upgrade state across scene transitions
+- Registry persists for entire game lifetime, never cleared by scene transitions
+- Data arrives in receiving scene's `init(data)` method (runs before `create()`)
+- On death: go to ShopScene with `treasureEarned: 0` (lose all treasure from that run — items stay in backrooms)
+
+### Scene Data Passing Pattern
+- `scene.start('TargetScene', { key: value })` — data received in both `init(data)` and `create(data)`
+- `this.registry.set(key, value)` / `this.registry.get(key)` — game-wide persistent store
+- Registry for persistent state (gold balance, purchased upgrades), start() data for per-transition context (treasure earned this run)
+- Gotcha: `scene.restart()` doesn't re-run constructor — must reset instance variables in `init()`
+- Gotcha: Scene operations are queued, execute at next Scene Manager update, not immediately
+
+### Upgrade Categories & Pricing
+- Inspired by Motherload's surface shop: player sells loot, buys from categories
+- Motherload uses shared tier pricing across all categories (~3-5x multiplier per tier)
+- Pricing tiers: 100, 300, 800, 2000 (roughly 3x multiplier, 4 tiers per stat)
+- Keep total tiers to 3-4 per stat to preserve tension — horror game should never let player feel fully safe
+
+### Upgradeable Stats
+| Stat | Base Value | Per-Tier Boost | Max Tiers | File |
+|---|---|---|---|---|
+| Battery capacity | 100 (90s) | +30 per tier | 3 | battery.js |
+| Flashlight beam width | PI/4 (45°) | +PI/12 per tier | 3 | GameScene.js |
+| Max health | 100 | +25 per tier | 3 | combat.js |
+| Movement speed | 200 | +20 per tier | 3 | GameScene.js |
+
+### Architecture: Two New Modules
+- `src/systems/shop.js` — pure functions: upgrade definitions, pricing, purchase validation, state management
+  - `UPGRADES` array: `{ id, name, description, maxLevel, costs: [100, 300, 800], effect: { stat, perLevel } }`
+  - `createShopState()` returns `{ gold: 0, upgrades: { battery: 0, flashlight: 0, health: 0, speed: 0 } }`
+  - `canPurchase(state, upgradeId)` — checks gold and max level
+  - `purchaseUpgrade(state, upgradeId)` — returns updated state (deducts gold, increments level)
+  - `getUpgradeValue(upgradeId, level)` — returns the actual stat value for a given upgrade level
+- `src/scenes/ShopScene.js` — Phaser scene for shop UI
+  - Text-based UI with interactive buttons (Phaser's `setInteractive` + pointer events)
+  - Shows treasure earned this run, total gold balance
+  - Lists upgrades with current level, cost of next level, buy button
+  - "Enter Backrooms" button to start next run
+  - Dark theme consistent with horror aesthetic
+
+### Phaser UI Patterns
+- Buttons: `this.add.text(x, y, 'Buy', style).setInteractive({ useHandCursor: true }).on('pointerdown', cb)`
+- Pointer events: `pointerover`, `pointerout`, `pointerdown`, `pointerup` for button states
+- No need for RexUI plugin — simple text buttons suffice for basic shop
+
+### GameScene Modifications
+- `init(data)` — read upgrades from registry, apply to state creation
+- `onDayComplete()` — `this.scene.start('ShopScene', { treasureEarned: this.inventoryState.treasureValue })`
+- `onPlayerDeath()` — `this.scene.start('ShopScene', { treasureEarned: 0 })`
+- State creation functions need to accept override values from upgrades
+- `createBatteryState()` already has `maxCharge` field — pass upgraded value
+- `createCombatState()` needs to accept `maxHp` parameter
+- Level seed should randomize between runs (use `Date.now()` or incrementing counter)
+
+### Modification to Existing Pure Functions
+- `combat.js`: `createCombatState(maxHp?)` — optional param, defaults to PLAYER_MAX_HP
+- `battery.js`: `createBatteryState(maxCharge?)` — optional param, defaults to BATTERY_MAX
+- GameScene: read `speed` and `flashlightAngle` from upgrade values instead of constants

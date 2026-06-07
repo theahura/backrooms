@@ -15,6 +15,15 @@ describe('createBatteryState', () => {
     expect(getBatteryFraction(state)).toBe(1);
     expect(state.isDepleted).toBe(false);
   });
+
+  it('accepts custom max charge for longer battery life', () => {
+    const state = createBatteryState(130);
+    expect(getBatteryFraction(state)).toBe(1);
+    expect(state.isDepleted).toBe(false);
+    const drained = updateBattery(state, 90000);
+    expect(getBatteryFraction(drained)).toBeGreaterThan(0);
+    expect(drained.isDepleted).toBe(false);
+  });
 });
 
 describe('updateBattery', () => {

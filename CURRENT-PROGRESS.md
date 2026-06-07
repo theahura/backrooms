@@ -1,8 +1,8 @@
 # Current Progress
 
-## Status: Items & Inventory System Complete
+## Status: Shop/Upgrade System Complete
 
-The game now has collectible items and an inventory system. Rooms contain 2-5 items (batteries, copper/silver/gold coins, gems) spawned with seeded PRNG and weighted rarity. Auto-pickup on overlap. Batteries are stored and usable via right-click to recharge the flashlight (+30%). Treasure value accumulates for the future shop system. HUD shows health bar, battery bar, battery count, and treasure value.
+The game now has a shop/upgrade system between runs, completing the core Motherload-inspired gameplay loop. When the player exits the backrooms (reaches the green exit zone), they transition to a ShopScene that shows treasure earned and lets them purchase upgrades. Four upgrade categories available: Battery Capacity (+30 per level), Flashlight Width (+15 degrees per level), Max Health (+25 per level), and Movement Speed (+20 per level). Each has 3 tiers priced at 100/300/800 gold. On death, the player loses all treasure from that run (penalty). Persistent state stored in Phaser's game.registry. Level seed randomizes each run.
 
 ## Completed
 - Application spec written
@@ -73,12 +73,22 @@ The game now has collectible items and an inventory system. Rooms contain 2-5 it
   - `rechargeBattery(state, amount)` restores flashlight charge, capped at max
   - Recharging a depleted battery restores functionality (resets isDepleted)
   - BATTERY_RECHARGE_AMOUNT = 30 (restores ~27 seconds of flashlight)
-- 115 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, and inventory
+- Shop/upgrade system between runs
+  - ShopScene appears after exiting or dying in the backrooms
+  - 4 upgrade categories: Battery Capacity, Flashlight Width, Max Health, Movement Speed
+  - Each upgrade has 3 tiers priced at 100/300/800 gold (~3x multiplier)
+  - Upgrades apply via parameterized state creation: `createCombatState(maxHp)`, `createBatteryState(maxCharge)`
+  - GameScene reads upgrade levels from `game.registry` in `init()` method
+  - Persistent state: shop state (gold + upgrade levels) and run counter stored in `game.registry`
+  - Death penalty: `treasureEarned: 0` passed to ShopScene (lose all treasure from that run)
+  - Level seed randomized per run via incrementing run counter
+  - Text-based UI with interactive buy buttons and level indicators
+- 133 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, and shop
 - Documentation (docs.md files for root, src, systems, scenes)
 
 ## Architecture
-- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory) — testable without Phaser
-- `src/scenes/` — Phaser scene classes that wire systems together for rendering
+- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop) — testable without Phaser
+- `src/scenes/` — Phaser scene classes that wire systems together for rendering (GameScene for gameplay, ShopScene for upgrades between runs)
 - Darkness uses BitmapMask with invertAlpha on a Graphics overlay
 - Furniture segments use the same `{x1,y1,x2,y2}` format as walls — concatenated into `wallSegments` for raycasting with zero visibility code changes
 - Level generation uses a growth algorithm on a logical grid — rooms placed in adjacent cells, connected via paired doorways
@@ -87,19 +97,23 @@ The game now has collectible items and an inventory system. Rooms contain 2-5 it
 - Enemy AI is a pure function state machine — takes state in, returns updated state with velocity
 - Combat/shooting/battery/inventory are pure function modules (`combat.js`, `shooting.js`, `battery.js`, `inventory.js`) — same architecture pattern as enemy/movement
 - Items system (`items.js`) follows same spawning pattern as enemy.js: seeded PRNG, furniture overlap avoidance, skip room 0
-- Player combat, battery, and inventory states are immutable objects; enemy health is a mutable field on the enemy state (asymmetry: player state is passed through pure functions, enemy health is mutated in-place in the scene callback)
+- Player combat, battery, inventory, and shop states are immutable objects; enemy health is a mutable field on the enemy state (asymmetry: player state is passed through pure functions, enemy health is mutated in-place in the scene callback)
 - Item spawning uses seed offset +20000 (furniture: +0, enemies: +10000) to avoid correlation
+- Shop state persists in `game.registry` — survives scene transitions but not browser reloads
+- GameScene `init()` reads upgrade levels from registry and computes stat values via `getUpgradeValue()`
+- ShopScene `init(data)` receives `treasureEarned` via scene start data, adds to registry gold balance
+- Two-scene flow: GameScene → (exit/death) → ShopScene → (enter backrooms) → GameScene
 - Bullet physics group uses Phaser's built-in pooling (`maxSize: 20`, `getFirstDead`)
 - HUD uses `setScrollFactor(0)` at depth 1000 to stay fixed on screen above all game layers
 - Battery feeds into flashlight rendering: `getFlashlightConeAngle()` scales the cone angle passed to `getFlashlightPolygon()` — no changes to the visibility system itself
 - Exit zone uses Phaser's zone + overlap detection pattern (same as enemy contact)
 
 ## Next Steps
-- Add shop/upgrade system between runs (trade valuables for upgrades)
-- Add day-complete scoring/summary screen (show items collected, treasure earned)
 - Add starting room (furniture store with crack in wall)
 - Add closable doors to some room connections
 - Add light switches that prevent enemy spawning
 - Add hiding mechanics (interact with canHide furniture to become invisible to enemies)
-- Add day-complete scoring/summary screen (currently just restarts)
 - Add compass/map that fills in as the player explores
+- Add localStorage persistence for cross-session save/load
+- Add more upgrade categories (weapon damage, fire rate, bullet range)
+- Add enemy scaling per run (more/tougher enemies as player gets stronger)
