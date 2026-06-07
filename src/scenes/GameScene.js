@@ -15,6 +15,7 @@ import { createSwitchStates, toggleSwitch, findNearestSwitch, getLitRoomIds, isP
 import { createHidingState, enterHiding, exitHiding, findNearestHideable, HIDE_INTERACT_RANGE } from '../systems/hiding.js';
 import { saveGame } from '../systems/persistence.js';
 import { createExplorationState, updateExploration, getMinimapData, MINIMAP_COLORS } from '../systems/exploration.js';
+import { generateStoreLayout, generateCrackPoints, getExitPosition, STORE_FLOOR_COLOR, STORE_WALL_COLOR } from '../systems/startroom.js';
 
 const WALL_THICKNESS = 16;
 const ROOM_COUNT = 6;
@@ -62,6 +63,7 @@ export class GameScene extends Phaser.Scene {
     this.createItems();
     this.createBullets();
     this.createExitZone();
+    this.createCrackVisual();
     this.setupInput();
     this.setupCamera();
     this.createDarknessOverlay();
@@ -83,10 +85,13 @@ export class GameScene extends Phaser.Scene {
   }
 
   drawRoom(gfx, room) {
-    gfx.fillStyle(0x333333, 1);
+    const floorColor = room.id === 0 ? STORE_FLOOR_COLOR : 0x333333;
+    const wallColor = room.id === 0 ? STORE_WALL_COLOR : 0x555555;
+
+    gfx.fillStyle(floorColor, 1);
     gfx.fillRect(room.x, room.y, room.width, room.height);
 
-    gfx.fillStyle(0x555555, 1);
+    gfx.fillStyle(wallColor, 1);
     gfx.fillRect(room.x, room.y, room.width, WALL_THICKNESS);
     gfx.fillRect(room.x, room.y + room.height - WALL_THICKNESS, room.width, WALL_THICKNESS);
     gfx.fillRect(room.x, room.y, WALL_THICKNESS, room.height);
@@ -94,8 +99,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   drawDoorways(gfx) {
-    gfx.fillStyle(0x333333, 1);
     for (const room of this.level.rooms) {
+      const floorColor = room.id === 0 ? STORE_FLOOR_COLOR : 0x333333;
+      gfx.fillStyle(floorColor, 1);
       for (const door of room.doors) {
         if (door.wall === 'north') {
           gfx.fillRect(room.x + door.offset, room.y, door.width, WALL_THICKNESS);
@@ -155,9 +161,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   createRoomFurniture(gfx, room) {
-    const furniture = generateRoomFurniture(
-      room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed
-    );
+    const furniture = room.id === 0
+      ? generateStoreLayout(room.x, room.y, room.width, room.height, WALL_THICKNESS)
+      : generateRoomFurniture(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed);
     this.roomFurniture.set(room.id, furniture);
 
     for (const item of furniture) {
@@ -500,8 +506,7 @@ export class GameScene extends Phaser.Scene {
 
   createExitZone() {
     const room = this.level.rooms[0];
-    const exitX = room.x + WALL_THICKNESS + 32;
-    const exitY = room.y + WALL_THICKNESS + 32;
+    const { x: exitX, y: exitY } = getExitPosition(room, WALL_THICKNESS);
     const exitSize = 64;
     this.exitPosition = { x: exitX, y: exitY };
 
@@ -515,6 +520,81 @@ export class GameScene extends Phaser.Scene {
     this.exitZone = this.add.zone(exitX, exitY, exitSize, exitSize);
     this.physics.add.existing(this.exitZone, true);
     this.physics.add.overlap(this.player, this.exitZone, this.onDayComplete, null, this);
+  }
+
+  createCrackVisual() {
+    const room = this.level.rooms[0];
+    const door = room.doors[0];
+    if (!door) return;
+
+    let crackX, crackY, crackW, crackH;
+    if (door.wall === 'north') {
+      crackX = room.x + door.offset + door.width / 2;
+      crackY = room.y;
+      crackW = door.width;
+      crackH = WALL_THICKNESS;
+    } else if (door.wall === 'south') {
+      crackX = room.x + door.offset + door.width / 2;
+      crackY = room.y + room.height - WALL_THICKNESS;
+      crackW = door.width;
+      crackH = WALL_THICKNESS;
+    } else if (door.wall === 'east') {
+      crackX = room.x + room.width - WALL_THICKNESS;
+      crackY = room.y + door.offset + door.width / 2;
+      crackW = WALL_THICKNESS;
+      crackH = door.width;
+    } else {
+      crackX = room.x;
+      crackY = room.y + door.offset + door.width / 2;
+      crackW = WALL_THICKNESS;
+      crackH = door.width;
+    }
+
+    const isVerticalWall = door.wall === 'east' || door.wall === 'west';
+    const crackLength = isVerticalWall ? crackH : crackW;
+    const segments = 10;
+
+    const points = isVerticalWall
+      ? generateCrackPoints(crackX + WALL_THICKNESS / 2, crackY - crackLength / 2, crackLength, segments, true)
+      : generateCrackPoints(crackX - crackLength / 2, crackY + WALL_THICKNESS / 2, crackLength, segments, false);
+
+    this.crackGlowGraphics = this.add.graphics();
+    this.crackGlowGraphics.setDepth(1);
+    this.crackGlowCenter = { x: crackX + (isVerticalWall ? WALL_THICKNESS / 2 : 0), y: crackY + (isVerticalWall ? 0 : WALL_THICKNESS / 2) };
+    this.crackGlowSize = { w: isVerticalWall ? WALL_THICKNESS + 8 : crackLength + 8, h: isVerticalWall ? crackLength + 8 : WALL_THICKNESS + 8 };
+
+    const crackGfx = this.add.graphics();
+    crackGfx.setDepth(2);
+
+    crackGfx.lineStyle(3, 0x111111, 0.9);
+    crackGfx.beginPath();
+    crackGfx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) {
+      crackGfx.lineTo(points[i].x, points[i].y);
+    }
+    crackGfx.strokePath();
+
+    const secondaryOffsetX = isVerticalWall ? -2 : 0;
+    const secondaryOffsetY = isVerticalWall ? 0 : -2;
+    crackGfx.lineStyle(1, 0x222222, 0.6);
+    crackGfx.beginPath();
+    crackGfx.moveTo(points[0].x + secondaryOffsetX, points[0].y + secondaryOffsetY);
+    for (let i = 1; i < points.length; i++) {
+      crackGfx.lineTo(points[i].x + secondaryOffsetX, points[i].y + secondaryOffsetY);
+    }
+    crackGfx.strokePath();
+  }
+
+  updateCrackGlow(time) {
+    if (!this.crackGlowGraphics) return;
+    this.crackGlowGraphics.clear();
+    const alpha = 0.15 + 0.1 * Math.sin(time * 0.003);
+    this.crackGlowGraphics.fillStyle(0xd4c073, alpha);
+    const cx = this.crackGlowCenter.x;
+    const cy = this.crackGlowCenter.y;
+    const hw = this.crackGlowSize.w / 2;
+    const hh = this.crackGlowSize.h / 2;
+    this.crackGlowGraphics.fillRect(cx - hw, cy - hh, hw * 2, hh * 2);
   }
 
   onDayComplete() {
@@ -606,6 +686,7 @@ export class GameScene extends Phaser.Scene {
   updateEnemies(delta) {
     const playerPos = { x: this.player.x, y: this.player.y };
     const litRoomIds = getLitRoomIds(this.switchStates);
+    if (!litRoomIds.includes(0)) litRoomIds.push(0);
     const litRooms = litRoomIds.map(id => this.level.rooms.find(r => r.id === id)).filter(Boolean);
 
     for (const es of this.enemyStates) {
@@ -807,6 +888,7 @@ export class GameScene extends Phaser.Scene {
     this.darkGraphics.fillRect(minX - 100, minY - 100, maxX - minX + 200, maxY - minY + 200);
 
     const litRoomIds = getLitRoomIds(this.switchStates);
+    if (!litRoomIds.includes(0)) litRoomIds.push(0);
     for (const roomId of litRoomIds) {
       const room = this.level.rooms.find(r => r.id === roomId);
       if (!room) continue;
@@ -909,6 +991,7 @@ export class GameScene extends Phaser.Scene {
     this.updateEnemies(delta);
     this.drawPlayer();
     this.updateDarkness(time);
+    this.updateCrackGlow(time);
     this.drawDoors();
     this.drawSwitches();
     this.explorationState = updateExploration(this.explorationState, this.player.x, this.player.y, this.level.rooms);

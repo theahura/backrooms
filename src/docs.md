@@ -10,7 +10,7 @@ Path: @/src
 - `@/index.html` loads `@/src/main.js` as an ES module via `<script type="module">`
 - `@/src/main.js` wires Phaser config (resolution, physics, renderer) and registers both scene classes (GameScene, ShopScene) with the engine
 - `@/src/scenes/` contains Phaser Scene subclasses: `GameScene` for gameplay and `ShopScene` for the between-run upgrade shop
-- `@/src/systems/` contains pure functions that scenes call for game math (movement, visibility, room geometry, furniture placement, enemy spawning/AI, combat/health, shooting/bullets, battery/flashlight drain, item spawning, inventory management, shop/upgrade logic, door state management, light switch state management, hiding state management, exploration/minimap tracking, and localStorage persistence)
+- `@/src/systems/` contains pure functions that scenes call for game math (movement, visibility, room geometry, furniture placement, starting room layout, enemy spawning/AI, combat/health, shooting/bullets, battery/flashlight drain, item spawning, inventory management, shop/upgrade logic, door state management, light switch state management, hiding state management, exploration/minimap tracking, and localStorage persistence)
 - The architecture enforces a one-way dependency: scenes import from systems, but systems never import from scenes or Phaser. Systems may import from each other (e.g., `enemy.js` imports `raySegmentIntersection` from `visibility.js`)
 
 ### Core Implementation
@@ -38,6 +38,7 @@ index.html
        |    -> src/systems/lightswitch.js (switch state + toggle + lit room detection)
        |    -> src/systems/hiding.js     (hiding state + enter/exit + nearest hideable)
        |    -> src/systems/exploration.js (exploration state + minimap data computation)
+       |    -> src/systems/startroom.js  (store layout, crack points, exit position, store colors)
        |    -> src/systems/shop.js       (getUpgradeValue for stat initialization)
        |    -> src/systems/persistence.js (saveGame after runCount increment)
        |    -> src/systems/random.js     (shared seeded PRNG)

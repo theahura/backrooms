@@ -1,8 +1,8 @@
 # Current Progress
 
-## Status: Fog-of-War Minimap Added
+## Status: Furniture Store Starting Room Added
 
-Added a minimap in the top-right corner of the screen that reveals rooms as the player visits them. Pure function module `exploration.js` tracks visited rooms via point-in-AABB room detection (reuses `isPointInRoom` from `lightswitch.js`) and computes scaled minimap rendering data. The minimap shows visited rooms as dark gray rectangles, the current room brighter, plus a green player dot and green exit marker. Exploration state resets each run.
+Transformed room 0 into a visually distinct furniture store with warm wood-tone colors, hand-crafted store furniture, permanent lighting, and a crack in the wall leading to the backrooms. Pure function module `startroom.js` generates the store layout, crack visual points, and exit position. The crack has a pulsing sickly-yellow glow effect. Room 0 is permanently lit (enemies that wander in freeze). Exit zone repositioned to center-north (store entrance).
 
 ## Completed
 - Application spec written
@@ -124,7 +124,17 @@ Added a minimap in the top-right corner of the screen that reveals rooms as the 
   - Exploration state resets each run — no persistence needed
   - Minimap coordinates computed from levelBounds with scale fitting into 160x130px area
   - 18 unit tests covering state creation, room detection, state accumulation, reference identity optimization, minimap data computation, screen width repositioning, and negative-coordinate rooms
-- 223 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, and exploration
+- Furniture store starting room (room 0)
+  - Pure function module `startroom.js`: generateStoreLayout, generateCrackPoints, getExitPosition, STORE_FLOOR_COLOR, STORE_WALL_COLOR
+  - Room 0 rendered with warm wood-tone colors (floor 0x5C4A3A, walls 0x7A6B5A) instead of default cold gray
+  - Hand-crafted store furniture layout (counter, display shelves, couches, coffee tables, desks, bookcases, potted plants) instead of random generation
+  - Room 0 permanently lit — added to lit room list unconditionally in both `updateDarkness()` and `updateEnemies()`
+  - Crack in the wall visual at the first doorway from room 0 — jagged line drawn with Graphics path API, with a secondary thinner parallel line
+  - Pulsing sickly-yellow glow behind the crack (0xD4C073, sine-wave alpha 0.15-0.25) updated per frame
+  - Crack supports both vertical walls (east/west) and horizontal walls (north/south) — `generateCrackPoints` takes a `vertical` parameter
+  - Exit zone repositioned from top-left corner to center-north of room 0 (store entrance area)
+  - 12 unit tests covering store layout bounds, spawn zone avoidance, determinism, crack point generation for both orientations, and exit position
+- 235 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, and starting room
 - Documentation (docs.md files for root, src, systems, scenes)
 - Bug fix: flashlight mouse tracking drift during WASD movement
   - Root cause: Phaser 3 `pointer.worldX`/`worldY` are cached properties only refreshed on mouse events, not camera scroll
@@ -132,7 +142,7 @@ Added a minimap in the top-right corner of the screen that reveals rooms as the 
   - Also fixes bullet direction when shooting while moving
 
 ## Architecture
-- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop, doors, lightswitch, hiding, persistence, exploration) — testable without Phaser
+- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop, doors, lightswitch, hiding, persistence, exploration, startroom) — testable without Phaser
 - `src/scenes/` — Phaser scene classes that wire systems together for rendering (GameScene for gameplay, ShopScene for upgrades between runs)
 - Darkness uses BitmapMask with invertAlpha on a Graphics overlay
 - Furniture segments use the same `{x1,y1,x2,y2}` format as walls — concatenated into `wallSegments` for raycasting with zero visibility code changes
@@ -140,7 +150,7 @@ Added a minimap in the top-right corner of the screen that reveals rooms as the 
 - Doorways are gaps in wall segments — the visibility system naturally handles light passing through without any changes
 - Enemy LOS reuses `raySegmentIntersection` from visibility.js — single ray from enemy to player, checked against wall segments
 - Enemy AI is a pure function state machine — takes state in, returns updated state with velocity
-- Combat/shooting/battery/inventory/hiding/exploration are pure function modules (`combat.js`, `shooting.js`, `battery.js`, `inventory.js`, `hiding.js`, `exploration.js`) — same architecture pattern as enemy/movement
+- Combat/shooting/battery/inventory/hiding/exploration/startroom are pure function modules (`combat.js`, `shooting.js`, `battery.js`, `inventory.js`, `hiding.js`, `exploration.js`, `startroom.js`) — same architecture pattern as enemy/movement
 - Items system (`items.js`) follows same spawning pattern as enemy.js: seeded PRNG, furniture overlap avoidance, skip room 0
 - Player combat, battery, inventory, hiding, exploration, and shop states are immutable objects; enemy health is a mutable field on the enemy state (asymmetry: player state is passed through pure functions, enemy health is mutated in-place in the scene callback)
 - Item spawning uses seed offset +20000 (furniture: +0, enemies: +10000, items: +20000, doors: +30000, switches: +40000) to avoid correlation
@@ -160,8 +170,11 @@ Added a minimap in the top-right corner of the screen that reveals rooms as the 
 - Exploration state tracks visited room IDs (Set) and current room ID — updated each frame via point-in-AABB check against all rooms
 - `getMinimapData()` computes world-to-minimap coordinate mapping from `levelBounds` with uniform scale to fit 160x130px area in top-right corner
 - `exploration.js` reuses `isPointInRoom()` from `lightswitch.js` — avoids duplicating room containment logic
+- Room 0 (starting room) uses `startroom.js` instead of `furniture.js` for furniture generation — hand-crafted positions via relative proportions, not seeded PRNG
+- Room 0 is permanently lit by unconditionally adding it to `litRoomIds` in both `updateDarkness()` and `updateEnemies()` — same mechanism as light switch lit rooms
+- Crack visual uses two Graphics objects: static crack line at depth 2 (baked once in `create()`) and animated glow at depth 1 (redrawn per frame with time-based sine-wave alpha)
+- Exit zone position computed by `getExitPosition()` from `startroom.js` — center-north of room 0 (store entrance)
 
 ## Next Steps
-- Add starting room (furniture store with crack in wall)
 - Add more upgrade categories (weapon damage, fire rate, bullet range)
 - Add enemy scaling per run (more/tougher enemies as player gets stronger)

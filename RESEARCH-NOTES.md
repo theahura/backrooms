@@ -707,3 +707,82 @@ function isStorageAvailable() {
 ### Persistence
 - Exploration state resets each run (new level each time) — no need to persist
 - Unlike shop state, this is ephemeral per-run data
+
+## Starting Room (Furniture Store) Research
+
+### Design Concept
+- The APPLICATION-SPEC says: "each day starts in the same 'room'. The starting room should look like a furniture store that has a crack in the wall that leads to the backrooms."
+- Inspired by the A24 Backrooms film: "a furniture store owner who finds a secret doorway that leads to a seemingly endless series of nondescript rooms"
+- The furniture store is a safe zone / hub that contrasts with the dangerous backrooms — warm vs cold, lit vs dark
+- The crack in the wall is the doorway to the backrooms — it's the existing door gap from room 0 to adjacent rooms, but visually treated as a crack instead of a clean opening
+
+### Architecture: Pure Module `startroom.js`
+- `src/systems/startroom.js` — pure functions for starting room configuration
+- Follow existing pattern: named exports, constants, query functions
+- `STORE_COLORS` — color palette for the furniture store (warm wood tones)
+- `generateStoreLayout(roomX, roomY, roomWidth, roomHeight, wallThickness)` — returns hand-crafted furniture items for the store (display shelves, counter, couches, etc.)
+- `generateCrackPoints(wallX, wallY, crackHeight, seed)` — returns jagged line points for the crack visual
+- No Phaser dependency — pure JavaScript, testable in Node
+
+### Color Palette
+| Element | Furniture Store | Backrooms (current) |
+|---------|----------------|---------------------|
+| Floor | `0x5C4A3A` (warm dark wood) | `0x333333` (cold gray) |
+| Walls | `0x7A6B5A` (warm tan) | `0x555555` (gray) |
+| Ambient | Permanently lit (no darkness) | Flashlight-only |
+
+### Store Furniture Types
+- Display shelves (long narrow rectangles, 100x20, `0x6b4e2a`)
+- Counter/register (wide rectangle, 120x40, `0x5c3a21` with metallic top)
+- Couches (wide rectangles, 90x50, `0x8B6B4E`)
+- Coffee tables (small squares, 40x40, `0xC19A6B`)
+- Rugs (large low-opacity rectangles, 120x80, `0x7A3B2E` at 0.3 alpha)
+- Potted plants (small circles, radius 8, `0x4A7A3B`)
+
+### Crack in the Wall Visual
+- Drawn on the wall at the doorway position connecting room 0 to the backrooms
+- Jagged line using `beginPath()`/`moveTo()`/`lineTo()`/`strokePath()` with small random offsets
+- Dark void color for the crack line (`0x111111`)
+- Pulsing sickly yellow-green glow behind the crack (`0xD4C073` at 0.1-0.4 alpha)
+- Glow implemented by tweening Graphics object alpha or redrawing per frame with time-based sine wave
+
+### Lighting
+- Room 0 should be permanently lit — no darkness overlay
+- Already supported by the mask system: draw `fillRect` into `maskGraphics` for the room bounds (same as light switch lit rooms)
+- Add room 0 to the lit room check unconditionally in `updateDarkness()`
+- Warm tint overlay on the store room (`0xFFEECC` at 0.05 alpha) — already matches lightswitch warm tint pattern
+
+### Exit Zone Repositioning
+- Currently at top-left corner of room 0
+- Reposition to the "store entrance" — a visual front door on the wall opposite from the crack
+- The exit is where the player returns to end their run
+
+### GameScene Integration Points
+- `drawRoom()`: use `STORE_COLORS` for room 0 instead of default gray
+- `createRoomFurniture()` or equivalent: use `generateStoreLayout()` for room 0 instead of random furniture
+- `updateDarkness()`: always include room 0 in lit rooms (before flashlight check)
+- `create()`: draw crack visual at doorway position on a separate Graphics object (depth 1-2)
+- `create()`: add pulsing glow tween or time-based glow in `update()`
+- `createExitZone()`: reposition to store entrance area
+
+### Phaser Drawing Patterns for Crack
+```javascript
+// Jagged crack line
+gfx.lineStyle(2, 0x111111, 0.9);
+gfx.beginPath();
+gfx.moveTo(crackX, crackY - crackHeight/2);
+for (let i = 0; i < segments; i++) {
+  gfx.lineTo(crackX + zigzagOffset, crackY - crackHeight/2 + segLength * (i+1));
+}
+gfx.strokePath();
+
+// Glow behind crack (redrawn per frame with time-based alpha)
+const glowAlpha = 0.15 + 0.1 * Math.sin(time * 0.003);
+glowGfx.fillStyle(0xD4C073, glowAlpha);
+glowGfx.fillRect(crackX - 4, crackY - crackHeight/2, 12, crackHeight);
+```
+
+### Performance Considerations
+- Store furniture is baked once in `create()` — no per-frame cost
+- Crack glow uses a single `fillRect` per frame — negligible
+- Permanent room lighting is one additional `fillRect` in `maskGraphics` per frame — already done for lit rooms
