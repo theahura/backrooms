@@ -6,7 +6,9 @@ import { generateLevel } from '../systems/level.js';
 import { generateRoomEnemies, updateEnemyAI } from '../systems/enemy.js';
 import { createCombatState, applyDamage, updateCombat, getHealthFraction, isInvulnerable, applyEnemyDamage, isEnemyDead, ENEMY_CONTACT_DAMAGE, ENEMY_MAX_HP, BULLET_DAMAGE } from '../systems/combat.js';
 import { calculateBulletVelocity, canFire, updateFireCooldown, isBulletExpired, BULLET_SPEED, FIRE_RATE_MS, BULLET_MAX_RANGE } from '../systems/shooting.js';
-import { createBatteryState, updateBattery, getBatteryFraction, getFlashlightConeAngle, shouldFlicker } from '../systems/battery.js';
+import { createBatteryState, updateBattery, getBatteryFraction, getFlashlightConeAngle, shouldFlicker, rechargeBattery, BATTERY_RECHARGE_AMOUNT } from '../systems/battery.js';
+import { generateRoomItems, ITEM_TYPES } from '../systems/items.js';
+import { createInventoryState, pickupItem, useBattery } from '../systems/inventory.js';
 
 const PLAYER_SPEED = 200;
 const WALL_THICKNESS = 16;
@@ -28,12 +30,15 @@ export class GameScene extends Phaser.Scene {
     this.roomFurniture = new Map();
     this.combatState = createCombatState();
     this.batteryState = createBatteryState();
+    this.inventoryState = createInventoryState();
     this.fireCooldown = 0;
     this.dayEnding = false;
 
     this.createRooms();
     this.createPlayer();
     this.createEnemies();
+    this.createItemTextures();
+    this.createItems();
     this.createBullets();
     this.createExitZone();
     this.setupInput();
@@ -151,6 +156,54 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  createItemTextures() {
+    for (const itemType of ITEM_TYPES) {
+      const gfx = this.make.graphics({ add: false });
+      gfx.fillStyle(itemType.color, 1);
+      if (itemType.type === 'gem') {
+        gfx.fillTriangle(
+          itemType.size.w / 2, 0,
+          0, itemType.size.h,
+          itemType.size.w, itemType.size.h
+        );
+      } else {
+        gfx.fillRect(0, 0, itemType.size.w, itemType.size.h);
+      }
+      gfx.generateTexture(`item_${itemType.type}`, itemType.size.w, itemType.size.h);
+      gfx.destroy();
+    }
+  }
+
+  createItems() {
+    this.itemGroup = this.physics.add.staticGroup();
+
+    for (const room of this.level.rooms) {
+      const furniture = this.roomFurniture.get(room.id) || [];
+      const items = generateRoomItems(
+        room.x, room.y, room.width, room.height,
+        WALL_THICKNESS, room.seed, furniture, room.id
+      );
+
+      for (const item of items) {
+        const sprite = this.itemGroup.create(item.x, item.y, `item_${item.type}`);
+        sprite.setDepth(5);
+        sprite.setData('itemType', item.type);
+        sprite.setData('itemValue', item.value);
+      }
+    }
+
+    this.physics.add.overlap(this.player, this.itemGroup, this.onItemPickup, null, this);
+  }
+
+  onItemPickup(player, itemSprite) {
+    if (!itemSprite.active) return;
+    this.inventoryState = pickupItem(this.inventoryState, {
+      type: itemSprite.getData('itemType'),
+      value: itemSprite.getData('itemValue'),
+    });
+    itemSprite.destroy();
+  }
+
   createPlayer() {
     const spawnRoom = this.level.rooms[0];
     const playerX = spawnRoom.x + spawnRoom.width / 2;
@@ -234,6 +287,22 @@ export class GameScene extends Phaser.Scene {
     this.hudGraphics = this.add.graphics();
     this.hudGraphics.setScrollFactor(0);
     this.hudGraphics.setDepth(1000);
+
+    this.batteryCountText = this.add.text(20, 66, '', {
+      fontSize: '14px',
+      color: '#ffff00',
+      fontFamily: 'monospace',
+    });
+    this.batteryCountText.setScrollFactor(0);
+    this.batteryCountText.setDepth(1000);
+
+    this.treasureText = this.add.text(120, 66, '', {
+      fontSize: '14px',
+      color: '#ffd700',
+      fontFamily: 'monospace',
+    });
+    this.treasureText.setScrollFactor(0);
+    this.treasureText.setDepth(1000);
   }
 
   createExitZone() {
@@ -410,6 +479,9 @@ export class GameScene extends Phaser.Scene {
 
     gfx.lineStyle(2, 0xffffff, 0.5);
     gfx.strokeRect(x, battY, width, height);
+
+    this.batteryCountText.setText(`BAT x${this.inventoryState.batteries}`);
+    this.treasureText.setText(`$${this.inventoryState.treasureValue}`);
   }
 
   setupInput() {
@@ -419,6 +491,21 @@ export class GameScene extends Phaser.Scene {
       S: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S),
       D: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
     };
+
+    this.input.mouse.disableContextMenu();
+    this.input.on('pointerdown', (pointer) => {
+      if (pointer.rightButtonDown() && !this.combatState.isDead && !this.dayEnding) {
+        this.onUseBattery();
+      }
+    });
+  }
+
+  onUseBattery() {
+    const result = useBattery(this.inventoryState);
+    if (result.used) {
+      this.inventoryState = result.state;
+      this.batteryState = rechargeBattery(this.batteryState, BATTERY_RECHARGE_AMOUNT);
+    }
   }
 
   setupCamera() {
@@ -525,7 +612,7 @@ export class GameScene extends Phaser.Scene {
     this.batteryState = updateBattery(this.batteryState, delta);
     this.fireCooldown = updateFireCooldown(this.fireCooldown, delta);
 
-    if (pointer.isDown && canFire(this.fireCooldown)) {
+    if (pointer.leftButtonDown() && canFire(this.fireCooldown)) {
       this.fireBullet();
       this.fireCooldown = FIRE_RATE_MS;
     }

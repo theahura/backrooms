@@ -269,3 +269,54 @@ project/
 - Bullets at depth 150 — visible above darkness, player can see their own shots
 - HUD at depth 1000 — always on top
 - Everything else unchanged: enemies 60, darkness 100, light 99, player 200
+
+## Items & Inventory System Research
+
+### Item Spawning Pattern
+- Follow enemy.js pattern exactly: `generateRoomItems(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, furnitureItems, roomId)`
+- Use `mulberry32(seed + 20000)` — furniture uses +0, enemies use +10000, items use +20000
+- Skip room 0 (starting room) — or place fewer items there
+- 40px margin from walls, AABB overlap check against furniture rects
+- Retry loop: `count * 20` max attempts per item placement
+- Return array of `{ x, y, type, value }` plain objects
+
+### Item Types & Value Tiers (Motherload-inspired exponential curve)
+- **Battery**: restores 30% flashlight charge when used. Spawns 0-1 per room.
+- **Copper Coin**: value 10, common. Bronze/copper color.
+- **Silver Coin**: value 50, uncommon. Silver/white color.
+- **Gold Coin**: value 200, rare. Gold color.
+- **Gem**: value 1000, very rare (maybe 1 per level). Cyan/blue color.
+- Total 2-5 items per room (including battery chance), weighted by rarity
+
+### Inventory Design (Simple for MVP)
+- State: `{ batteries: number, treasureValue: number }`
+- Auto-pickup on overlap — items destroyed on contact
+- No capacity limit for now (backpack upgrade is a future shop feature)
+- Batteries are a count; right-click uses one to recharge flashlight
+- Treasure value is a running total carried to the shop after exiting
+
+### Phaser 3 Integration
+- Items use `this.physics.add.staticGroup()` — static bodies skip velocity calculations
+- Overlap: `this.physics.add.overlap(player, itemGroup, onItemPickup, null, this)`
+- Item textures via `generateTexture` (small colored circles/rectangles, 8-12px)
+- Items render at depth 5 (below darkness at 100) — only visible in flashlight
+- On pickup: `item.destroy()` removes from group and physics
+
+### Right-Click Input (Battery Use)
+- `this.input.mouse.disableContextMenu()` in create()
+- Check `pointer.rightButtonDown()` in pointerdown event or poll in update
+- On right-click: if batteries > 0, decrement count, call `rechargeBattery(state, amount)`
+
+### Battery Recharge Function (New Addition to battery.js)
+- Need new export: `rechargeBattery(state, amount)` → `{ ...state, charge: Math.min(state.charge + amount, state.maxCharge), isDepleted: false }`
+- Amount: 30 (30% of BATTERY_MAX=100)
+
+### HUD Updates
+- Add battery count icon + number below existing bars (e.g., battery icon + "x3")
+- Add treasure value display (coin icon + "$1,250")
+- Use `this.add.text()` with `setScrollFactor(0).setDepth(1000)` for text elements
+
+### Architecture: Two New Pure Modules
+- `src/systems/items.js` — item type definitions, room item generation (pure functions)
+- `src/systems/inventory.js` — inventory state creation, item pickup logic, battery use (pure functions)
+- `rechargeBattery` added to existing `src/systems/battery.js`

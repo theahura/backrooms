@@ -10,12 +10,12 @@ Path: @/src
 - `@/index.html` loads `@/src/main.js` as an ES module via `<script type="module">`
 - `@/src/main.js` wires Phaser config (resolution, physics, renderer) and passes scene classes to the engine
 - `@/src/scenes/` contains Phaser Scene subclasses that orchestrate rendering, input, and physics each frame
-- `@/src/systems/` contains pure functions that scenes call for game math (movement, visibility, room geometry, furniture placement, enemy spawning/AI, combat/health, shooting/bullets, and battery/flashlight drain)
+- `@/src/systems/` contains pure functions that scenes call for game math (movement, visibility, room geometry, furniture placement, enemy spawning/AI, combat/health, shooting/bullets, battery/flashlight drain, item spawning, and inventory management)
 - The architecture enforces a one-way dependency: scenes import from systems, but systems never import from scenes or Phaser. Systems may import from each other (e.g., `enemy.js` imports `raySegmentIntersection` from `visibility.js`)
 
 ### Core Implementation
 - **Game initialization** (`@/src/main.js`): creates a `Phaser.Game` with 1024x768 resolution, Arcade physics (zero gravity for top-down), and `GameScene` as the only registered scene
-- **Frame loop**: Phaser calls `GameScene.update()` every frame, which reads input, computes velocity via the movement system, ticks combat/fire/battery state, processes shooting input, checks bullet expiry, runs enemy AI updates, redraws the player and HUD, and recomputes the flashlight/darkness overlay. The update loop early-returns if the player is dead or a day-ending transition is in progress
+- **Frame loop**: Phaser calls `GameScene.update()` every frame, which reads input, computes velocity via the movement system, ticks combat/fire/battery state, processes shooting input, checks bullet expiry, runs enemy AI updates, redraws the player and HUD (including inventory counts), and recomputes the flashlight/darkness overlay. The update loop early-returns if the player is dead or a day-ending transition is in progress
 - **Level generation**: at scene creation, `GameScene` calls `generateLevel()` which produces a set of connected rooms with doorways. The scene then iterates over all rooms for rendering, physics setup, furniture placement, and enemy spawning
 
 ```
@@ -30,7 +30,9 @@ index.html
             -> src/systems/enemy.js      (enemy spawning + LOS + AI state machine)
             -> src/systems/combat.js     (player/enemy health + damage + invulnerability)
             -> src/systems/shooting.js   (bullet velocity + fire rate + range expiry)
-            -> src/systems/battery.js    (battery drain + cone scaling + flicker)
+            -> src/systems/battery.js    (battery drain + cone scaling + flicker + recharge)
+            -> src/systems/items.js      (item type definitions + room item spawning)
+            -> src/systems/inventory.js  (inventory state: batteries + treasure value)
             -> src/systems/random.js     (shared seeded PRNG)
 ```
 

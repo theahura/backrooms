@@ -5,6 +5,8 @@ import {
   getBatteryFraction,
   getFlashlightConeAngle,
   shouldFlicker,
+  rechargeBattery,
+  BATTERY_RECHARGE_AMOUNT,
 } from '../battery.js';
 
 describe('createBatteryState', () => {
@@ -98,5 +100,31 @@ describe('shouldFlicker', () => {
     }
     expect(results).toContain(true);
     expect(results).toContain(false);
+  });
+});
+
+describe('rechargeBattery', () => {
+  it('increases charge by the given amount', () => {
+    const state = createBatteryState();
+    const drained = updateBattery(state, 45000);
+    const before = getBatteryFraction(drained);
+    const recharged = rechargeBattery(drained, BATTERY_RECHARGE_AMOUNT);
+    expect(getBatteryFraction(recharged)).toBeGreaterThan(before);
+  });
+
+  it('does not exceed max charge', () => {
+    const state = createBatteryState();
+    const recharged = rechargeBattery(state, BATTERY_RECHARGE_AMOUNT);
+    expect(getBatteryFraction(recharged)).toBe(1);
+  });
+
+  it('restores flashlight functionality on a fully depleted battery', () => {
+    const baseCone = Math.PI / 4;
+    const state = createBatteryState();
+    const depleted = updateBattery(state, 200000);
+    expect(getFlashlightConeAngle(depleted, baseCone)).toBe(0);
+    const recharged = rechargeBattery(depleted, BATTERY_RECHARGE_AMOUNT);
+    expect(getFlashlightConeAngle(recharged, baseCone)).toBeGreaterThan(0);
+    expect(getBatteryFraction(recharged)).toBeGreaterThan(0);
   });
 });

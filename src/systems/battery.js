@@ -31,6 +31,17 @@ export function getFlashlightConeAngle(state, baseConeAngle) {
   return baseConeAngle * scale;
 }
 
+export const BATTERY_RECHARGE_AMOUNT = 30;
+
+export function rechargeBattery(state, amount) {
+  const newCharge = Math.min(state.charge + amount, state.maxCharge);
+  return {
+    ...state,
+    charge: newCharge,
+    isDepleted: newCharge <= 0,
+  };
+}
+
 export function shouldFlicker(state, time) {
   const fraction = getBatteryFraction(state);
   if (fraction > FLICKER_THRESHOLD) return false;
