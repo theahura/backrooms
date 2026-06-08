@@ -9,8 +9,10 @@ import {
   UPGRADES,
 } from '../systems/shop.js';
 import { saveGame } from '../systems/persistence.js';
-import { getLocation, LOCATIONS } from '../systems/locations.js';
+import { getLocation } from '../systems/locations.js';
 import { getJournalEntries, getJournalPage } from '../systems/lore.js';
+
+const JOURNAL_ENTRIES_PER_PAGE = 5;
 
 export class ShopScene extends Phaser.Scene {
   constructor() {
@@ -242,7 +244,7 @@ export class ShopScene extends Phaser.Scene {
   showJournal() {
     if (this.journalOverlay) return;
 
-    const ENTRIES_PER_PAGE = 5;
+    const ENTRIES_PER_PAGE = JOURNAL_ENTRIES_PER_PAGE;
     const journalData = getJournalEntries(this.collectedLore);
     this.journalEntries = journalData.entries;
     this.journalPage = 0;
@@ -252,6 +254,7 @@ export class ShopScene extends Phaser.Scene {
     const bg = this.add.graphics().setDepth(2000);
     bg.fillStyle(0x111111, 1);
     bg.fillRect(0, 0, 1024, 768);
+    bg.setInteractive(new Phaser.Geom.Rectangle(0, 0, 1024, 768), Phaser.Geom.Rectangle.Contains);
     objects.push(bg);
 
     const title = this.add.text(512, 50, `COLLECTED NOTES  ${journalData.collectedCount}/${journalData.totalCount}`, {
@@ -330,9 +333,7 @@ export class ShopScene extends Phaser.Scene {
     closeBtn.on('pointerdown', () => this.hideJournal());
     objects.push(closeBtn);
 
-    this.journalEscHandler = (event) => {
-      if (event.key === 'Escape') this.hideJournal();
-    };
+    this.journalEscHandler = () => this.hideJournal();
     this.input.keyboard.on('keydown-ESC', this.journalEscHandler);
 
     this.journalOverlay = objects;
@@ -340,7 +341,7 @@ export class ShopScene extends Phaser.Scene {
   }
 
   renderJournalPage() {
-    const ENTRIES_PER_PAGE = 5;
+    const ENTRIES_PER_PAGE = JOURNAL_ENTRIES_PER_PAGE;
     const { pageEntries, currentPage, totalPages } = getJournalPage(this.journalEntries, this.journalPage, ENTRIES_PER_PAGE);
     this.journalPage = currentPage;
 
