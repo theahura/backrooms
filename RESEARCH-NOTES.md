@@ -2560,3 +2560,90 @@ Steps:
 - **Consistent lighting assumption** — sprites are drawn as if lit from above (top highlight, bottom shadow)
 - **No outlines on furniture** — furniture blends into environment, discovered by flashlight
 - **Distinct silhouettes for items** — must be recognizable at a glance in flashlight beam
+
+## Character & Enemy Pixel Art Animation Research
+
+### Design Decision: Programmatic Multi-Frame Animation via `textures.generate()` + `anims.create()`
+
+Phaser 3 supports creating animations from multiple separate texture keys (not just spritesheet frames). Each frame in the `frames` array can specify its own `key` property pointing to a different texture. This allows us to generate each animation frame as a separate texture via `textures.generate()` and then define animations using `anims.create()`.
+
+### Phaser 3 Animation API with Separate Texture Keys
+
+```javascript
+// Generate each frame as a separate texture
+this.textures.generate('player_walk_0', { data: walkFrame0, pixelWidth: 1, palette: playerPalette });
+this.textures.generate('player_walk_1', { data: walkFrame1, pixelWidth: 1, palette: playerPalette });
+
+// Create animation referencing separate texture keys
+this.anims.create({
+  key: 'player_walk',
+  frames: [{ key: 'player_walk_0' }, { key: 'player_walk_1' }],
+  frameRate: 6,
+  repeat: -1,
+});
+
+// Play with ignoreIfPlaying to avoid restart from frame 0 each update
+sprite.play('player_walk', true);
+```
+
+Key API details:
+- `sprite.play(key, ignoreIfPlaying)` — `true` prevents restarting if already playing
+- `sprite.stop()` — stops animation
+- `sprite.anims.getName()` — returns current animation key
+- `sprite.setRotation()` / `sprite.setAngle()` — independent of animation system, work freely
+- `sprite.setFlipX()` — mirrors sprite without separate directional art
+- `sprite.setTint()` / `sprite.setAlpha()` — work on animated sprites (corpse system compatible)
+
+### Player Character Design
+
+**Current**: Green circle (radius 10) + triangle "nose" direction indicator, drawn per-frame via Graphics object, rotated via `setRotation(playerAngle)`.
+
+**Target**: 20x20 pixel art sprite (pixelWidth=1) showing a top-down humanoid explorer. Sprite is oriented with "front" facing RIGHT (angle 0 in Phaser). Uses `setRotation(playerAngle)` to face the mouse — same mechanism as current Graphics rotation.
+
+**Animation frames (minimal for this scale)**:
+- `player_idle_0`, `player_idle_1` — 2-frame idle animation (subtle shift)
+- `player_walk_0`, `player_walk_1` — 2-frame walk cycle (leg movement)
+
+**Visual states**:
+- Normal: play idle or walk animation normally
+- Hiding: `setAlpha(0.3)` + `setTint(0x336633)` — same visual effect as current
+- Hurt/invulnerable: `setAlpha(0.5)` + `setTint(0xcc4444)` — same visual effect as current
+
+**Architecture change**: Replace invisible physics sprite + separate Graphics object with a single visible physics sprite. Remove `this.playerGraphics`. `drawPlayer()` becomes animation/state switching instead of Graphics redraw.
+
+### Enemy Character Designs
+
+**Basic zombie (20x20)**: Blocky/wide silhouette, red-brown/grey-green flesh tones. Shambling humanoid from above. 2-frame walk animation at slow playback (~4 fps). Maintains red color identity.
+
+**Crawler (14x14)**: Small, elongated insect-like shape. Purple/dark tones. 2-frame scuttle animation at faster playback (~8 fps). Maintains purple identity.
+
+**Spitter (20x20)**: Medium body with distinct bulging head/mouth area. Blue/teal tones. 2-frame walk animation (~4 fps). Maintains blue identity.
+
+**Enemy rotation**: Currently enemies have no rotation — they show the same texture regardless of movement direction. Add `setRotation(Math.atan2(vy, vx))` based on velocity each frame in `updateEnemies()`. This rotates the top-down sprite to face movement direction, same approach as the player.
+
+### Animation Configuration as Pure Data
+
+Export `ANIM_DEFS` from `sprites.js` alongside `SPRITE_DEFS`. Each animation definition is pure data:
+```javascript
+export const ANIM_DEFS = {
+  player_idle: { frames: ['player_idle_0', 'player_idle_1'], frameRate: 2, repeat: -1 },
+  player_walk: { frames: ['player_walk_0', 'player_walk_1'], frameRate: 6, repeat: -1 },
+  enemy_walk:  { frames: ['enemy_walk_0', 'enemy_walk_1'], frameRate: 4, repeat: -1 },
+  // etc.
+};
+```
+
+GameScene creates Phaser animations from this data alongside texture generation.
+
+### Backward Compatibility
+
+- `getEnemyStats()` texture keys change: `'enemy'` → `'enemy_idle_0'`, `'crawler'` → `'crawler_idle_0'`, `'spitter'` → `'spitter_idle_0'`. These are the initial textures; animations take over immediately.
+- Corpse system uses `setTint()`, `setAlpha()`, `setAngle()` — all work on animated sprites, no changes needed. `sprite.stop()` should be called to freeze the animation when the enemy dies.
+- Physics body sizes unchanged (20x20 for basic/spitter, 14x14 for crawler)
+- `spawnDangerWave()` uses `getEnemyStats()` for texture keys — automatically picks up new keys
+
+### Performance
+
+- ~16 new sprite definitions (4 player + 4 basic + 3 crawler + 5 spitter frames)
+- Separate texture keys per frame cause extra draw calls vs spritesheets, but with <20 animated entities this is negligible
+- DynamicTexture atlas optimization available if needed (not worth the complexity for this scale)

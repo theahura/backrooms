@@ -1,6 +1,10 @@
 # Current Progress
 
-## Status: Pixel Art Sprite System
+## Status: Character & Enemy Pixel Art Animations
+
+Added pixel art animations for player and all enemy types (basic, crawler, spitter), replacing the Graphics-drawn player circle and generateTexture() enemy circles with animated pixel art sprites. Key changes: (1) New `CHARACTER_PALETTES` in `sprites.js` with per-entity-type color palettes (green tones for player, red for basic enemy, purple for crawler, blue for spitter). (2) 16 new `SPRITE_DEFS` entries for animation frames: `player_idle_0/1`, `player_walk_0/1`, `enemy_idle_0`, `enemy_walk_0/1`, `crawler_idle_0`, `crawler_walk_0/1`, `spitter_idle_0/1`, `spitter_walk_0/1`, `spitter_attack_0`. Player/basic/spitter sprites are 20x20px, crawler sprites are 14x14px (matching existing body sizes). (3) New `ANIM_DEFS` export: pure-data animation configuration mapping animation keys to frame lists, frame rates, and repeat settings. 9 animations total (idle + walk for each type, plus spitter_attack). (4) Three new helper functions: `getEnemyTextureKey(type)` returns initial texture for enemy type, `getAnimKeyForState(entityType, aiState)` maps AI state to animation key, `getAllAnimKeys()` returns all animation keys. (5) Player changed from invisible physics sprite + Graphics overlay to visible animated sprite — `createPlayer()` creates sprite with 'player_idle_0' texture and plays 'player_idle' animation. `drawPlayer()` replaced from Graphics clear/redraw to `setRotation()` + `setTint()`/`setAlpha()`/`clearTint()` for visual states (hiding=0x336633 alpha 0.3, hurt=0xcc4444 alpha 0.5, normal=no tint alpha 1) + velocity-based animation switching (player_walk when moving, player_idle when still). (6) Removed `createEnemyTextures()` method entirely — enemy textures come from centralized `sprites.js` via `getEnemyTextureKey()`. `getEnemyStats()` uses helper function. (7) Enemies play idle animation on creation in both `createEnemies()` and `spawnDangerWave()`. (8) `updateEnemies()` now sets rotation from velocity (`Math.atan2(vy, vx)`) and switches animation state via `getAnimKeyForState(type, state)` with `play(key, true)` to prevent frame restarts. (9) `onBulletHitEnemy()` calls `enemySprite.stop()` before corpse visuals to freeze animation on death frame. (10) `generateSpriteTextures()` now also creates Phaser animations from `ANIM_DEFS` via `anims.create()`. 17 new behavioral tests (character sprite coverage, dimension contracts, animation definition integrity, helper function behavior). 575 tests passing.
+
+## Previous: Pixel Art Sprite System
 
 Replaced all simple colored rectangles with detailed pixel art sprites for furniture, items, weapons, bullets, doors, switches, and lore notes. Key changes: (1) New pure data module `sprites.js` with `SPRITE_DEFS` containing 25 pixel art definitions using Phaser's `textures.generate()` data array format — each entry has `data` (array of character strings), `palette` (character-to-hex-color mapping), and `pixelWidth`/`pixelHeight` scaling multipliers. Shared `PALETTES` constant defines 8 color themes (wood, metal, items, weapons, bullets, door, switchPl, lore). Furniture sprites use `pixelWidth=5` to scale small data arrays (e.g., 16x10 → 80x50 for table). Items/bullets use `pixelWidth=1`. (2) `pixelArt: true` added to Phaser game config in `main.js` for global nearest-neighbor rendering. (3) New `generateSpriteTextures()` method in GameScene called at the start of `create()` — iterates all SPRITE_DEFS and calls `this.textures.generate()` once per key, before any creation methods that reference textures. (4) Furniture rendering converted from Graphics `fillRect()` to Phaser sprites with `setDisplaySize()` for dimension matching. Falls back to Graphics for location-specific types (counter, couch) without sprite definitions. (5) Doors converted from per-frame Graphics clear/redraw to static sprites stored in `this.doorSprites` Map — `drawDoors()` now just toggles visibility. (6) Switches converted from per-frame Graphics to static sprites stored in `this.switchSprites` Map — `drawSwitches()` now swaps textures (`switch_on`/`switch_off`). (7) Removed inline texture generation from `createItemTextures()`, `createBullets()`, `createEnemyBullets()`, `createWeaponPickups()`, and `createLoreItems()` — all textures pre-generated centrally. Player and enemy sprites unchanged (those are the next commit — pixel art animations). 10 new tests validating sprite coverage and dimension contracts. 558 tests passing.
 
@@ -241,7 +245,7 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
   - Per-type HP constants: `CRAWLER_MAX_HP=30`, `SPITTER_MAX_HP=40` in `combat.js`
   - Per-type contact damage: `CRAWLER_CONTACT_DAMAGE=15`, `SPITTER_CONTACT_DAMAGE=10` in `combat.js`
   - Projectile constants: `SPITTER_PROJECTILE_SPEED=200`, `SPITTER_PROJECTILE_RANGE=400` in `shooting.js`
-  - Distinct textures: basic=red 20px, crawler=purple 14px, spitter=blue 20px with mouth detail
+  - Animated pixel art sprites: basic=red 20px, crawler=purple 14px, spitter=blue 20px — idle/walk animations driven by AI state via `getAnimKeyForState()`, velocity-based rotation
   - 17 new unit tests covering type assignment, spawn typing, crawler speeds, spitter attack state machine
 - Multi-floor level generation with bidirectional stairs
   - Pure function module `stairs.js`: `generateMultiFloorLevel`, `getFloorBounds`, `createStairConnections`
@@ -385,7 +389,19 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
   - Cubicles: grid-based U-shaped partition templates (150px cells, 120px walls, random open sides, 30% empty)
   - Refactored subdivision logic into parameterized `subdivideGeneric()`
   - 15 new tests (5 per type)
-- 547 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, weapon upgrades, enemy types, stairs, weapons, inventory capacity, maze generation, room connections, weaponless start, ammo system, minimap upgrade, switch frequency, lore spawning, lore persistence, lore journal, floor scaling, multi-floor stair connections, alternate locations, location persistence, cross-room pathfinding, navContext-driven enemy AI, new furniture types, time-based danger escalation, audio system, crawler door-opening, and additional room types
+- Pixel art sprite system (centralized sprites.js with SPRITE_DEFS, PALETTES, textures.generate() for all entities)
+  - 25+ sprite definitions: furniture, items, weapons, bullets, doors, switches, lore notes
+  - pixelArt: true in Phaser config for nearest-neighbor rendering
+  - Static sprites for furniture, doors, switches replacing per-frame Graphics redraws
+  - 10 tests for sprite coverage and dimension contracts
+- Character & enemy pixel art animations
+  - 16 animation frame sprite definitions with CHARACTER_PALETTES (player, basic, crawler, spitter)
+  - ANIM_DEFS: 9 animations (idle/walk per type + spitter_attack) with frame lists and rates
+  - Player: visible animated sprite replacing invisible sprite + Graphics overlay
+  - Enemies: animated sprites with velocity-based rotation and AI-state-driven animation switching
+  - enemySprite.stop() on death freezes animation before corpse visuals
+  - 17 behavioral tests for sprites, animations, and helper functions
+- 575 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, weapon upgrades, enemy types, stairs, weapons, inventory capacity, maze generation, room connections, weaponless start, ammo system, minimap upgrade, switch frequency, lore spawning, lore persistence, lore journal, floor scaling, multi-floor stair connections, alternate locations, location persistence, cross-room pathfinding, navContext-driven enemy AI, new furniture types, time-based danger escalation, audio system, crawler door-opening, additional room types, pixel art sprites, and character animations
 - Documentation (docs.md files for root, src, systems, scenes)
 - Bug fix: flashlight mouse tracking drift during WASD movement
   - Root cause: Phaser 3 `pointer.worldX`/`worldY` are cached properties only refreshed on mouse events, not camera scroll
@@ -457,5 +473,4 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
 - ShopScene location cycling: When `unlockedLocations.length > 1`, ShopScene renders `< LocationName >` with clickable arrow buttons. `cycleLocation(direction)` wraps around the unlocked array. Active location is stored in registry and persisted. "New location discovered!" banner shown when arriving via alternate exit.
 
 ## Next Steps (from APPLICATION_SPEC.md)
-- Add actual pixel art elements for tables, light switches, rewards, etc. (give backrooms more flavor)
-- Add actual pixel art animations for enemies and player character
+- All pixel art sprite and animation items from the spec are now implemented

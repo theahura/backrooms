@@ -25,7 +25,7 @@ import { buildRoomGraph, buildFullRoomGraph, bfsFromRoom, getNextDoorway, getClo
 import { createDangerState, updateDangerTime, shouldSpawnWave, advanceWave, getWaveComposition, getSpawnRoom } from '../systems/danger.js';
 import { getFootstepInterval, getAmbientSoundDelay } from '../systems/audio.js';
 import { generateAllSounds, createAmbientDrone, playAmbientSound } from '../systems/audioEngine.js';
-import { SPRITE_DEFS, getAllSpriteKeys } from '../systems/sprites.js';
+import { SPRITE_DEFS, getAllSpriteKeys, ANIM_DEFS, getAllAnimKeys, getEnemyTextureKey, getAnimKeyForState } from '../systems/sprites.js';
 
 const WALL_THICKNESS = 16;
 
@@ -223,6 +223,15 @@ export class GameScene extends Phaser.Scene {
         pixelWidth: def.pixelWidth || 1,
         pixelHeight: def.pixelHeight || def.pixelWidth || 1,
         palette: def.palette,
+      });
+    }
+
+    for (const [animKey, animDef] of Object.entries(ANIM_DEFS)) {
+      this.anims.create({
+        key: animKey,
+        frames: animDef.frames.map(k => ({ key: k })),
+        frameRate: animDef.frameRate,
+        repeat: animDef.repeat,
       });
     }
   }
@@ -705,11 +714,9 @@ export class GameScene extends Phaser.Scene {
     const playerX = spawnRoom.x + spawnRoom.width / 2;
     const playerY = spawnRoom.y + spawnRoom.height / 2;
 
-    this.player = this.physics.add.sprite(playerX, playerY, '__DEFAULT');
-    this.player.setVisible(false);
-
-    this.playerGraphics = this.add.graphics();
-    this.playerGraphics.setDepth(200);
+    this.player = this.physics.add.sprite(playerX, playerY, 'player_idle_0');
+    this.player.setDepth(200);
+    this.player.play('player_idle');
     this.player.body.setSize(20, 20, true);
 
     this.physics.add.collider(this.player, this.walls);
@@ -717,38 +724,10 @@ export class GameScene extends Phaser.Scene {
     this.physics.add.collider(this.player, this.doorGroup);
   }
 
-  createEnemyTextures() {
-    const basicGfx = this.make.graphics({ add: false });
-    basicGfx.fillStyle(0xcc3333, 1);
-    basicGfx.fillCircle(10, 10, 10);
-    basicGfx.fillStyle(0x992222, 1);
-    basicGfx.fillCircle(7, 7, 3);
-    basicGfx.fillCircle(13, 7, 3);
-    basicGfx.generateTexture('enemy', 20, 20);
-    basicGfx.destroy();
-
-    const crawlerGfx = this.make.graphics({ add: false });
-    crawlerGfx.fillStyle(0x9933cc, 1);
-    crawlerGfx.fillCircle(7, 7, 7);
-    crawlerGfx.generateTexture('crawler', 14, 14);
-    crawlerGfx.destroy();
-
-    const spitterGfx = this.make.graphics({ add: false });
-    spitterGfx.fillStyle(0x3399cc, 1);
-    spitterGfx.fillCircle(10, 10, 10);
-    spitterGfx.fillStyle(0x226688, 1);
-    spitterGfx.fillCircle(7, 7, 3);
-    spitterGfx.fillCircle(13, 7, 3);
-    spitterGfx.fillStyle(0x44bbdd, 1);
-    spitterGfx.fillCircle(10, 13, 3);
-    spitterGfx.generateTexture('spitter', 20, 20);
-    spitterGfx.destroy();
-  }
-
   getEnemyStats(type) {
-    if (type === 'crawler') return { hp: this.scaledCrawlerHP, contactDamage: this.scaledCrawlerDamage, textureKey: 'crawler', bodySize: 12 };
-    if (type === 'spitter') return { hp: this.scaledSpitterHP, contactDamage: this.scaledSpitterDamage, textureKey: 'spitter', bodySize: 16 };
-    return { hp: this.scaledEnemyHP, contactDamage: this.scaledEnemyDamage, textureKey: 'enemy', bodySize: 16 };
+    if (type === 'crawler') return { hp: this.scaledCrawlerHP, contactDamage: this.scaledCrawlerDamage, textureKey: getEnemyTextureKey('crawler'), bodySize: 12 };
+    if (type === 'spitter') return { hp: this.scaledSpitterHP, contactDamage: this.scaledSpitterDamage, textureKey: getEnemyTextureKey('spitter'), bodySize: 16 };
+    return { hp: this.scaledEnemyHP, contactDamage: this.scaledEnemyDamage, textureKey: getEnemyTextureKey('basic'), bodySize: 16 };
   }
 
   spawnDangerWave(playerRoomId, litRoomIds) {
@@ -771,6 +750,7 @@ export class GameScene extends Phaser.Scene {
       enemy.body.setSize(stats.bodySize, stats.bodySize, true);
       enemy.body.setCollideWorldBounds(true);
       enemy.setDepth(60);
+      enemy.play(getAnimKeyForState(type, 'idle'), true);
 
       this.enemyStates.push({
         sprite: enemy,
@@ -801,8 +781,6 @@ export class GameScene extends Phaser.Scene {
   createEnemies() {
     this.enemyGroup = this.physics.add.group();
     this.enemyStates = [];
-    this.createEnemyTextures();
-
     for (const room of this.level.rooms) {
       const furniture = this.roomFurniture.get(room.id) || [];
       const spawnPoints = generateRoomEnemies(
@@ -816,6 +794,7 @@ export class GameScene extends Phaser.Scene {
         enemy.body.setSize(stats.bodySize, stats.bodySize, true);
         enemy.body.setCollideWorldBounds(true);
         enemy.setDepth(60);
+        enemy.play(getAnimKeyForState(spawn.type, 'idle'), true);
 
         this.enemyStates.push({
           sprite: enemy,
@@ -1329,6 +1308,7 @@ export class GameScene extends Phaser.Scene {
 
     if (isEnemyDead(enemyState.health)) {
       this.playSound('enemy_death');
+      enemySprite.stop();
       enemySprite.setActive(false);
       enemySprite.body.stop();
       enemySprite.body.enable = false;
@@ -1430,6 +1410,7 @@ export class GameScene extends Phaser.Scene {
       const inLitRoom = litRooms.some(room => isPointInRoom(room, es.x, es.y));
       if (inLitRoom) {
         es.sprite.setVelocity(0, 0);
+        es.sprite.play(getAnimKeyForState(es.type, 'idle'), true);
         continue;
       }
 
@@ -1511,38 +1492,34 @@ export class GameScene extends Phaser.Scene {
       }
 
       es.sprite.setVelocity(updated.velocityX, updated.velocityY);
+
+      if (updated.velocityX !== 0 || updated.velocityY !== 0) {
+        es.sprite.setRotation(Math.atan2(updated.velocityY, updated.velocityX));
+      }
+      es.sprite.play(getAnimKeyForState(es.type, es.state), true);
     }
   }
 
   drawPlayer() {
-    this.playerGraphics.clear();
-    this.playerGraphics.x = this.player.x;
-    this.playerGraphics.y = this.player.y;
-    this.playerGraphics.setRotation(this.playerAngle || 0);
+    this.player.setRotation(this.playerAngle || 0);
 
     const hurt = isInvulnerable(this.combatState);
     const hiding = this.hidingState.isHiding;
-    let alpha, bodyColor, indicatorColor;
 
     if (hiding) {
-      alpha = 0.3;
-      bodyColor = 0x336633;
-      indicatorColor = 0x558855;
+      this.player.setAlpha(0.3);
+      this.player.setTint(0x336633);
     } else if (hurt) {
-      alpha = 0.5;
-      bodyColor = 0xcc4444;
-      indicatorColor = 0xee8888;
+      this.player.setAlpha(0.5);
+      this.player.setTint(0xcc4444);
     } else {
-      alpha = 1;
-      bodyColor = 0x44aa44;
-      indicatorColor = 0x88ee88;
+      this.player.setAlpha(1);
+      this.player.clearTint();
     }
 
-    this.playerGraphics.fillStyle(bodyColor, alpha);
-    this.playerGraphics.fillCircle(0, 0, 10);
-
-    this.playerGraphics.fillStyle(indicatorColor, alpha);
-    this.playerGraphics.fillTriangle(5, -4, 5, 4, 14, 0);
+    const isMoving = this.player.body.velocity.x !== 0 || this.player.body.velocity.y !== 0;
+    const animKey = isMoving ? 'player_walk' : 'player_idle';
+    this.player.play(animKey, true);
   }
 
   drawHUD() {
