@@ -23,24 +23,25 @@ The basic idea:
 
 The actual view of the top down should be that the camera is centered on the player character, fixed fov. As the player moves, the camera stays on them.
 
-movement is with wasd, looking is with the mouse, shooting is left click, using items is right click, q/e is to switch weapons if multiple are held
+movement is with wasd, looking is with the mouse, shooting is left click, using items is right click or e, q or scroll to switch weapons if multiple are held
 
-the player character should be a simple character 'model' (pixel art / shapes are fine as long as it looks like a person roughly)
+The player character should be a simple character 'model' (pixel art / shapes are fine as long as it looks like a person roughly)
 
-Fill out any details that are missing, e.g. the theming around where the player is getting their upgraded equipment from, what kind of valuables are discovered, the design / feel of the rooms, the design / feel of the enemies, and so on
+The old flash game Motherload is the direct inspiration for this game.
 
-The old flash game Motherload is the direct inspiration for this game if that helps.
-
-Next things to build:
-- more variety in the room design -- some rooms should feel more maze like, with walls and columns and different shapes
+Other details (from playtesting):
 - tables shouldnt block light
 - there should be more doors and stairs per room
 - the map should not be available immediately (it should be very expensive)
-- player shouldnt start with a gun
 - guns should have ammo
+- player shouldnt start with a gun
 - the starting location should have a standard entry -- that entry shouldnt move; and the 'shop' should be in the center of the 'furniture shop' and not in the edge blocking the door
 - the player should be able to move around under a table while hidden
-- most rooms should NOT have light switches
+- most rooms should NOT have light switches -- these should be extremely rare
+- enemies should be able to move between rooms
+
+Next things to build:
+- more variety in the room design -- some rooms should feel more maze like, with walls and columns and different shapes
 
 Known bugs:
 - NA
