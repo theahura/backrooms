@@ -133,7 +133,7 @@ describe('getNextDoorway', () => {
     const graph = buildRoomGraph(rooms, []);
     const cameFrom = bfsFromRoom(graph, 0);
 
-    const doorway = getNextDoorway(rooms, graph, cameFrom, 2, 0);
+    const doorway = getNextDoorway(graph, cameFrom, 2, 0);
 
     expect(doorway).not.toBeNull();
     expect(typeof doorway.x).toBe('number');
@@ -145,7 +145,7 @@ describe('getNextDoorway', () => {
     const graph = buildRoomGraph(rooms, []);
     const cameFrom = bfsFromRoom(graph, 0);
 
-    const doorway = getNextDoorway(rooms, graph, cameFrom, 0, 0);
+    const doorway = getNextDoorway(graph, cameFrom, 0, 0);
 
     expect(doorway).toBeNull();
   });
@@ -158,7 +158,7 @@ describe('getNextDoorway', () => {
     const graph = buildRoomGraph(rooms, doorStates);
     const cameFrom = bfsFromRoom(graph, 0);
 
-    const doorway = getNextDoorway(rooms, graph, cameFrom, 2, 0);
+    const doorway = getNextDoorway(graph, cameFrom, 2, 0);
 
     expect(doorway).toBeNull();
   });

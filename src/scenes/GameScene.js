@@ -1309,7 +1309,7 @@ export class GameScene extends Phaser.Scene {
       }
 
       const enemyRoomId = es.currentRoomId;
-      const doorway = getNextDoorway(this.level.rooms, this.roomGraph, cameFrom, enemyRoomId, playerRoomId);
+      const doorway = getNextDoorway(this.roomGraph, cameFrom, enemyRoomId, playerRoomId);
 
       let seekDoorway = false;
       let wanderDoorway = doorway;

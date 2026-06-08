@@ -26,11 +26,9 @@ function isDoorClosed(doorStates, roomIdA, roomIdB) {
 
 export function buildRoomGraph(rooms, doorStates) {
   const graph = new Map();
-  const roomMap = new Map();
 
   for (const room of rooms) {
     graph.set(room.id, []);
-    roomMap.set(room.id, room);
   }
 
   for (const room of rooms) {
@@ -64,17 +62,9 @@ export function bfsFromRoom(graph, startRoomId) {
   return cameFrom;
 }
 
-export function getNextDoorway(rooms, graph, cameFrom, enemyRoomId, playerRoomId) {
+export function getNextDoorway(graph, cameFrom, enemyRoomId, playerRoomId) {
   if (enemyRoomId === playerRoomId) return null;
   if (!cameFrom.has(enemyRoomId)) return null;
-
-  let nextRoomId = enemyRoomId;
-  const path = [enemyRoomId];
-  while (cameFrom.has(nextRoomId) && cameFrom.get(nextRoomId) !== playerRoomId) {
-    nextRoomId = cameFrom.get(nextRoomId);
-    path.push(nextRoomId);
-  }
-  if (!cameFrom.has(nextRoomId)) return null;
 
   const stepToward = cameFrom.get(enemyRoomId);
   const edges = graph.get(enemyRoomId) || [];

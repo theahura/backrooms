@@ -1,6 +1,10 @@
 # Current Progress
 
-## Status: Cross-Room Enemy Movement
+## Status: Balance Tuning — Making the Player Feel More Lost
+
+Rebalanced the game to create a more disorienting, lost-feeling experience. Key changes: (1) Flashlight FOV narrowed from PI/4 (45°) to PI/6 (30°) base angle — players see less at any given moment, creating tunnel vision and claustrophobia. (2) Battery duration extended from 90s to 150s — players explore longer, venture deeper, and have more time to get lost. (3) Items per room reduced from 2-5 to 1-3, and loot table reweighted to favor utility items (battery 25, ammo 20) over treasures (copper 30, silver 15, gold 8, gem 2) — treasure drops from ~76% to ~55% of all items. (4) Shop costs increased across the board: standard upgrades from [100, 300, 800] to [200, 600, 1500], starting pistol from 500 to 1000, minimap from 1500 to 3000. Combined effect: thinner FOV + longer battery = more rooms explored with less visibility; fewer treasures + higher costs = slower progression where each find matters more. No new modules or functions. No save migration needed (costs are not persisted; stats are recomputed from upgrade levels). Updated tests for new item count bounds, shop cost assertions, flashlight base value, and battery drain duration.
+
+## Previous: Cross-Room Enemy Movement
 
 Enemies can now navigate between rooms through open doorways to chase the player. Key changes: (1) New pure function module `pathfinding.js` with BFS-based room graph pathfinding — `buildRoomGraph()` creates adjacency list from room doors (excluding closed doors), `bfsFromRoom()` runs BFS from player room, `getNextDoorway()` finds the next doorway on the path toward the player, `getDoorwayCenter()` computes world position of doorway centers, `getRoomDistance()` returns BFS hop count. (2) `updateEnemyAI()` in `enemy.js` gains optional 7th parameter `navContext` — in chase state, enemies in different rooms navigate to doorways instead of transitioning to search; in idle state, enemies probabilistically seek doorways for room transitions. (3) GameScene builds and caches room graph (invalidated on door toggle via `roomGraphDirty` flag), runs BFS from player room each frame, tracks per-enemy room state (`spawnRoomId`, `currentRoomId`, `roomTransitionCooldown`, `targetDoorway`), computes per-room enemy density, and constructs navContext per enemy. (4) Constraints: 10s cooldown between room transitions, max 2 rooms from spawn (leash), max 4 enemies per room during idle wander. (5) Closed doors block pathfinding — closing a door is a valid defensive strategy. (6) Fixed 6 pre-existing test failures (shop prices, item count range, battery drain timing, flashlight angle). 25 new tests: 18 for pathfinding, 7 for navContext-driven enemy AI.
 
@@ -394,5 +398,5 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
 - ShopScene location cycling: When `unlockedLocations.length > 1`, ShopScene renders `< LocationName >` with clickable arrow buttons. `cycleLocation(direction)` wraps around the unlocked array. Active location is stored in registry and persisted. "New location discovered!" banner shown when arriving via alternate exit.
 
 ## Next Steps
-- All items from APPLICATION_SPEC.md "Next things to build" are now complete
+- All items from APPLICATION_SPEC.md "Next things to build" are now complete (balance tuning was the latest)
 - Potential future features: more location variety, location-specific enemy types, achievements, boss encounters
