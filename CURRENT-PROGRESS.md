@@ -1,6 +1,10 @@
 # Current Progress
 
-## Status: New Hiding Furniture Types + Scroll Wheel Weapon Switching
+## Status: Enemy Corpse Persistence + Lit Room Enemy Behavior
+
+Two related enemy lifecycle changes: (1) Dead enemies now persist as visible corpses — `onBulletHitEnemy` keeps the sprite visible with gray tint (0x666666), faded alpha (0.6), toppled angle (90°), and low depth (5, below living enemies at 60). Sprite gets `setActive(false)` and `body.enable = false` so it's excluded from physics/collision checks — player and bullets pass through corpses. Enemy state is still removed from `enemyStates` array so no AI updates occur. New constants `CORPSE_TINT`, `CORPSE_ALPHA`, `CORPSE_ANGLE`, `CORPSE_DEPTH` exported from `combat.js`. (2) Enemies no longer automatically despawn when a light switch is turned on — `onToggleSwitch` was simplified from 20 lines to a single `toggleSwitch()` call with no enemy interaction. The existing freeze behavior in `updateEnemies()` (velocity zeroed, AI skipped via `continue`) is now the sole mechanism for handling enemies in lit rooms. Enemies remain alive and visible in lit rooms but frozen in place; if the switch is toggled off, they resume AI. No new modules, no save format changes, no new tests (feature is GameScene wiring changes only — existing tests for `isEnemyDead`, `applyEnemyDamage`, `isPointInRoom`, and `updateEnemyAI` cover the underlying behavioral contracts). 479 tests passing.
+
+## Previous: New Hiding Furniture Types + Scroll Wheel Weapon Switching
 
 Added 4 new hideable furniture types from the APPLICATION_SPEC and scroll wheel weapon switching. Key changes: (1) Four new entries in `FURNITURE_TYPES` in `furniture.js`: `bed` (90x60, canHide: true, blocksLight: false — large hiding area, hide under), `armoire` (40x70, canHide: true, blocksLight: true — tall wardrobe, hide inside, blocks light/LOS), `closet` (50x60, canHide: true, blocksLight: true — tall enclosed space, hide inside, blocks light/LOS), `vent` (30x30, canHide: true, blocksLight: false — small floor grate, crawl inside, constrained movement area). (2) Armoire and closet introduce a new gameplay dynamic: furniture that is both a hiding spot AND blocks light/LOS — previously these properties were mutually exclusive. This creates double-safe hiding spots where the player is invisible AND enemies can't see through the furniture. (3) `TYPE_KEYS` auto-updates from `Object.keys(FURNITURE_TYPES)` — type distribution changes from 4 types (25% each) to 8 types (12.5% each), increasing room variety. (4) Scroll wheel weapon switching via `this.input.on('wheel', ...)` in `setupInput()` with 200ms cooldown — reuses existing `switchWeapon()` from `weapons.js`, same guards as other input (dead/dayEnding/hiding). No new modules, no new exports, no save format changes. 6 new tests covering light blocking behavior, generation distribution, hideable integration, and blocksLight properties.
 
@@ -99,7 +103,7 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
   - Bullets render at depth 150 (visible above darkness layer)
 - Enemy health system
   - 50 HP per zombie, killed after 2 bullet hits
-  - Dead enemies removed from physics and AI updates
+  - Dead enemies persist as visible corpses (gray tint, faded alpha, toppled), removed from physics and AI updates
 - Flashlight battery drain system
   - 90-second full drain, battery depletes linearly over time
   - Flashlight cone angle scales from 100% to 25% of base as battery drains
@@ -148,7 +152,7 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
   - ~40% of non-room-0 rooms (seeded PRNG, seed+40000 offset) have a light switch on a random wall
   - Press E within 80px to toggle on/off
   - When ON: entire room illuminated (darkness mask removed via fillRect in BitmapMask)
-  - When ON: all enemies in the room despawned, enemies freeze if they enter a lit room
+  - When ON: enemies in the room are frozen in place (velocity zeroed, AI skipped); they remain visible and alive
   - Switch visual: small rectangle on wall (gray when off, yellow when on) at depth 50
   - Pure function module `lightswitch.js`: createSwitchStates, toggleSwitch, findNearestSwitch, getLitRoomIds, isPointInRoom
   - E-key interaction resolves nearest interactable (door vs switch) by Euclidean distance
@@ -335,6 +339,12 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
   - Armoire and closet are the first furniture types that are both hideable AND block light/LOS
   - Scroll wheel weapon switching via `this.input.on('wheel', ...)` with 200ms debounce cooldown
   - 4 new tests: generation distribution, hideable integration, blocksLight properties
+- Enemy corpse persistence + lit room enemy behavior
+  - Dead enemies remain visible as corpses: gray tint (CORPSE_TINT=0x666666), faded alpha (0.6), toppled angle (90°), depth 5 (below living enemies at 60)
+  - Corpse sprites have `active=false` and `body.enable=false` — no physics, no overlap callbacks, player/bullets pass through
+  - Enemies no longer despawn when light switches are toggled on — `onToggleSwitch` is now a pure state toggle
+  - Enemies in lit rooms are frozen in place (velocity zeroed, AI skipped) by the existing `updateEnemies()` freeze check
+  - If switch toggled off, frozen enemies resume their AI
 - 479 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, weapon upgrades, enemy types, stairs, weapons, inventory capacity, maze generation, room connections, weaponless start, ammo system, minimap upgrade, switch frequency, lore spawning, lore persistence, lore journal, floor scaling, multi-floor stair connections, alternate locations, location persistence, cross-room pathfinding, navContext-driven enemy AI, and new furniture types
 - Documentation (docs.md files for root, src, systems, scenes)
 - Bug fix: flashlight mouse tracking drift during WASD movement
@@ -412,7 +422,5 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
 - Add more room types
 - Add actual pixel art elements for tables, light switches, rewards, etc. (give backrooms more flavor)
 - Add actual pixel art animations for enemies and player character
-- Enemy corpses should persist after death
-- Enemies should not disappear automatically in lit rooms
 - One enemy type should be able to open doors
 - More difficult enemies should spawn as player spends more time outside safe rooms

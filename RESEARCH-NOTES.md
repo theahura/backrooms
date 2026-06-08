@@ -2010,3 +2010,75 @@ The APPLICATION_SPEC says "rooms can have areas where players can hide, includin
 - Reuse `switchWeapon()` and `updateWeaponStats()` — same as Q key
 - Guard: skip if hiding, dead, or day ending (same guards as other input)
 - The 2-slot system means scroll direction doesn't matter (just toggle), but use direction for consistency with player expectation
+
+## Enemy Corpse Persistence + Lit Room Enemy Behavior Research
+
+### Problem Statement
+Two related spec items:
+1. "When an enemy dies, its body should remain" — currently dead enemies are fully hidden (`setVisible(false)`) and removed from `enemyStates`
+2. "Enemies shouldn't disappear in rooms with light automatically" — currently `onToggleSwitch` instantly despawns all enemies in the room when a light is turned on
+
+### Current Death Path (GameScene.js:1219-1236)
+`onBulletHitEnemy(bullet, enemySprite)`:
+- Finds `enemyState` by `es.sprite === enemySprite`
+- Applies damage via `applyEnemyDamage()` from combat.js
+- On death: `setActive(false)`, `setVisible(false)`, `body.stop()`, `body.enable = false`
+- Filters dead enemy from `this.enemyStates`
+- Sprite remains in `enemyGroup` but inactive and invisible
+
+### Current Lit Room Despawn (GameScene.js:323-342)
+`onToggleSwitch(switchId)`:
+- When switch turned ON: finds all enemies in room via `isPointInRoom`
+- Applies same death pattern: deactivate, hide, stop, disable body
+- Filters from `this.enemyStates`
+
+### Current Lit Room Freeze (GameScene.js:1305-1309)
+In `updateEnemies(delta)`:
+- Enemies in lit rooms have velocity zeroed and AI skipped (via `continue`)
+- This catches enemies that wander into lit rooms after switch toggled
+
+### Corpse Design Decision: Visual-Only Sprite Retention
+
+Based on Phaser 3 research:
+- `sprite.disableBody(true, false)` — deactivates game object (no updates) but keeps visible
+- Alternatively: manual `setActive(false)` + keep `setVisible(true)` + `body.enable = false`
+- Dead sprites with `active=false` are skipped by physics overlap checks — no false damage on player walking over corpses
+- Visual indicators: `setTint(0x666666)` (gray tint) + `setAlpha(0.6)` (faded) + `setAngle(90)` (toppled)
+- Performance: rendering inactive sprites is cheap (just draw calls, no physics computation)
+
+### Implementation Plan
+
+**1. Enemy Corpses (onBulletHitEnemy change):**
+- Keep `setActive(false)` — removes from physics/collision checks
+- REMOVE `setVisible(false)` — corpse stays visible
+- Keep `body.stop()` and `body.enable = false` — no physics interaction
+- Add corpse visual: `setTint(0x666666)`, `setAlpha(0.6)`, `setAngle(90)`
+- Still filter from `this.enemyStates` — no AI updates for dead enemies
+- Lower depth to below living enemies (depth 5 — same as items, below darkness at 100)
+
+**2. Lit Room Enemies (onToggleSwitch change):**
+- Remove the entire enemy despawn block from `onToggleSwitch`
+- Keep the existing freeze behavior in `updateEnemies` (velocity zeroed, AI skipped)
+- Enemies remain alive and visible in lit rooms — just frozen in place
+- Player can still shoot frozen enemies
+- If switch turned off, enemies resume AI
+
+### Constants
+- `CORPSE_TINT = 0x666666` — gray desaturation
+- `CORPSE_ALPHA = 0.6` — faded appearance
+- `CORPSE_ANGLE = 90` — toppled on side
+- `CORPSE_DEPTH = 5` — below living enemies (60), below darkness (100)
+
+### Edge Cases
+- Enemies killed in lit rooms: become corpses (visible because room is lit)
+- Enemies frozen in lit rooms then killed: same corpse treatment
+- Player walks over corpse: no damage (body disabled, active=false skips overlap)
+- onEnemyContact: already uses `this.enemyStates.find(es => es.sprite === enemySprite)` — dead enemies are filtered out of enemyStates, so contact returns early with no damage
+- Multiple enemies die in same spot: corpses stack visually (acceptable)
+
+### Test Strategy
+- Pure function tests: `isEnemyDead` and `applyEnemyDamage` in combat.js already tested — no changes needed
+- No pure function changes needed — all changes are in GameScene.js (scene-level wiring)
+- New tests should verify behavior properties that can be tested at the pure function level:
+  - The lit room freeze behavior is already testable via `updateEnemyAI` (passing `inLitRoom` context)
+  - Corpse visual properties can't be tested without Phaser mocks, but the removal of despawn from switch toggle is a behavioral change worth documenting in tests

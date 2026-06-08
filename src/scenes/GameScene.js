@@ -5,7 +5,7 @@ import { generateMazeWalls } from '../systems/maze.js';
 import { getFlashlightPolygon } from '../systems/visibility.js';
 import { generateMultiFloorLevel, getFloorBounds, getFloorRoomCounts, STAIR_SIZE } from '../systems/stairs.js';
 import { generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_CHASE, CRAWLER_CHASE_SPEED, SPITTER_CHASE_SPEED } from '../systems/enemy.js';
-import { createCombatState, applyDamage, updateCombat, getHealthFraction, isInvulnerable, applyEnemyDamage, isEnemyDead, ENEMY_CONTACT_DAMAGE, ENEMY_MAX_HP, CRAWLER_MAX_HP, SPITTER_MAX_HP, CRAWLER_CONTACT_DAMAGE, SPITTER_CONTACT_DAMAGE, SPITTER_PROJECTILE_DAMAGE } from '../systems/combat.js';
+import { createCombatState, applyDamage, updateCombat, getHealthFraction, isInvulnerable, applyEnemyDamage, isEnemyDead, ENEMY_CONTACT_DAMAGE, ENEMY_MAX_HP, CRAWLER_MAX_HP, SPITTER_MAX_HP, CRAWLER_CONTACT_DAMAGE, SPITTER_CONTACT_DAMAGE, SPITTER_PROJECTILE_DAMAGE, CORPSE_TINT, CORPSE_ALPHA, CORPSE_ANGLE, CORPSE_DEPTH } from '../systems/combat.js';
 import { calculateBulletVelocity, calculateShotgunSpread, canFire, updateFireCooldown, isBulletExpired, SPITTER_PROJECTILE_SPEED, SPITTER_PROJECTILE_RANGE } from '../systems/shooting.js';
 import { WEAPON_TYPES, createWeaponState, switchWeapon, pickupWeapon, getActiveWeapon, getEffectiveStats, generateLevelWeapons, hasAmmo, consumeAmmo, addAmmo, AMMO_PER_PICKUP } from '../systems/weapons.js';
 import { getEnemyHP, getEnemyCount, getEnemyChaseSpeed, getEnemyDamage } from '../systems/scaling.js';
@@ -322,24 +322,6 @@ export class GameScene extends Phaser.Scene {
 
   onToggleSwitch(switchId) {
     this.switchStates = toggleSwitch(this.switchStates, switchId);
-    const sw = this.switchStates.find(s => s.id === switchId);
-    if (!sw || !sw.isOn) return;
-
-    const room = this.level.rooms.find(r => r.id === sw.roomId);
-    if (!room) return;
-
-    const toRemove = this.enemyStates.filter(es =>
-      isPointInRoom(room, es.sprite.x, es.sprite.y)
-    );
-    for (const es of toRemove) {
-      es.sprite.setActive(false);
-      es.sprite.setVisible(false);
-      es.sprite.body.stop();
-      es.sprite.body.enable = false;
-    }
-    this.enemyStates = this.enemyStates.filter(es =>
-      !toRemove.includes(es)
-    );
   }
 
   onToggleDoor(doorId) {
@@ -1229,9 +1211,12 @@ export class GameScene extends Phaser.Scene {
 
     if (isEnemyDead(enemyState.health)) {
       enemySprite.setActive(false);
-      enemySprite.setVisible(false);
       enemySprite.body.stop();
       enemySprite.body.enable = false;
+      enemySprite.setTint(CORPSE_TINT);
+      enemySprite.setAlpha(CORPSE_ALPHA);
+      enemySprite.setAngle(CORPSE_ANGLE);
+      enemySprite.setDepth(CORPSE_DEPTH);
       this.enemyStates = this.enemyStates.filter(es => es !== enemyState);
     }
   }
@@ -1240,7 +1225,16 @@ export class GameScene extends Phaser.Scene {
     if (this.hidingState.isHiding) return;
 
     const enemyState = this.enemyStates.find(es => es.sprite === enemySprite);
-    const damage = enemyState ? enemyState.contactDamage : this.scaledEnemyDamage;
+    if (!enemyState) return;
+
+    const litRoomIds = getLitRoomIds(this.switchStates);
+    if (!litRoomIds.includes(0)) litRoomIds.push(0);
+    const inLitRoom = this.level.rooms.some(room =>
+      litRoomIds.includes(room.id) && isPointInRoom(room, enemyState.x, enemyState.y)
+    );
+    if (inLitRoom) return;
+
+    const damage = enemyState.contactDamage;
 
     const before = this.combatState;
     this.combatState = applyDamage(before, damage);

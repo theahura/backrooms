@@ -10,6 +10,11 @@ export const CRAWLER_CONTACT_DAMAGE = 15;
 export const SPITTER_CONTACT_DAMAGE = 10;
 export const SPITTER_PROJECTILE_DAMAGE = 15;
 
+export const CORPSE_TINT = 0x666666;
+export const CORPSE_ALPHA = 0.6;
+export const CORPSE_ANGLE = 90;
+export const CORPSE_DEPTH = 5;
+
 export function createCombatState(maxHp = PLAYER_MAX_HP) {
   return {
     hp: maxHp,

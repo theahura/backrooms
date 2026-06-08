@@ -115,3 +115,4 @@ describe('isEnemyDead', () => {
     expect(isEnemyDead(25)).toBe(false);
   });
 });
+
