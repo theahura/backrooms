@@ -1320,7 +1320,7 @@ export class GameScene extends Phaser.Scene {
           if (currentRoom) {
             const eligibleDoors = currentRoom.doors.filter(d => {
               const dist = getRoomDistance(this.roomGraph, es.spawnRoomId, d.targetRoomId);
-              if (dist > MAX_ROOM_DISTANCE && dist !== -1) return false;
+              if (dist === -1 || dist > MAX_ROOM_DISTANCE) return false;
               const count = roomEnemyCounts.get(d.targetRoomId) || 0;
               if (count >= MAX_ROOM_ENEMIES) return false;
               return true;
