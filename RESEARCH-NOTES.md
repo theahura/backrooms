@@ -2357,3 +2357,95 @@ From APPLICATION_SPEC.md: "make it so that one kind of enemy can open doors." Th
 3. `src/scenes/GameScene.js` — build full graph for crawlers, compute `closedDoorOnPath` in navContext, handle `wantsToOpenDoor` signal
 4. `src/systems/__tests__/enemy.test.js` — tests for opening_door state transitions, timer behavior, wantsToOpenDoor signal
 5. `src/systems/__tests__/pathfinding.test.js` — tests for buildFullRoomGraph including closed-door edges
+
+## Additional Room Types Research
+
+### Current Room Type System
+
+The existing `maze.js` handles three room types distributed as: open (40%), maze (30%), columns (30%). The architecture uses:
+- `getRoomType(seed)` to determine type via seeded PRNG (offset +70000)
+- `generateMazeWalls(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, doors)` as the dispatch entry point
+- `segmentCrossesDoorZone(seg, doorZones)` to filter segments that would block doors
+- Room dimensions: 1200x1000 with WALL_THICKNESS=16, inner area ~1168x968
+- `getDoorZone()` creates exclusion rectangles (80+wallThickness deep) extending into room from each door
+
+All generated segments are axis-aligned `{x1, y1, x2, y2}` objects pushed into the `wallSegments` array for raycasting and separately created as Phaser physics zones for collision.
+
+### New Room Type: Corridor
+
+**Concept**: Deeper recursive division creating winding passage layouts. Classic Backrooms Level 0 yellow hallway feel — long walls with narrow passages between them.
+
+**Algorithm**: Reuse existing `subdivide()` pattern but with:
+- Smaller `MIN_SUBDIVISION_SIZE` (120 vs 200) to create narrower corridors
+- Deeper recursion (`maxDepth` 4 vs 2) for more subdivisions
+- Narrower `GAP_WIDTH` (60 vs 80) for tighter passages
+- Same door zone avoidance via `segmentCrossesDoorZone()`
+- Produces 6-12 wall segments creating winding paths
+
+**Reference**: Recursive division naturally produces "long straight walls crossing the space" (Wikipedia maze generation algorithms). Deeper recursion creates the subdivided hallway feel.
+
+### New Room Type: Storage
+
+**Concept**: Scattered rectangular crates/pallets of varying sizes creating irregular cover and shadow patterns. Warehouse/industrial feel.
+
+**Algorithm**: Rejection-sampling rectangle placement:
+1. Pick random position and size within inner bounds
+2. Size classes: small (40x40), medium (60x40), large (80x60)
+3. Check AABB overlap against all placed crates (with 50px minimum gap for navigability)
+4. Check `segmentCrossesDoorZone()` for all 4 sides
+5. Place 6-10 crates per room (retry up to count*30 attempts)
+6. Convert each crate to 4 wall segments (identical to column segment pattern)
+
+**Gap size (50px)**: Chosen because player collision body is ~20px wide, and GAP_WIDTH for other types is 60-80px. 50px provides tight but navigable passages between crates.
+
+**No connectivity validation needed**: With 6-10 crates of 40-80px in a 1168x968 room with 50px gaps, pockets are geometrically impossible — crates are too sparse relative to room size. This matches the existing column pattern (no connectivity check there either).
+
+### New Room Type: Cubicles (Office)
+
+**Concept**: Grid of U-shaped partition walls creating corporate horror cubicle farm aesthetic. Regular grid with random open sides per cell.
+
+**Algorithm**: Grid-based template stamping:
+1. Divide inner room into cells (150x150 each, giving ~7x6 grid in standard room)
+2. For each cell, seeded-random choose: U-shape (3 walls), L-shape (2 walls), or open (skip)
+3. U-shape has one open side (randomly chosen: N/S/E/W) — the cubicle entrance
+4. L-shape has two open sides (corner piece)
+5. Each wall is shorter than cell size (120px instead of 150px) to leave aisle gaps
+6. Filter all segments against door zones
+7. Skip ~30% of cells randomly to ensure navigability
+
+**Template definitions** (relative to cell origin cx, cy with wall length 120):
+- U-north (open top): left wall + bottom wall + right wall
+- U-south (open bottom): left wall + top wall + right wall
+- U-east (open right): left wall + top wall + bottom wall
+- U-west (open left): right wall + top wall + bottom wall
+- L-shapes: only 2 adjacent walls
+
+### Type Distribution (Rebalanced)
+
+```
+open:     20% (was 40%)  — some rooms should still be empty for pacing/contrast
+maze:     15% (was 30%)  — BSP recursive division
+columns:  15% (was 30%)  — staggered pillar grid
+corridor: 20%            — deep recursive division (winding passages)
+storage:  15%            — scattered crates
+cubicles: 15%            — office partition grid
+```
+
+Total: 100%. Across a typical 6-room level (excluding room 0), expect ~1 of each type.
+
+### Integration Approach
+
+All changes confined to `maze.js`:
+1. Extend `getRoomType()` to return 6 types instead of 3
+2. Extend `generateMazeWalls()` dispatch to handle new types
+3. Add internal functions: `generateCorridorWalls()`, `generateStorageWalls()`, `generateCubicleWalls()`
+4. Export new type constants for testing
+5. No changes to GameScene, level.js, or any other file — the interface is unchanged
+
+### Performance
+
+- Corridor: ~6-12 segments (same order as current maze type)
+- Storage: 6-10 crates × 4 segments = 24-40 segments
+- Cubicles: ~15-25 cells × 2-3 segments = 30-75 segments
+- All well within raycasting budget (existing rooms with furniture already produce 50+ segments)
+- Generation is one-time cost in `create()` — no per-frame impact
