@@ -1513,6 +1513,18 @@ export class GameScene extends Phaser.Scene {
         this.onUseBattery();
       }
     });
+
+    this.lastScrollTime = 0;
+    this.input.on('wheel', (pointer, currentlyOver, deltaX, deltaY) => {
+      if (this.combatState.isDead || this.dayEnding || this.isTeleporting) return;
+      const now = this.time.now;
+      if (now - this.lastScrollTime < 200) return;
+      this.lastScrollTime = now;
+      if (deltaY !== 0) {
+        this.weaponState = switchWeapon(this.weaponState);
+        this.updateWeaponStats();
+      }
+    });
   }
 
   onWeaponPickup(wpnSprite) {

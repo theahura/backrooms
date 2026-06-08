@@ -1962,3 +1962,51 @@ MAX_ROOM_ENEMIES = 4             // density cap per room
 - No pathfinding around internal maze walls — enemies rely on physics sliding
 - Enemies cannot open doors (closing a door traps them)
 - Sound-based attraction (gunshots drawing enemies from adjacent rooms) is a future enhancement
+
+## New Hiding Furniture Types Research
+
+### Spec Gap Analysis
+The APPLICATION_SPEC says "rooms can have areas where players can hide, including under tables and beds, inside vents, armoirs, and closets." Currently only `table` and `desk` have `canHide: true`. Missing: bed, vent, armoire, closet.
+
+### New Furniture Type Definitions
+
+| Type | Width | Height | Color | canHide | blocksLight | Rationale |
+|------|-------|--------|-------|---------|-------------|-----------|
+| bed | 90 | 60 | 0x4a3a3a (dark gray-brown) | true | false | Low-profile, hide under. Large footprint = generous hiding area |
+| armoire | 40 | 70 | 0x5c3a21 (dark wood) | true | true | Tall enclosed wardrobe, hide inside. Blocks light AND hides player — new dynamic |
+| closet | 50 | 60 | 0x3a3a3a (dark gray) | true | true | Tall enclosed space, hide inside. Same dual role as armoire |
+| vent | 30 | 30 | 0x666666 (metallic gray) | true | false | Small floor vent/grate, crawl inside. Smallest hiding spot |
+
+### Design Impact
+- Adding 4 types to `FURNITURE_TYPES` changes `TYPE_KEYS` length from 4 to 8. Each type now appears ~12.5% of the time instead of 25%.
+- Armoire and closet introduce a new combination: furniture that is both a hiding spot AND blocks light/LOS. This creates interesting gameplay where the player can hide inside something that also blocks enemy line-of-sight through it.
+- Vent is the smallest hiding spot — player must be precise to interact with it, and the movement area while hidden is very constrained (30x30 minus 20x20 body = 10x10 movement area).
+- Bed is the largest hiding spot — generous movement area while hidden (90x60 minus body = large crawl space).
+
+### Architecture
+- Only change: add 4 entries to `FURNITURE_TYPES` object in `furniture.js`
+- `TYPE_KEYS` is `Object.keys(FURNITURE_TYPES)` so auto-includes new types
+- `generateRoomFurniture` randomly selects from `TYPE_KEYS` — no changes needed
+- GameScene's `blocksLight` check uses `FURNITURE_TYPES[item.type]` — works for new types
+- GameScene's hiding system uses `item.canHide` on placed items — works for new types
+- No test changes expected for existing tests (no assertions on specific type names/distributions)
+- New tests: verify new types exist in FURNITURE_TYPES with correct properties, verify blocksLight behavior for armoire/closet
+
+## Scroll Wheel Weapon Switching Research
+
+### Phaser 3 API
+- `this.input.on('wheel', (pointer, currentlyOver, deltaX, deltaY, deltaZ) => {...})`
+- `deltaY < 0` = scroll up, `deltaY > 0` = scroll down
+- Available since Phaser 3.18.0, stable in 3.90.x
+
+### Debouncing
+- Phaser has no built-in scroll debounce
+- Pattern: time-based cooldown using `this.time.now`
+- 200ms cooldown between allowed switches (matches fire rate granularity)
+- Trackpads produce many small scroll events — cooldown handles this
+
+### Integration
+- Add `this.input.on('wheel', ...)` in `setupInput()` alongside existing mouse handlers
+- Reuse `switchWeapon()` and `updateWeaponStats()` — same as Q key
+- Guard: skip if hiding, dead, or day ending (same guards as other input)
+- The 2-slot system means scroll direction doesn't matter (just toggle), but use direction for consistency with player expectation

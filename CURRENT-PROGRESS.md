@@ -1,6 +1,10 @@
 # Current Progress
 
-## Status: Balance Tuning — Making the Player Feel More Lost
+## Status: New Hiding Furniture Types + Scroll Wheel Weapon Switching
+
+Added 4 new hideable furniture types from the APPLICATION_SPEC and scroll wheel weapon switching. Key changes: (1) Four new entries in `FURNITURE_TYPES` in `furniture.js`: `bed` (90x60, canHide: true, blocksLight: false — large hiding area, hide under), `armoire` (40x70, canHide: true, blocksLight: true — tall wardrobe, hide inside, blocks light/LOS), `closet` (50x60, canHide: true, blocksLight: true — tall enclosed space, hide inside, blocks light/LOS), `vent` (30x30, canHide: true, blocksLight: false — small floor grate, crawl inside, constrained movement area). (2) Armoire and closet introduce a new gameplay dynamic: furniture that is both a hiding spot AND blocks light/LOS — previously these properties were mutually exclusive. This creates double-safe hiding spots where the player is invisible AND enemies can't see through the furniture. (3) `TYPE_KEYS` auto-updates from `Object.keys(FURNITURE_TYPES)` — type distribution changes from 4 types (25% each) to 8 types (12.5% each), increasing room variety. (4) Scroll wheel weapon switching via `this.input.on('wheel', ...)` in `setupInput()` with 200ms cooldown — reuses existing `switchWeapon()` from `weapons.js`, same guards as other input (dead/dayEnding/hiding). No new modules, no new exports, no save format changes. 6 new tests covering light blocking behavior, generation distribution, hideable integration, and blocksLight properties.
+
+## Previous: Balance Tuning — Making the Player Feel More Lost
 
 Rebalanced the game to create a more disorienting, lost-feeling experience. Key changes: (1) Flashlight FOV narrowed from PI/4 (45°) to PI/6 (30°) base angle — players see less at any given moment, creating tunnel vision and claustrophobia. (2) Battery duration extended from 90s to 150s — players explore longer, venture deeper, and have more time to get lost. (3) Items per room reduced from 2-5 to 1-3, and loot table reweighted to favor utility items (battery 25, ammo 20) over treasures (copper 30, silver 15, gold 8, gem 2) — treasure drops from ~76% to ~55% of all items. (4) Shop costs increased across the board: standard upgrades from [100, 300, 800] to [200, 600, 1500], starting pistol from 500 to 1000, minimap from 1500 to 3000. Combined effect: thinner FOV + longer battery = more rooms explored with less visibility; fewer treasures + higher costs = slower progression where each find matters more. No new modules or functions. No save migration needed (costs are not persisted; stats are recomputed from upgrade levels). Updated tests for new item count bounds, shop cost assertions, flashlight base value, and battery drain duration.
 
@@ -326,7 +330,12 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
   - Persistence v3: `unlockedLocations` and `activeLocation` fields (backward compatible)
   - Alternate exit zones: blue-white pulsing glow, 60x60 overlap zones with location labels
   - 21 new tests: 18 locations (data, layouts, exit spawning), 3 persistence
-- 475 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, weapon upgrades, enemy types, stairs, weapons, inventory capacity, maze generation, room connections, weaponless start, ammo system, minimap upgrade, switch frequency, lore spawning, lore persistence, lore journal, floor scaling, multi-floor stair connections, alternate locations, location persistence, cross-room pathfinding, and navContext-driven enemy AI
+- New hiding furniture types (bed, armoire, closet, vent) + scroll wheel weapon switching
+  - 4 new entries in `FURNITURE_TYPES`: bed (90x60, hideable, no light blocking), armoire (40x70, hideable, blocks light), closet (50x60, hideable, blocks light), vent (30x30, hideable, no light blocking)
+  - Armoire and closet are the first furniture types that are both hideable AND block light/LOS
+  - Scroll wheel weapon switching via `this.input.on('wheel', ...)` with 200ms debounce cooldown
+  - 4 new tests: generation distribution, hideable integration, blocksLight properties
+- 479 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, weapon upgrades, enemy types, stairs, weapons, inventory capacity, maze generation, room connections, weaponless start, ammo system, minimap upgrade, switch frequency, lore spawning, lore persistence, lore journal, floor scaling, multi-floor stair connections, alternate locations, location persistence, cross-room pathfinding, navContext-driven enemy AI, and new furniture types
 - Documentation (docs.md files for root, src, systems, scenes)
 - Bug fix: flashlight mouse tracking drift during WASD movement
   - Root cause: Phaser 3 `pointer.worldX`/`worldY` are cached properties only refreshed on mouse events, not camera scroll
@@ -337,7 +346,7 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
 - `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop, doors, lightswitch, hiding, persistence, exploration, startroom, scaling, stairs, weapons, maze, lore, locations, pathfinding) — testable without Phaser
 - `src/scenes/` — Phaser scene classes that wire systems together for rendering (GameScene for gameplay, ShopScene for upgrades between runs)
 - Darkness uses BitmapMask with invertAlpha on a Graphics overlay
-- Furniture segments use the same `{x1,y1,x2,y2}` format as walls — concatenated into `wallSegments` for raycasting with zero visibility code changes
+- Furniture segments use the same `{x1,y1,x2,y2}` format as walls — concatenated into `wallSegments` for raycasting with zero visibility code changes. 8 furniture types with three property combinations: hideable-only (table, desk, bed, vent), blocking-only (shelf, bookcase), and both hideable and blocking (armoire, closet)
 - Level generation uses a growth algorithm on a logical grid — rooms placed in adjacent cells, connected via paired doorways
 - Doorways are gaps in wall segments — the visibility system naturally handles light passing through without any changes
 - Enemy LOS reuses `raySegmentIntersection` from visibility.js — single ray from enemy to player, checked against wall segments
@@ -397,6 +406,13 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
 - Lore journal: `getJournalEntries(collectedLoreIds)` maps `LORE_ENTRIES` to `{id, text, collected}` with counts. `getJournalPage(entries, page, perPage)` paginates with page clamping. Both are pure functions in `lore.js` (no PRNG, no side effects). ShopScene overlay uses `this.journalOverlay` (array of Phaser objects) for lifecycle management — `showJournal()` creates all objects, `hideJournal()` destroys them. Depth 2000 (background) and 2001 (text/controls) ensure overlay sits above all shop content. ESC key handled via `input.keyboard.on('keydown-ESC')`.
 - ShopScene location cycling: When `unlockedLocations.length > 1`, ShopScene renders `< LocationName >` with clickable arrow buttons. `cycleLocation(direction)` wraps around the unlocked array. Active location is stored in registry and persisted. "New location discovered!" banner shown when arriving via alternate exit.
 
-## Next Steps
-- All items from APPLICATION_SPEC.md "Next things to build" are now complete (balance tuning was the latest)
-- Potential future features: more location variety, location-specific enemy types, achievements, boss encounters
+## Next Steps (from APPLICATION_SPEC.md)
+- Add audio
+- Add more enemy types
+- Add more room types
+- Add actual pixel art elements for tables, light switches, rewards, etc. (give backrooms more flavor)
+- Add actual pixel art animations for enemies and player character
+- Enemy corpses should persist after death
+- Enemies should not disappear automatically in lit rooms
+- One enemy type should be able to open doors
+- More difficult enemies should spawn as player spends more time outside safe rooms

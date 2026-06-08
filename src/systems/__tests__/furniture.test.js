@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES } from '../furniture.js';
 import { getFlashlightPolygon } from '../visibility.js';
 import { createRoomWalls } from '../room.js';
+import { findNearestHideable } from '../hiding.js';
 
 describe('createFurnitureSegments', () => {
   it('returns 4 segments forming a closed boundary', () => {
@@ -123,6 +124,50 @@ describe('furniture light blocking behavior', () => {
     const maxXWithout = Math.max(...polyWithoutShelf.map(p => p.x));
 
     expect(maxXWith).toBeLessThan(maxXWithout);
+  });
+});
+
+describe('new hiding furniture types', () => {
+  it('generated rooms can contain new furniture types', () => {
+    const allTypes = new Set();
+    for (let seed = 0; seed < 200; seed++) {
+      const furniture = generateRoomFurniture(0, 0, 1200, 1000, 16, seed);
+      for (const item of furniture) {
+        allTypes.add(item.type);
+      }
+    }
+    expect(allTypes.has('bed')).toBe(true);
+    expect(allTypes.has('armoire')).toBe(true);
+    expect(allTypes.has('closet')).toBe(true);
+    expect(allTypes.has('vent')).toBe(true);
+  });
+
+  it('generated rooms produce all new types as hideable and findable', () => {
+    const hideableTypes = new Set();
+    for (let seed = 0; seed < 200; seed++) {
+      const furniture = generateRoomFurniture(0, 0, 1200, 1000, 16, seed);
+      const furnitureMap = new Map([[0, furniture]]);
+      for (const item of furniture) {
+        const cx = item.x + item.width / 2;
+        const cy = item.y + item.height / 2;
+        const result = findNearestHideable(furnitureMap, cx, cy, 80);
+        if (result) hideableTypes.add(result.furniture.type);
+      }
+    }
+    expect(hideableTypes.has('bed')).toBe(true);
+    expect(hideableTypes.has('armoire')).toBe(true);
+    expect(hideableTypes.has('closet')).toBe(true);
+    expect(hideableTypes.has('vent')).toBe(true);
+  });
+
+  it('armoire and closet have blocksLight true in FURNITURE_TYPES', () => {
+    expect(FURNITURE_TYPES.armoire.blocksLight).toBe(true);
+    expect(FURNITURE_TYPES.closet.blocksLight).toBe(true);
+  });
+
+  it('bed and vent have blocksLight false in FURNITURE_TYPES', () => {
+    expect(FURNITURE_TYPES.bed.blocksLight).toBe(false);
+    expect(FURNITURE_TYPES.vent.blocksLight).toBe(false);
   });
 });
 
