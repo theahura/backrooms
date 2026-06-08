@@ -2,16 +2,16 @@ export const STORE_FLOOR_COLOR = 0x5c4a3a;
 export const STORE_WALL_COLOR = 0x7a6b5a;
 
 const STORE_FURNITURE = [
-  { type: 'counter', relX: 0.08, relY: 0.35, width: 120, height: 40, color: 0x5c3a21, canHide: false },
+  { type: 'counter', relX: 0.35, relY: 0.42, width: 120, height: 40, color: 0x5c3a21, canHide: false },
   { type: 'shelf', relX: 0.55, relY: 0.08, width: 100, height: 20, color: 0x6b4e2a, canHide: false },
   { type: 'shelf', relX: 0.55, relY: 0.18, width: 100, height: 20, color: 0x6b4e2a, canHide: false },
   { type: 'shelf', relX: 0.55, relY: 0.28, width: 100, height: 20, color: 0x6b4e2a, canHide: false },
-  { type: 'bookcase', relX: 0.75, relY: 0.55, width: 30, height: 80, color: 0x4a2c17, canHide: false },
+  { type: 'bookcase', relX: 0.62, relY: 0.55, width: 30, height: 80, color: 0x4a2c17, canHide: false },
   { type: 'couch', relX: 0.08, relY: 0.6, width: 90, height: 50, color: 0x8b6b4e, canHide: false },
   { type: 'table', relX: 0.25, relY: 0.65, width: 40, height: 40, color: 0xc19a6b, canHide: true },
   { type: 'desk', relX: 0.08, relY: 0.15, width: 60, height: 40, color: 0x3a3a3a, canHide: true },
   { type: 'table', relX: 0.35, relY: 0.15, width: 80, height: 50, color: 0x5c3a21, canHide: true },
-  { type: 'bookcase', relX: 0.75, relY: 0.08, width: 30, height: 80, color: 0x4a2c17, canHide: false },
+  { type: 'bookcase', relX: 0.62, relY: 0.08, width: 30, height: 80, color: 0x4a2c17, canHide: false },
 ];
 
 export function generateStoreLayout(roomX, roomY, roomWidth, roomHeight, wallThickness) {
@@ -69,7 +69,7 @@ export function generateCrackPoints(startX, startY, length, segments, vertical =
 
 export function getExitPosition(room, wallThickness) {
   return {
-    x: room.x + room.width / 2,
-    y: room.y + wallThickness + 32,
+    x: room.x + wallThickness + 40,
+    y: room.y + room.height / 2,
   };
 }

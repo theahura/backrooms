@@ -1,6 +1,10 @@
 # Current Progress
 
-## Status: Movement While Hidden
+## Status: Starting Location Entry Consistency & Shop Positioning
+
+Room 0 now has a consistent layout: (1) The crack to the backrooms is always on the east wall — `generateLevel()` forces `DIRECTIONS[1]` (east) for the first room connection (`i === 1`), consuming the PRNG roll but discarding it to preserve sequence for subsequent rooms. (2) The exit zone (front entrance) moved from center-north to west-center of room 0 (`x: room.x + wallThickness + 40, y: room.y + room.height / 2`) — representing the furniture store's front door, ~544px from player spawn at center. (3) The shop counter moved from far-left (`relX: 0.08`) to center-left (`relX: 0.35, relY: 0.42`) — centered within the store without overlapping the 60x60 spawn exclusion zone. (4) Bookcases moved from `relX: 0.75` to `relX: 0.62` to avoid blocking the now-guaranteed east doorway. 7 new tests covering east direction consistency, exit positioning, and furniture layout.
+
+## Previous: Movement While Hidden
 
 Player can now move at half speed while hidden under furniture (tables/desks), constrained to the furniture bounds. Key changes: (1) `HIDING_SPEED_MULTIPLIER = 0.5` constant in `hiding.js`. (2) `onEnterHiding(furniture)` method in GameScene snaps player to furniture center, sets `body.setBoundsRectangle()` to furniture area, enables `setCollideWorldBounds(true)`, disables player-furniture collider. (3) `onExitHiding()` restores collider and removes bounds constraint. (4) WASD no longer exits hiding -- E key is the only exit. (5) Player-furniture collider stored as `this.playerFurnitureCollider` for toggling.
 
@@ -154,7 +158,7 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
   - Crack in the wall visual at the first doorway from room 0 — jagged line drawn with Graphics path API, with a secondary thinner parallel line
   - Pulsing sickly-yellow glow behind the crack (0xD4C073, sine-wave alpha 0.15-0.25) updated per frame
   - Crack supports both vertical walls (east/west) and horizontal walls (north/south) — `generateCrackPoints` takes a `vertical` parameter
-  - Exit zone repositioned from top-left corner to center-north of room 0 (store entrance area)
+  - Exit zone positioned at west-center of room 0 (front entrance of furniture store)
   - 12 unit tests covering store layout bounds, spawn zone avoidance, determinism, crack point generation for both orientations, and exit position
 - Enemy scaling per run
   - Pure function module `scaling.js`: getEnemyHP, getEnemyCount, getEnemyChaseSpeed, getEnemyDamage
@@ -319,7 +323,7 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
 - Room 0 (starting room) uses `startroom.js` instead of `furniture.js` for furniture generation — hand-crafted positions via relative proportions, not seeded PRNG
 - Room 0 is permanently lit by unconditionally adding it to `litRoomIds` in both `updateDarkness()` and `updateEnemies()` — same mechanism as light switch lit rooms
 - Crack visual uses two Graphics objects: static crack line at depth 2 (baked once in `create()`) and animated glow at depth 1 (redrawn per frame with time-based sine-wave alpha)
-- Exit zone position computed by `getExitPosition()` from `startroom.js` — center-north of room 0 (store entrance)
+- Exit zone position computed by `getExitPosition()` from `startroom.js` — west-center of room 0 (front entrance of furniture store)
 - Multi-floor level: `stairs.js` wraps `generateLevel()` per floor, offsets room IDs and Y positions, then creates stair connections. `generateMultiFloorLevel` replaces direct `generateLevel` call in GameScene.
 - Stair zones use identical overlap + camera fade pattern as exit zone — `onStairEnter()` mirrors `onDayComplete()` structure with `body.reset()` instead of scene transition
 - `getMinimapData(state, rooms, bounds, playerPos, exitPos, screenWidth, floorFilter)` — 7th param filters rooms by floor; null/undefined shows all (backward compatible)
@@ -334,7 +338,6 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
 - Light switch frequency: `SWITCH_CHANCE = 0.15` in lightswitch.js (previously 0.4). With 6 eligible rooms per level, expect ~0.9 switches per run (often zero).
 
 ## Next Steps
-- Fix starting location entry consistency and shop positioning (spec: entry shouldn't move, shop should be centered)
 - Add different exit locations (spec: discovering alternate exits leads to different locations)
 - Add lore items in rooms
 - Add more floors (extend FLOOR_ROOM_COUNTS array) for later runs

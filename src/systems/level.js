@@ -43,7 +43,10 @@ export function generateLevel(seed, roomCount) {
     for (let attempt = 0; attempt < 100 && !placed; attempt++) {
       const parentIdx = Math.floor(rand() * rooms.length);
       const parent = rooms[parentIdx];
-      const dir = DIRECTIONS[Math.floor(rand() * DIRECTIONS.length)];
+      const dirRoll = Math.floor(rand() * DIRECTIONS.length);
+      const dir = (i === 1) ? DIRECTIONS[1] : DIRECTIONS[dirRoll];
+
+      if (i > 1 && parent.id === 0) continue;
 
       const newGridX = parent.gridX + dir.dx;
       const newGridY = parent.gridY + dir.dy;
@@ -89,6 +92,7 @@ function addExtraDoors(rooms, grid, seed) {
   const rand = mulberry32(seed + 80000);
 
   for (const room of rooms) {
+    if (room.id === 0) continue;
     for (const dir of DIRECTIONS) {
       const neighborKey = `${room.gridX + dir.dx},${room.gridY + dir.dy}`;
       const neighbor = grid.get(neighborKey);

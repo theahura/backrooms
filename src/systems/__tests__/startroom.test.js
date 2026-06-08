@@ -116,5 +116,51 @@ describe('startroom', () => {
       expect(pos.x).toBeGreaterThan(1200 + WALL_THICKNESS);
       expect(pos.y).toBeGreaterThan(1000 + WALL_THICKNESS);
     });
+
+    it('exit is on the west side of the room', () => {
+      const pos = getExitPosition(room, WALL_THICKNESS);
+      expect(pos.x).toBeLessThan(room.x + room.width * 0.2);
+    });
+
+    it('exit is vertically centered', () => {
+      const pos = getExitPosition(room, WALL_THICKNESS);
+      const centerY = room.y + room.height / 2;
+      expect(Math.abs(pos.y - centerY)).toBeLessThan(50);
+    });
+
+    it('exit zone does not overlap player spawn at room center', () => {
+      const pos = getExitPosition(room, WALL_THICKNESS);
+      const spawnX = room.x + room.width / 2;
+      const spawnY = room.y + room.height / 2;
+      const exitHalf = 32;
+      const playerHalf = 10;
+      const overlapX = pos.x + exitHalf > spawnX - playerHalf && pos.x - exitHalf < spawnX + playerHalf;
+      const overlapY = pos.y + exitHalf > spawnY - playerHalf && pos.y - exitHalf < spawnY + playerHalf;
+      expect(overlapX && overlapY).toBe(false);
+    });
+  });
+
+  describe('store layout positioning', () => {
+    const roomX = 0;
+    const roomY = 0;
+    const roomWidth = 1200;
+    const roomHeight = 1000;
+
+    it('includes a counter near the horizontal center of the room', () => {
+      const layout = generateStoreLayout(roomX, roomY, roomWidth, roomHeight, WALL_THICKNESS);
+      const counter = layout.find(item => item.type === 'counter');
+      expect(counter).toBeDefined();
+      const counterCenterX = counter.x + counter.width / 2;
+      expect(counterCenterX).toBeGreaterThan(roomWidth * 0.3);
+      expect(counterCenterX).toBeLessThan(roomWidth * 0.65);
+    });
+
+    it('no furniture extends into the east doorway zone', () => {
+      const layout = generateStoreLayout(roomX, roomY, roomWidth, roomHeight, WALL_THICKNESS);
+      const eastBoundary = roomX + roomWidth - WALL_THICKNESS - 20;
+      for (const item of layout) {
+        expect(item.x + item.width).toBeLessThanOrEqual(eastBoundary);
+      }
+    });
   });
 });

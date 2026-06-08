@@ -1493,3 +1493,60 @@ Player does NOT currently use `setCollideWorldBounds` (only enemies do). Player 
 - Wall colliders still active while hiding — but player is inside furniture bounds which are inside room bounds, so no conflict
 - Furniture physics zones: player collides with `furnitureGroup` via `this.physics.add.collider(this.player, this.furnitureGroup)` (line 520). Currently not stored in a variable. Need to store as `this.playerFurnitureCollider` and toggle `.active = false` while hiding (otherwise physics pushes player out of the furniture body). Re-enable on exit hiding.
 - Player body is 20x20 (set at line 517 via `body.setSize(20, 20, true)`)
+
+## Starting Location Entry Consistency & Shop Positioning Research
+
+### Problem Statement
+The spec says: "the starting location should have a standard entry -- that entry shouldn't move; and the 'shop' should be in the center of the 'furniture shop' and not in the edge blocking the door"
+
+Current issues:
+1. Room 0's first door (the crack to the backrooms) can be on ANY wall depending on the random seed — it should be consistent
+2. The exit zone (triggers ShopScene) is at center-north of room 0 (`y: room.y + wallThickness + 32`), which could be near a door and blocks the "front" of the store
+3. The shop counter furniture is at `relX: 0.08` (far left), not centered
+
+### Design Decision: Spatial Separation Pattern
+
+Based on research of Hades, Dead Cells, Enter the Gungeon, and Binding of Isaac hub rooms:
+- All roguelite hubs use **spatial separation** between spawn and exit
+- No game uses proximity-only auto-trigger for run-starting exits
+- Shops are placed on the mandatory path between spawn and exit
+
+**Chosen layout for room 0:**
+- **Crack (backrooms entry)**: Always east wall — forced in level generation
+- **Exit zone (front entrance)**: West side of room 0, centered vertically — the "front door"
+- **Player spawn**: Center of room 0 (unchanged)
+- **Shop counter**: Center-ish position (relX ~0.35, relY ~0.42)
+
+Flow: Player spawns at center → walks east to crack → explores backrooms → returns through crack → walks west to exit (front door) → ShopScene
+
+### Architecture: Changes Required
+
+1. **`level.js` line 46**: Force `DIRECTIONS[1]` (east) for `i === 1` so room 0's first connection is always east
+2. **`startroom.js` `getExitPosition()`**: Change from north-center to west side (`x: room.x + wallThickness + 40, y: room.y + room.height / 2`)
+3. **`startroom.js` `STORE_FURNITURE`**: Move counter to `relX: 0.35, relY: 0.42` — centered-ish without overlapping spawn exclusion zone (60x60 centered at room center)
+4. **Store furniture**: Move east-side furniture (bookcases at relX: 0.75) to avoid blocking the always-east crack doorway
+
+### Spawn Zone vs Counter Overlap Analysis
+- Room: 1200x1000, wallThickness: 16, innerW: 1168, innerH: 968
+- Spawn exclusion zone: 60x60 centered at (600, 500)
+- Counter at relX:0.35, relY:0.42: x=16+round(0.35*1168)=425, y=16+round(0.42*968)=423
+- Counter bounds: x=[425, 545], y=[423, 463]. Spawn zone: x=[570, 630], y=[470, 530]
+- No overlap — counter is safely placed
+
+### Exit Zone vs Player Spawn Separation
+- Player spawns at: (600, 500) — center of 1200x1000 room
+- Exit zone at: (56, 500) — west side, 40px from left wall
+- Separation: ~544px horizontal distance
+- Exit zone is 64x64 — player body is 20x20 — no overlap on spawn
+
+### Test Impact
+- `getExitPosition` tests check "inside room bounds" — passes at any interior position
+- Level tests check determinism, connectivity, pairing — all pass with forced east
+- "flashlight through doorway" test with seed 42 and 2 rooms: room 1 forced to east, angle from room0 center to room1 center still works
+- "produces different layouts for different seeds" test: seeds 1 vs 2 still differ (rooms 2+ are random)
+
+### Gotchas
+- Must still consume `rand()` on first iteration or PRNG state shifts for subsequent rooms — consume and discard
+- East-wall bookcases in store layout might visually overlap the crack doorway — reposition them
+- `createCrackVisual()` already handles all 4 wall directions generically via switch on `door.wall`
+- `addExtraDoors` may add extra doors to room 0 on other walls — room.doors[0] remains the east door since it was pushed first

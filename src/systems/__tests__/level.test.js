@@ -95,7 +95,32 @@ describe('generateLevel', () => {
   });
 });
 
+describe('room 0 first connection is always east', () => {
+  it('room 0 first door is on the east wall for multiple seeds', () => {
+    const seeds = [1, 2, 7, 13, 42, 99, 123, 456, 789, 1000];
+    for (const seed of seeds) {
+      const level = generateLevel(seed, 4);
+      expect(level.rooms[0].doors[0].wall).toBe('east');
+    }
+  });
+
+  it('first connected room is at grid position (1, 0)', () => {
+    const level = generateLevel(42, 4);
+    const firstDoor = level.rooms[0].doors[0];
+    const roomById = new Map(level.rooms.map(r => [r.id, r]));
+    const connectedRoom = roomById.get(firstDoor.targetRoomId);
+    expect(connectedRoom.gridX).toBe(1);
+    expect(connectedRoom.gridY).toBe(0);
+  });
+});
+
 describe('extra door connections', () => {
+  it('room 0 does not get extra door connections', () => {
+    const level = generateLevel(42, 6);
+    const room0 = level.rooms[0];
+    expect(room0.doors).toHaveLength(1);
+  });
+
   it('levels with many rooms have more door connections than minimum spanning tree', () => {
     // A minimum spanning tree of N rooms needs N-1 connections
     // With extra doors, total unique connections should exceed N-1 for larger levels
