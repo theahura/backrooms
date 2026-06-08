@@ -86,6 +86,14 @@ export const SOUND_CONFIGS = {
     noteDuration: 0.05,
     noteGap: 0.06,
   },
+  medkit_pickup: {
+    duration: 0.2,
+    gain: 0.25,
+    type: 'chime',
+    notes: [523, 784, 1047],
+    noteDuration: 0.05,
+    noteGap: 0.05,
+  },
   battery_recharge: {
     duration: 0.25,
     gain: 0.2,

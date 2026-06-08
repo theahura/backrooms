@@ -63,6 +63,9 @@ const PALETTES = {
     0: '#000000', 1: '#ddccaa', 2: '#ccbb99', 3: '#bbaa88',
     4: '#998866', 5: '#887755', 6: '#776644',
   },
+  medkit: {
+    0: '#000000', 1: '#ff4444', 3: '#ffffff',
+  },
 };
 
 export const SPRITE_DEFS = {
@@ -303,6 +306,23 @@ export const SPRITE_DEFS = {
       '....AA....',
     ],
     palette: PALETTES.items,
+    pixelWidth: 1,
+  },
+
+  item_medkit: {
+    data: [
+      '..000000..',
+      '.01111110.',
+      '.01111110.',
+      '.01133110.',
+      '.01333310.',
+      '.01333310.',
+      '.01133110.',
+      '.01111110.',
+      '.01111110.',
+      '..000000..',
+    ],
+    palette: PALETTES.medkit,
     pixelWidth: 1,
   },
 

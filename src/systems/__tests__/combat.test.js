@@ -2,11 +2,13 @@ import { describe, it, expect } from 'vitest';
 import {
   createCombatState,
   applyDamage,
+  applyHeal,
   updateCombat,
   getHealthFraction,
   isInvulnerable,
   applyEnemyDamage,
   isEnemyDead,
+  MEDKIT_HEAL_AMOUNT,
 } from '../combat.js';
 
 describe('createCombatState', () => {
@@ -93,6 +95,33 @@ describe('updateCombat', () => {
     const result = updateCombat(state, 100);
     expect(isInvulnerable(result)).toBe(false);
     expect(getHealthFraction(result)).toBe(1);
+  });
+});
+
+describe('applyHeal', () => {
+  it('increases health fraction for a damaged player', () => {
+    const state = createCombatState();
+    const damaged = applyDamage(state, 40);
+    const cooldownExpired = updateCombat(damaged, 99999);
+    const healed = applyHeal(cooldownExpired, MEDKIT_HEAL_AMOUNT);
+    expect(getHealthFraction(healed)).toBeGreaterThan(getHealthFraction(cooldownExpired));
+    expect(healed.isDead).toBe(false);
+  });
+
+  it('does not heal above full health', () => {
+    const state = createCombatState();
+    const damaged = applyDamage(state, 10);
+    const cooldownExpired = updateCombat(damaged, 99999);
+    const healed = applyHeal(cooldownExpired, 9999);
+    expect(getHealthFraction(healed)).toBe(1);
+  });
+
+  it('does not heal a dead player', () => {
+    const state = createCombatState();
+    const dead = applyDamage(state, 9999);
+    const result = applyHeal(dead, MEDKIT_HEAL_AMOUNT);
+    expect(getHealthFraction(result)).toBe(0);
+    expect(result.isDead).toBe(true);
   });
 });
 

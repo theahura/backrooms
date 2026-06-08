@@ -6,7 +6,7 @@ import { getRoomTheme } from '../systems/roomThemes.js';
 import { getFlashlightPolygon } from '../systems/visibility.js';
 import { generateMultiFloorLevel, getFloorBounds, getFloorRoomCounts, STAIR_SIZE } from '../systems/stairs.js';
 import { generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_CHASE, CRAWLER_CHASE_SPEED, SPITTER_CHASE_SPEED } from '../systems/enemy.js';
-import { createCombatState, applyDamage, updateCombat, getHealthFraction, isInvulnerable, applyEnemyDamage, isEnemyDead, ENEMY_CONTACT_DAMAGE, ENEMY_MAX_HP, CRAWLER_MAX_HP, SPITTER_MAX_HP, CRAWLER_CONTACT_DAMAGE, SPITTER_CONTACT_DAMAGE, SPITTER_PROJECTILE_DAMAGE, CORPSE_TINT, CORPSE_ALPHA, CORPSE_ANGLE, CORPSE_DEPTH } from '../systems/combat.js';
+import { createCombatState, applyDamage, applyHeal, updateCombat, getHealthFraction, isInvulnerable, applyEnemyDamage, isEnemyDead, ENEMY_CONTACT_DAMAGE, ENEMY_MAX_HP, CRAWLER_MAX_HP, SPITTER_MAX_HP, CRAWLER_CONTACT_DAMAGE, SPITTER_CONTACT_DAMAGE, SPITTER_PROJECTILE_DAMAGE, CORPSE_TINT, CORPSE_ALPHA, CORPSE_ANGLE, CORPSE_DEPTH, MEDKIT_HEAL_AMOUNT } from '../systems/combat.js';
 import { calculateBulletVelocity, calculateShotgunSpread, canFire, updateFireCooldown, isBulletExpired, SPITTER_PROJECTILE_SPEED, SPITTER_PROJECTILE_RANGE } from '../systems/shooting.js';
 import { WEAPON_TYPES, createWeaponState, switchWeapon, pickupWeapon, getActiveWeapon, getEffectiveStats, generateLevelWeapons, hasAmmo, consumeAmmo, addAmmo, AMMO_PER_PICKUP } from '../systems/weapons.js';
 import { getEnemyHP, getEnemyCount, getEnemyChaseSpeed, getEnemyDamage } from '../systems/scaling.js';
@@ -603,8 +603,17 @@ export class GameScene extends Phaser.Scene {
 
   onItemPickup(player, itemSprite) {
     if (!itemSprite.active) return;
-    if (!canPickupItem(this.inventoryState)) return;
+    if (this.combatState.isDead) return;
     const itemType = itemSprite.getData('itemType');
+    if (itemType === 'medkit') {
+      if (this.combatState.hp >= this.combatState.maxHp) return;
+      this.combatState = applyHeal(this.combatState, MEDKIT_HEAL_AMOUNT);
+      this.playSound('medkit_pickup');
+      this.cameras.main.flash(100, 0, 255, 0);
+      itemSprite.destroy();
+      return;
+    }
+    if (!canPickupItem(this.inventoryState)) return;
     if (itemType === 'ammo' && !getActiveWeapon(this.weaponState)) return;
     if (itemType === 'ammo') {
       const weapon = getActiveWeapon(this.weaponState);

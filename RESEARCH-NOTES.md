@@ -2679,3 +2679,62 @@ The raw researched colors are too bright — the game renders rooms in darkness 
 - GameScene calls `getRoomType(room.seed)` (already exported) + `getRoomTheme(type)` in `drawRoom()`, `drawDoorways()`, and `createRoomMaze()`
 - Room 0 still uses `locations.js` colors (unchanged)
 - No changes to room objects or level generation — room type is derived from seed on the fly
+
+## Health Pickup Items (Medkits) Research
+
+### Design Decision: Instant-Heal Pickup (No Inventory Slot)
+
+Based on analysis of Enter the Gungeon (hearts auto-heal on contact), Nuclear Throne (adaptive medkit spawning below 50% HP), Binding of Isaac (red hearts auto-heal), and Motherload (hull repair as paid service). The APPLICATION_SPEC mentions "powerups" as room contents but no healing items exist — this fills that gap.
+
+**Approach: Auto-heal on pickup, no inventory slot consumed.**
+- Medkit heals immediately (25 HP) — like Enter the Gungeon hearts
+- At full HP, pickup is skipped (item stays on ground) — player can return later
+- Does NOT count against inventory capacity — healing is too important to gate behind backpack size
+- This mirrors how the existing ammo system works conceptually (functional on pickup) but without the inventory slot
+
+### Heal Amount Rationale
+- Base `PLAYER_MAX_HP = 100`, damage sources: contact 20, spitter projectile 15, scaled up to 40
+- 25 HP = 25% of base max HP, consistent with the 15-25% consensus from roguelike research
+- At max health upgrade (100 + 25*3 = 175 HP), 25 HP = ~14% — still meaningful but not overpowered
+- Heals slightly more than one hit of base contact damage (25 > 20) — rewards finding medkits
+
+### Item Spawn Design
+- Weight: 8 (same as gold_coin, ~7.4% of drops with new total weight 108)
+- Rarer than batteries (25) and ammo (20), comparable to gold coins (8)
+- Size: 10x10 (matches ammo)
+- Color: 0xff4444 (red — universal health indicator)
+- Value: 0 (no treasure value)
+
+### Sprite Design
+- 10x10 pixel art red cross on white background (universal medkit symbol)
+- New palette needed — items palette has no red or white tones
+- Create `PALETTES.medkit` with red, dark red, white, and light gray entries
+- Texture key: `item_medkit` (follows `item_${type}` convention)
+
+### Audio Design
+- New `medkit_pickup` sound: ascending chime C5→G5→C6 (523, 784, 1047 Hz)
+- Distinct from `item_pickup` (660, 880) — higher pitch and 3-note arpeggio conveys healing/restoration
+- Duration 0.2s, gain 0.25 (matches item_pickup volume)
+
+### Architecture: Minimal New Code
+- `combat.js`: Add `MEDKIT_HEAL_AMOUNT = 25` constant and `applyHeal(state, amount)` pure function
+- `items.js`: Add medkit entry to `ITEM_TYPES` array
+- `sprites.js`: Add `PALETTES.medkit` palette and `item_medkit` sprite definition
+- `audio.js`: Add `medkit_pickup` to `SOUND_CONFIGS`
+- `GameScene.js`: Add medkit branch in `onItemPickup()` — before inventory check, apply heal, play sound, destroy sprite
+- No changes to `inventory.js` — medkits bypass inventory entirely
+
+### GameScene Integration
+- `onItemPickup()` flow for medkit:
+  1. Check `!itemSprite.active` → return (existing)
+  2. Check `itemType === 'medkit'` → special handling (NEW)
+  3. Check `combatState.hp >= combatState.maxHp` → return (full HP skip)
+  4. `this.combatState = applyHeal(this.combatState, MEDKIT_HEAL_AMOUNT)`
+  5. Play `medkit_pickup` sound
+  6. Destroy sprite
+  7. Return (skip inventory logic)
+- Existing items unchanged — medkit branch runs before `canPickupItem` check
+
+### Visual Feedback
+- Camera flash: brief green tint (0, 255, 0) for 100ms — contrasts with red damage flash
+- No HUD changes needed — health bar already updates from `combatState.hp` each frame

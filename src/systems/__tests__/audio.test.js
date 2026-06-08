@@ -77,4 +77,5 @@ describe('getSoundConfig', () => {
       expect(config, `ambient sound ${ambient.name} should have a config`).toBeDefined();
     }
   });
+
 });
