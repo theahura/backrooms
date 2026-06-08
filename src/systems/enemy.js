@@ -106,11 +106,16 @@ function distanceBetween(ax, ay, bx, by) {
   return Math.sqrt(dx * dx + dy * dy);
 }
 
-export function updateEnemyAI(enemy, playerPos, segments, delta, playerHidden = false, chaseSpeed = ENEMY_SPEED_CHASE) {
+export function updateEnemyAI(enemy, playerPos, segments, delta, playerHidden = false, chaseSpeed = ENEMY_SPEED_CHASE, navContext = null) {
   const canSee = !playerHidden && hasLineOfSight(enemy, playerPos, segments, DETECTION_RANGE);
   const result = { ...enemy };
   const type = enemy.type || 'basic';
   const speeds = getTypeSpeeds(type, chaseSpeed);
+
+  if (navContext) {
+    result.roomTransitionCooldown = Math.max(0, (navContext.roomTransitionCooldown || 0) - delta);
+    result.targetDoorway = navContext.targetDoorway || null;
+  }
 
   switch (enemy.state) {
     case 'idle': {
@@ -119,14 +124,28 @@ export function updateEnemyAI(enemy, playerPos, segments, delta, playerHidden = 
         const { vx, vy } = velocityToward(enemy.x, enemy.y, playerPos.x, playerPos.y, speeds.chase);
         result.velocityX = vx;
         result.velocityY = vy;
+        result.targetDoorway = null;
       } else {
         result.wanderTimer = (enemy.wanderTimer || 0) - delta;
         if (result.wanderTimer <= 0) {
-          result.wanderAngle = (enemy.wanderAngle || 0) + 1 + Math.PI * 0.7;
           result.wanderTimer = WANDER_INTERVAL;
+
+          if (navContext && navContext.seekDoorway && result.roomTransitionCooldown <= 0 && navContext.doorway) {
+            result.targetDoorway = navContext.doorway;
+          } else {
+            result.wanderAngle = (enemy.wanderAngle || 0) + 1 + Math.PI * 0.7;
+            result.targetDoorway = navContext ? null : result.targetDoorway;
+          }
         }
-        result.velocityX = Math.cos(result.wanderAngle) * speeds.wander;
-        result.velocityY = Math.sin(result.wanderAngle) * speeds.wander;
+
+        if (result.targetDoorway) {
+          const { vx, vy } = velocityToward(enemy.x, enemy.y, result.targetDoorway.x, result.targetDoorway.y, speeds.wander);
+          result.velocityX = vx;
+          result.velocityY = vy;
+        } else {
+          result.velocityX = Math.cos(result.wanderAngle || enemy.wanderAngle || 0) * speeds.wander;
+          result.velocityY = Math.sin(result.wanderAngle || enemy.wanderAngle || 0) * speeds.wander;
+        }
       }
       break;
     }
@@ -143,6 +162,10 @@ export function updateEnemyAI(enemy, playerPos, segments, delta, playerHidden = 
           result.velocityX = vx;
           result.velocityY = vy;
         }
+      } else if (navContext && navContext.enemyRoomId !== navContext.playerRoomId && navContext.doorway) {
+        const { vx, vy } = velocityToward(enemy.x, enemy.y, navContext.doorway.x, navContext.doorway.y, speeds.chase);
+        result.velocityX = vx;
+        result.velocityY = vy;
       } else {
         result.state = 'search';
         result.lastKnownX = playerPos.x;

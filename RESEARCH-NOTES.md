@@ -1816,3 +1816,104 @@ No new pure module needed — the journal UI logic belongs in ShopScene since it
 ### Existing Vertical Layout Issue
 
 The ShopScene enter button is already at y~770 (beyond 768 canvas). The journal button should NOT add to the vertical stack — placed horizontally next to the title or gold balance instead.
+
+## Enemy Cross-Room Movement Research
+
+### Problem Statement
+Enemies currently spawn per-room and have no room or doorway awareness. They chase directly toward the player but bump into walls because there's no pathfinding. The spec says "enemies should be able to move between rooms."
+
+### Approach: Room-Doorway Graph BFS (Hierarchical Pathfinding)
+
+Based on research from Red Blob Games, FNAF room-graph movement, and Alien: Isolation director-managed AI:
+
+**Two-level system:**
+1. **High-level**: BFS on room connectivity graph to determine which doorway to head toward
+2. **Low-level**: Direct movement (existing `velocityToward`) to reach that doorway, relying on physics colliders to slide along obstacles
+
+**Why BFS over A*/NavMesh/EasyStar:**
+- Room connectivity graph has 7-12 nodes (rooms) — BFS is O(n) microseconds
+- Grid-based A* would need 2000-4000 tiles, expensive per-enemy per-frame
+- NavMesh (phaser-navmesh) requires polygon construction from procedural segments — complex setup
+- BFS from the player's room computes paths for ALL enemies in a single traversal
+
+### Room Graph Construction
+
+Already implicit in the data:
+- `room.doors[]` has `{ wall, offset, width, targetRoomId }` entries
+- Adjacency list: `room.doors.map(d => d.targetRoomId)`
+- Door center positions computable from room position + door wall/offset/width (same math as `getDoorCenter` in doors.js)
+- Closed doors should be excluded from the graph (or enemies should not path through them)
+
+### Enemy State Extensions
+
+Each enemy needs:
+- `spawnRoomId`: room where originally spawned (for leash constraint)
+- `currentRoomId`: room currently occupying (updated via `isPointInRoom`)
+- `targetDoorway`: `{x, y}` waypoint when navigating to a doorway (null when not in transit)
+- `roomTransitionCooldown`: prevents ping-ponging between rooms
+
+### Chase State Changes
+
+When enemy is in `chase` state and cannot see the player:
+1. Determine enemy's current room and player's current room
+2. If different rooms: BFS from player room outward, look up `cameFrom[enemyRoom]` to find next room
+3. Find the doorway connecting enemy's room to next room
+4. Set velocity toward that doorway's center position
+5. Once enemy crosses into the next room (detected by `isPointInRoom`), update `currentRoomId` and repeat
+
+When enemy CAN see the player: chase directly (existing behavior, unchanged).
+
+### Wander/Idle State Changes
+
+FNAF-inspired probability-based room transitions:
+- Every `WANDER_INTERVAL` (2000ms), roll for doorway selection
+- 10-15% chance to pick a random doorway in current room as wander target
+- Expected time between room transitions: ~13-20 seconds per enemy
+- `ROOM_TRANSITION_COOLDOWN` (10s) after entering a new room prevents ping-ponging
+- Max 2 rooms from spawn room (leash constraint) — bias toward spawn when at max distance
+
+### Density Management
+
+- Per-room max enemy cap (e.g., 4 enemies) checked before transitions
+- If target room is at capacity, enemy stays in current room or picks a different door
+- Prevents all enemies from clustering in one room
+
+### Door Awareness
+
+- Only navigate through open doorways (check door states)
+- Enemies do NOT open doors — if a closable door is closed, exclude that edge from the BFS graph
+- This means closing a door behind you is a valid defensive strategy
+
+### Constants
+
+```javascript
+DOORWAY_SEEK_CHANCE = 0.15       // 15% per wander tick to seek a doorway
+ROOM_TRANSITION_COOLDOWN = 10000 // 10s cooldown after entering a new room
+MAX_ROOM_DISTANCE = 2            // max rooms from spawn room
+MAX_ROOM_ENEMIES = 4             // density cap per room
+```
+
+### Architecture: New Pure Module `pathfinding.js`
+
+- `src/systems/pathfinding.js` — pure functions, no Phaser dependency
+- `buildRoomGraph(rooms, closedDoorSegments)` — builds adjacency list from room doors, excluding closed doors
+- `bfsFromRoom(graph, startRoomId)` — returns `cameFrom` map for all reachable rooms
+- `getNextDoorway(rooms, enemyRoomId, playerRoomId, cameFrom)` — returns `{x, y}` of the doorway to head toward
+- `getDoorwayCenter(room, door)` — computes world position of a door gap center
+- `getRandomDoorway(room)` — picks a random doorway from current room for wander transitions
+- `getRoomDistance(graph, fromId, toId)` — BFS distance between two rooms (for leash checks)
+
+### GameScene Integration
+
+- `updateEnemies(delta)`: pass rooms, door states, and player room to AI
+- `updateEnemyAI` signature extended with optional navigation context
+- Build room graph once per door toggle (cache it), not per frame
+- Per-enemy room detection: call `getCurrentRoom(enemy.x, enemy.y, rooms)` — O(n) rooms but n is 7-12
+- Stagger enemy AI updates if performance is a concern (unlikely with 7-12 rooms)
+
+### Known Limitations
+
+- Enemies do NOT follow player between floors (stairs are teleportation zones)
+- No pathfinding around internal maze walls — enemies rely on physics sliding
+- Enemies cannot open doors (closing a door traps them)
+- Sound-based attraction (gunshots drawing enemies from adjacent rooms) is a future enhancement

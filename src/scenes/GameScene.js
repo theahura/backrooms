@@ -17,10 +17,11 @@ import { createDoorStates, toggleDoor, getDoorCenter, findNearestDoor, DOOR_INTE
 import { createSwitchStates, toggleSwitch, findNearestSwitch, getLitRoomIds, isPointInRoom, SWITCH_INTERACT_RANGE } from '../systems/lightswitch.js';
 import { createHidingState, enterHiding, exitHiding, findNearestHideable, HIDE_INTERACT_RANGE, HIDING_SPEED_MULTIPLIER } from '../systems/hiding.js';
 import { saveGame } from '../systems/persistence.js';
-import { createExplorationState, updateExploration, getMinimapData, MINIMAP_COLORS } from '../systems/exploration.js';
+import { createExplorationState, updateExploration, getMinimapData, getCurrentRoom, MINIMAP_COLORS } from '../systems/exploration.js';
 import { generateCrackPoints } from '../systems/startroom.js';
 import { getLocation, getLocationLayout, getLocationExitPosition, generateAlternateExit } from '../systems/locations.js';
 import { generateRoomLore } from '../systems/lore.js';
+import { buildRoomGraph, bfsFromRoom, getNextDoorway, getRoomDistance, getDoorwayCenter, DOORWAY_SEEK_CHANCE, ROOM_TRANSITION_COOLDOWN, MAX_ROOM_DISTANCE, MAX_ROOM_ENEMIES } from '../systems/pathfinding.js';
 
 const WALL_THICKNESS = 16;
 
@@ -107,6 +108,9 @@ export class GameScene extends Phaser.Scene {
     this.currentFloor = 0;
     this.hidingState = createHidingState();
     this.explorationState = createExplorationState();
+
+    this.roomGraph = null;
+    this.roomGraphDirty = true;
 
     this.createRooms();
     this.createDoors();
@@ -357,6 +361,7 @@ export class GameScene extends Phaser.Scene {
     } else {
       zone.body.enable = false;
     }
+    this.roomGraphDirty = true;
   }
 
   onEnterHiding(furniture) {
@@ -716,6 +721,10 @@ export class GameScene extends Phaser.Scene {
           attackCooldown: 0,
           health: stats.hp,
           contactDamage: stats.contactDamage,
+          spawnRoomId: room.id,
+          currentRoomId: room.id,
+          roomTransitionCooldown: 0,
+          targetDoorway: null,
         });
       }
     }
@@ -1267,9 +1276,31 @@ export class GameScene extends Phaser.Scene {
     if (!litRoomIds.includes(0)) litRoomIds.push(0);
     const litRooms = litRoomIds.map(id => this.level.rooms.find(r => r.id === id)).filter(Boolean);
 
+    if (this.roomGraphDirty || !this.roomGraph) {
+      this.roomGraph = buildRoomGraph(this.level.rooms, this.doorStates);
+      this.roomGraphDirty = false;
+    }
+
+    const playerRoom = getCurrentRoom(playerPos.x, playerPos.y, this.level.rooms);
+    const playerRoomId = playerRoom ? playerRoom.id : -1;
+    const cameFrom = bfsFromRoom(this.roomGraph, playerRoomId);
+
+    const roomEnemyCounts = new Map();
+    for (const es of this.enemyStates) {
+      const rid = es.currentRoomId;
+      roomEnemyCounts.set(rid, (roomEnemyCounts.get(rid) || 0) + 1);
+    }
+
     for (const es of this.enemyStates) {
       es.x = es.sprite.x;
       es.y = es.sprite.y;
+
+      const enemyRoom = getCurrentRoom(es.x, es.y, this.level.rooms);
+      if (enemyRoom && enemyRoom.id !== es.currentRoomId) {
+        es.currentRoomId = enemyRoom.id;
+        es.roomTransitionCooldown = ROOM_TRANSITION_COOLDOWN;
+        es.targetDoorway = null;
+      }
 
       const inLitRoom = litRooms.some(room => isPointInRoom(room, es.x, es.y));
       if (inLitRoom) {
@@ -1277,8 +1308,47 @@ export class GameScene extends Phaser.Scene {
         continue;
       }
 
+      const enemyRoomId = es.currentRoomId;
+      const doorway = getNextDoorway(this.level.rooms, this.roomGraph, cameFrom, enemyRoomId, playerRoomId);
+
+      let seekDoorway = false;
+      let wanderDoorway = doorway;
+      if (es.roomTransitionCooldown <= 0 && es.state === 'idle') {
+        const wanderRand = Math.random();
+        if (wanderRand < DOORWAY_SEEK_CHANCE) {
+          const currentRoom = this.level.rooms.find(r => r.id === enemyRoomId);
+          if (currentRoom) {
+            const eligibleDoors = currentRoom.doors.filter(d => {
+              const dist = getRoomDistance(this.roomGraph, es.spawnRoomId, d.targetRoomId);
+              if (dist > MAX_ROOM_DISTANCE && dist !== -1) return false;
+              const count = roomEnemyCounts.get(d.targetRoomId) || 0;
+              if (count >= MAX_ROOM_ENEMIES) return false;
+              return true;
+            });
+            if (eligibleDoors.length > 0) {
+              const pickedIdx = Math.floor(Math.random() * eligibleDoors.length);
+              const picked = eligibleDoors[pickedIdx];
+              wanderDoorway = getDoorwayCenter(currentRoom, picked);
+              seekDoorway = true;
+            }
+          }
+        }
+      }
+
+      const navContext = {
+        enemyRoomId,
+        playerRoomId,
+        spawnRoomId: es.spawnRoomId,
+        roomTransitionCooldown: es.roomTransitionCooldown,
+        targetDoorway: es.targetDoorway,
+        doorway: seekDoorway ? wanderDoorway : doorway,
+        maxRoomDistance: MAX_ROOM_DISTANCE,
+        roomEnemyCounts,
+        seekDoorway,
+      };
+
       const chaseSpeed = this.getScaledChaseSpeed(es.type);
-      const updated = updateEnemyAI(es, playerPos, this.wallSegments, delta, this.hidingState.isHiding, chaseSpeed);
+      const updated = updateEnemyAI(es, playerPos, this.wallSegments, delta, this.hidingState.isHiding, chaseSpeed, navContext);
 
       es.state = updated.state;
       es.velocityX = updated.velocityX;
@@ -1289,6 +1359,8 @@ export class GameScene extends Phaser.Scene {
       es.lastKnownY = updated.lastKnownY;
       es.searchTimer = updated.searchTimer;
       es.attackCooldown = updated.attackCooldown;
+      es.roomTransitionCooldown = updated.roomTransitionCooldown;
+      es.targetDoorway = updated.targetDoorway;
 
       if (updated.wantsToFire) {
         this.fireEnemyBullet(es.x, es.y, playerPos.x, playerPos.y);

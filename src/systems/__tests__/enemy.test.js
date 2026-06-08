@@ -521,3 +521,115 @@ describe('updateEnemyAI spitter behavior', () => {
     expect(speed).toBeCloseTo(SPITTER_CHASE_SPEED, 0);
   });
 });
+
+describe('updateEnemyAI with navContext', () => {
+  function makeNavRooms() {
+    return [
+      {
+        id: 0, gridX: 0, gridY: 0, x: 0, y: 0,
+        width: 1200, height: 1000,
+        doors: [{ wall: 'east', offset: 200, width: 80, targetRoomId: 1 }],
+        seed: 42,
+      },
+      {
+        id: 1, gridX: 1, gridY: 0, x: 1200, y: 0,
+        width: 1200, height: 1000,
+        doors: [{ wall: 'west', offset: 200, width: 80, targetRoomId: 0 }],
+        seed: 43,
+      },
+    ];
+  }
+
+  function makeNavContext(overrides = {}) {
+    const rooms = makeNavRooms();
+    return {
+      enemyRoomId: 1,
+      playerRoomId: 0,
+      spawnRoomId: 1,
+      roomTransitionCooldown: 0,
+      targetDoorway: null,
+      doorway: { x: 1200, y: 240 },
+      maxRoomDistance: 2,
+      roomEnemyCounts: new Map([[0, 1], [1, 1]]),
+      ...overrides,
+    };
+  }
+
+  it('enemy in chase state navigates to doorway when in different room from player and cannot see', () => {
+    const enemy = createTypedEnemy({ state: 'chase', x: 1800, y: 500 });
+    const player = { x: 600, y: 500 };
+    const wall = { x1: 1200, y1: 0, x2: 1200, y2: 200 };
+    const wall2 = { x1: 1200, y1: 280, x2: 1200, y2: 1000 };
+    const navContext = makeNavContext();
+
+    const updated = updateEnemyAI(enemy, player, [wall, wall2], 16, false, ENEMY_SPEED_CHASE, navContext);
+
+    expect(updated.velocityX).toBeLessThan(0);
+    const speed = Math.sqrt(updated.velocityX ** 2 + updated.velocityY ** 2);
+    expect(speed).toBeGreaterThan(0);
+  });
+
+  it('enemy in chase state still chases directly when can see the player', () => {
+    const enemy = createTypedEnemy({ state: 'chase', x: 1300, y: 240 });
+    const player = { x: 1100, y: 240 };
+    const navContext = makeNavContext();
+
+    const updated = updateEnemyAI(enemy, player, [], 16, false, ENEMY_SPEED_CHASE, navContext);
+
+    expect(updated.state).toBe('chase');
+    expect(updated.velocityX).toBeLessThan(0);
+  });
+
+  it('enemy in chase state falls back to search when in same room and cannot see', () => {
+    const enemy = createTypedEnemy({ state: 'chase', x: 600, y: 100 });
+    const player = { x: 600, y: 900 };
+    const wall = { x1: 0, y1: 500, x2: 1200, y2: 500 };
+    const navContext = makeNavContext({ enemyRoomId: 0, playerRoomId: 0 });
+
+    const updated = updateEnemyAI(enemy, player, [wall], 16, false, ENEMY_SPEED_CHASE, navContext);
+
+    expect(updated.state).toBe('search');
+  });
+
+  it('enemy without navContext behaves exactly as before', () => {
+    const enemy = createTypedEnemy({ state: 'chase', x: 1800, y: 500 });
+    const player = { x: 600, y: 500 };
+    const wall = { x1: 1200, y1: 0, x2: 1200, y2: 1000 };
+
+    const updated = updateEnemyAI(enemy, player, [wall], 16);
+
+    expect(updated.state).toBe('search');
+  });
+
+  it('enemy in idle state with doorway seek navigates toward a doorway', () => {
+    const enemy = createTypedEnemy({ state: 'idle', wanderTimer: 0, x: 1800, y: 500 });
+    const player = { x: 9999, y: 9999 };
+    const navContext = makeNavContext({ seekDoorway: true });
+
+    const updated = updateEnemyAI(enemy, player, [], 16, false, ENEMY_SPEED_CHASE, navContext);
+
+    expect(updated.targetDoorway).toBeDefined();
+    expect(updated.targetDoorway).toHaveProperty('x');
+    expect(updated.targetDoorway).toHaveProperty('y');
+  });
+
+  it('enemy in idle state does not seek doorway when cooldown is active', () => {
+    const enemy = createTypedEnemy({ state: 'idle', wanderTimer: 0, x: 1800, y: 500 });
+    const player = { x: 9999, y: 9999 };
+    const navContext = makeNavContext({ seekDoorway: true, roomTransitionCooldown: 5000 });
+
+    const updated = updateEnemyAI(enemy, player, [], 16, false, ENEMY_SPEED_CHASE, navContext);
+
+    expect(updated.targetDoorway == null).toBe(true);
+  });
+
+  it('decrements roomTransitionCooldown by delta', () => {
+    const enemy = createTypedEnemy({ state: 'idle', wanderTimer: 1000, x: 1800, y: 500 });
+    const player = { x: 9999, y: 9999 };
+    const navContext = makeNavContext({ roomTransitionCooldown: 5000 });
+
+    const updated = updateEnemyAI(enemy, player, [], 100, false, ENEMY_SPEED_CHASE, navContext);
+
+    expect(updated.roomTransitionCooldown).toBe(4900);
+  });
+});
