@@ -43,7 +43,6 @@ Other details (from playtesting):
 - enemies should be able to move between rooms
 
 Next things to build:
-- we want the player to get more lost: increase the cost of most of the items, make the rewards / treasures far more rare, and make the initial flashlight battery longer (but the fov thinner)
 
 Known bugs:
 - NA
