@@ -22,6 +22,7 @@ import { generateCrackPoints } from '../systems/startroom.js';
 import { getLocation, getLocationLayout, getLocationExitPosition, generateAlternateExit } from '../systems/locations.js';
 import { generateRoomLore } from '../systems/lore.js';
 import { buildRoomGraph, bfsFromRoom, getNextDoorway, getRoomDistance, getDoorwayCenter, DOORWAY_SEEK_CHANCE, ROOM_TRANSITION_COOLDOWN, MAX_ROOM_DISTANCE, MAX_ROOM_ENEMIES } from '../systems/pathfinding.js';
+import { createDangerState, updateDangerTime, shouldSpawnWave, advanceWave, getWaveComposition, getSpawnRoom } from '../systems/danger.js';
 
 const WALL_THICKNESS = 16;
 
@@ -67,6 +68,7 @@ export class GameScene extends Phaser.Scene {
     this.activeLocation = this.registry.get('activeLocation') ?? 'store';
     this.activeLocationData = getLocation(this.activeLocation) || getLocation('store');
     this.unlockedLocations = this.registry.get('unlockedLocations') ?? ['store'];
+    this.dangerState = createDangerState();
     saveGame(shopState || createShopState(), runCount + 1, [...this.collectedLore], this.unlockedLocations, this.activeLocation);
   }
 
@@ -668,6 +670,50 @@ export class GameScene extends Phaser.Scene {
     return { hp: this.scaledEnemyHP, contactDamage: this.scaledEnemyDamage, textureKey: 'enemy', bodySize: 16 };
   }
 
+  spawnDangerWave(playerRoomId, litRoomIds) {
+    const types = getWaveComposition(this.dangerState.waveCount);
+    const room = getSpawnRoom(this.level.rooms, playerRoomId, litRoomIds, this.currentFloor);
+    if (!room) return;
+
+    const margin = 40;
+    const minX = room.x + WALL_THICKNESS + margin;
+    const minY = room.y + WALL_THICKNESS + margin;
+    const maxX = room.x + room.width - WALL_THICKNESS - margin;
+    const maxY = room.y + room.height - WALL_THICKNESS - margin;
+
+    for (const type of types) {
+      const x = minX + Math.random() * (maxX - minX);
+      const y = minY + Math.random() * (maxY - minY);
+      const stats = this.getEnemyStats(type);
+      const enemy = this.enemyGroup.create(x, y, stats.textureKey);
+      enemy.body.setSize(stats.bodySize, stats.bodySize, true);
+      enemy.body.setCollideWorldBounds(true);
+      enemy.setDepth(60);
+
+      this.enemyStates.push({
+        sprite: enemy,
+        x,
+        y,
+        type,
+        state: 'idle',
+        velocityX: 0,
+        velocityY: 0,
+        wanderTimer: 0,
+        wanderAngle: Math.random() * Math.PI * 2,
+        lastKnownX: 0,
+        lastKnownY: 0,
+        searchTimer: 0,
+        attackCooldown: 0,
+        health: stats.hp,
+        contactDamage: stats.contactDamage,
+        spawnRoomId: room.id,
+        currentRoomId: room.id,
+        roomTransitionCooldown: 0,
+        targetDoorway: null,
+      });
+    }
+  }
+
   createEnemies() {
     this.enemyGroup = this.physics.add.group();
     this.enemyStates = [];
@@ -867,6 +913,14 @@ export class GameScene extends Phaser.Scene {
     });
     this.weaponText.setScrollFactor(0);
     this.weaponText.setDepth(1000);
+
+    this.dangerText = this.add.text(20, 106, '', {
+      fontSize: '14px',
+      color: '#ff4444',
+      fontFamily: 'monospace',
+    });
+    this.dangerText.setScrollFactor(0);
+    this.dangerText.setDepth(1000);
 
     if (this.hasMinimap) {
       this.floorText = this.add.text(this.cameras.main.width - 180, 145, 'B1', {
@@ -1279,6 +1333,13 @@ export class GameScene extends Phaser.Scene {
     const playerRoomId = playerRoom ? playerRoom.id : -1;
     const cameFrom = bfsFromRoom(this.roomGraph, playerRoomId);
 
+    const isInSafeRoom = litRoomIds.includes(playerRoomId);
+    this.dangerState = updateDangerTime(this.dangerState, delta, isInSafeRoom);
+    while (shouldSpawnWave(this.dangerState)) {
+      this.spawnDangerWave(playerRoomId, litRoomIds);
+      this.dangerState = advanceWave(this.dangerState);
+    }
+
     const roomEnemyCounts = new Map();
     for (const es of this.enemyStates) {
       const rid = es.currentRoomId;
@@ -1447,6 +1508,12 @@ export class GameScene extends Phaser.Scene {
     } else {
       this.weaponText.setColor('#666666');
       this.weaponText.setText('UNARMED');
+    }
+
+    if (this.dangerState.waveCount > 0) {
+      this.dangerText.setText(`DANGER ${this.dangerState.waveCount}`);
+    } else {
+      this.dangerText.setText('');
     }
   }
 

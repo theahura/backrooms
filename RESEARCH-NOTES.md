@@ -2082,3 +2082,97 @@ Based on Phaser 3 research:
 - New tests should verify behavior properties that can be tested at the pure function level:
   - The lit room freeze behavior is already testable via `updateEnemyAI` (passing `inLitRoom` context)
   - Corpse visual properties can't be tested without Phaser mocks, but the removal of despawn from switch toggle is a behavioral change worth documenting in tests
+
+## Time-Based Enemy Difficulty Escalation Research
+
+### Problem Statement
+The spec says "make it so that more and more difficult enemies spawn as the player spends more time outside of the safe rooms." This creates a second pressure axis beyond the battery timer — camping, hiding, or slow exploration becomes increasingly dangerous.
+
+### Design Decisions (from game research)
+
+**Timing Model (Left 4 Dead Director + Vampire Survivors wave clock)**:
+- Track cumulative time spent in unsafe rooms (not room 0, not lit rooms)
+- Timer **pauses** in safe rooms (not reset) — prevents cycling exploit
+- Fixed 30-second intervals between waves
+- First wave at 30s of unsafe time (gives player time to establish themselves)
+- Cap at 8 waves (240s = 4 min of unsafe time to see all waves)
+
+**Spawn Location (Terraria spawn ring + room-based architecture)**:
+- Spawn in rooms adjacent to the player's current room (naturally off-screen)
+- Never spawn in the player's current room, room 0, or lit rooms
+- Must be on the same floor as the player
+- If no valid spawn room exists, skip the wave
+
+**Wave Composition (deterministic, no PRNG needed)**:
+- Count per wave: `1 + floor(waveCount / 3)`, capped at 4
+- Type distribution shifts toward harder types as waves progress:
+  - Waves 1-2: all basic zombies (gentle escalation)
+  - Waves 3-4: mix of basic and crawlers
+  - Waves 5-6: basic, crawlers, and spitters
+  - Waves 7-8: mostly crawlers and spitters (intense pressure)
+- This is independent of `runCount` — time pressure is orthogonal to per-run scaling
+
+**Horror Pacing Principles (from horror game design research)**:
+- Tension-and-release cycle: safe rooms serve as "fear meter refreshers"
+- Fewer, more dangerous enemies > constant weak ones
+- Variable encounter pacing prevents habituation
+- Sound cues for wave spawns add anticipation (future: audio system)
+
+### Architecture: New Pure Module `danger.js`
+
+- `src/systems/danger.js` — pure functions, no Phaser dependency
+- Constants:
+  - `DANGER_WAVE_INTERVAL = 30000` (30 seconds between waves)
+  - `MAX_DANGER_WAVES = 8` (cap total waves per run)
+- State: `{ unsafeTime: 0, waveCount: 0 }`
+- `createDangerState()` — returns initial state
+- `updateDangerTime(state, delta, isInSafeRoom)` — increments `unsafeTime` when not in safe room, returns unchanged state when in safe room
+- `shouldSpawnWave(state)` — returns true when `unsafeTime >= (waveCount + 1) * DANGER_WAVE_INTERVAL` and waveCount < MAX_DANGER_WAVES
+- `getWaveComposition(waveCount)` — returns array of enemy type strings for the wave
+- `advanceWave(state)` — increments waveCount, returns updated state
+
+### Spawn Position Strategy
+
+Reuse existing `generateRoomEnemies()` pattern for position selection (furniture overlap avoidance, wall margin). For dynamic spawns, use a seed offset of +110000 + waveCount * 100 to avoid correlation with pre-placed enemies.
+
+### GameScene Integration Points
+
+- `init()`: create `this.dangerState = createDangerState()`
+- `updateEnemies(delta)`: 
+  1. Determine if player is in a safe room (room 0 or lit room)
+  2. Call `updateDangerTime(state, delta, isInSafeRoom)`
+  3. If `shouldSpawnWave(state)`: select spawn room, generate positions, create enemy sprites+states
+  4. Call `advanceWave(state)` after spawning
+- Dynamic spawn method reuses existing `getEnemyStats(type)` for texture/HP/damage lookup
+- No new colliders needed — group colliders auto-cover new members (confirmed by Phaser 3 research)
+- Enemy textures already generated in `createEnemyTextures()` — same keys reused
+
+### Phaser 3 Dynamic Spawning Confirmation
+
+- `this.enemyGroup.create(x, y, textureKey)` works at any point during gameplay
+- Existing colliders (`this.physics.add.collider(enemyGroup, walls)`, etc.) automatically cover new group members because colliders reference the group object, not a snapshot
+- No maxSize on enemyGroup — no pool exhaustion concern
+- Performance: each active dynamic body adds to per-frame physics cost, but with 7-12 rooms and caps on spawning, total enemies stay well under concerning thresholds
+
+### HUD Integration
+
+- Show a danger indicator when waves are active: subtle pulsing red border or "DANGER" text
+- Optional: show wave count for player feedback (e.g., "THREAT: 3/8")
+- Keep it minimal — horror games benefit from ambiguity about how much danger the player is in
+
+### Constants Summary
+
+```javascript
+DANGER_WAVE_INTERVAL = 30000   // 30 seconds
+MAX_DANGER_WAVES = 8           // cap at 8 waves
+DANGER_SEED_OFFSET = 110000    // seed offset for spawn positions
+```
+
+### Edge Cases
+
+- Player enters safe room at exactly wave threshold: timer paused, wave doesn't fire until player returns to unsafe area
+- All adjacent rooms are safe/room 0: wave is skipped (no valid spawn location)
+- Player on floor with no adjacent non-safe rooms: wave skipped
+- Dynamic enemies follow same death/corpse behavior as pre-placed enemies
+- Dynamic enemies have same pathfinding capability as pre-placed enemies (navContext)
+- Run count scaling still applies to dynamically spawned enemies (they use scaledEnemyHP etc.)

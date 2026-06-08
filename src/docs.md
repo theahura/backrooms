@@ -10,7 +10,7 @@ Path: @/src
 - `@/index.html` loads `@/src/main.js` as an ES module via `<script type="module">`
 - `@/src/main.js` wires Phaser config (resolution, physics, renderer), registers both scene classes (GameScene, ShopScene) with the engine, and loads persisted state (including `unlockedLocations` and `activeLocation`) into `game.registry`
 - `@/src/scenes/` contains Phaser Scene subclasses: `GameScene` for gameplay and `ShopScene` for the between-run upgrade shop
-- `@/src/systems/` contains pure functions that scenes call for game math (movement, visibility, room geometry, room interior variety via maze walls/columns, furniture placement with type-dependent light blocking, starting room layout, starting location definitions and alternate exit spawning, multi-floor level wrapping with multiple stair connections, level generation with extra door connections, enemy spawning/AI with cross-room pathfinding, enemy difficulty scaling, combat/health with per-type constants, shooting/bullets including shotgun spread and enemy projectile constants, weapon types/inventory/switching/stat computation, battery/flashlight drain, item spawning, inventory management with capacity constraints, shop/upgrade logic, door state management, light switch state management, hiding state management, exploration/minimap tracking, BFS-based room graph pathfinding, and localStorage persistence)
+- `@/src/systems/` contains pure functions that scenes call for game math (movement, visibility, room geometry, room interior variety via maze walls/columns, furniture placement with type-dependent light blocking, starting room layout, starting location definitions and alternate exit spawning, multi-floor level wrapping with multiple stair connections, level generation with extra door connections, enemy spawning/AI with cross-room pathfinding, enemy difficulty scaling, time-based danger escalation, combat/health with per-type constants, shooting/bullets including shotgun spread and enemy projectile constants, weapon types/inventory/switching/stat computation, battery/flashlight drain, item spawning, inventory management with capacity constraints, shop/upgrade logic, door state management, light switch state management, hiding state management, exploration/minimap tracking, BFS-based room graph pathfinding, and localStorage persistence)
 - The architecture enforces a one-way dependency: scenes import from systems, but systems never import from scenes or Phaser. Systems may import from each other (e.g., `enemy.js` imports `raySegmentIntersection` from `visibility.js`)
 
 ### Core Implementation
@@ -33,6 +33,7 @@ index.html
        |    -> src/systems/enemy.js      (enemy spawning + LOS + AI state machine + cross-room navContext)
        |    -> src/systems/pathfinding.js (BFS room graph + doorway routing for enemy cross-room movement)
        |    -> src/systems/scaling.js    (run-based enemy difficulty scaling)
+       |    -> src/systems/danger.js     (time-based danger escalation: wave spawning in unsafe rooms)
        |    -> src/systems/combat.js     (player/enemy health + damage + invulnerability)
        |    -> src/systems/shooting.js   (bullet velocity + fire rate + range expiry + shotgun spread)
        |    -> src/systems/weapons.js   (weapon types + 2-slot inventory + switching + effective stats)
