@@ -2647,3 +2647,35 @@ GameScene creates Phaser animations from this data alongside texture generation.
 - ~16 new sprite definitions (4 player + 4 basic + 3 crawler + 5 spitter frames)
 - Separate texture keys per frame cause extra draw calls vs spritesheets, but with <20 animated entities this is negligible
 - DynamicTexture atlas optimization available if needed (not worth the complexity for this scale)
+
+## Room Visual Theming Research
+
+### Current State
+- All non-room-0 rooms use hardcoded `0x333333` (floor) and `0x555555` (walls) in `GameScene.drawRoom()`
+- Room 0 uses per-location colors from `locations.js` (e.g., store: floor `0x5c4a3a`, wall `0x7a6b5a`)
+- Internal maze walls in `createRoomMaze()` also use hardcoded `0x555555`
+- Room types (open, maze, columns, corridor, storage, cubicles) are computed from seed in `maze.js` but never used for visual differentiation
+- `getRoomType(seed)` is already exported from `maze.js` and available to call from GameScene
+
+### Backrooms Visual Aesthetics (from research)
+- **Level 0 (classic)**: Sickly yellow/beige wallpaper, stained carpet, fluorescent lighting. Community palettes: `#c9c49f`, `#d4cfa5`, `#8e8744`
+- **Industrial/maintenance**: Dark concrete, chalky walls, rusted pipes. Colors: `#4a4a4e`, `#5a5856`
+- **Office/cubicle**: Navy carpet, sterile white walls, grey partitions. Colors: `#3e4a6a`, `#d8dce0`
+- **Storage/warehouse**: Dusty concrete, beige drywall, wooden crates. Colors: `#555045`, `#6a6458`
+- **Corridor/hallway**: Dim olive-yellow carpet, faded wallpaper. Colors: `#8a7e60`, `#b8b683`
+- **Dark/cave**: Near-black void, cold stone. Colors: `#1a1a1e`, `#222226`
+
+### Color Adaptation for Flashlight System
+The raw researched colors are too bright — the game renders rooms in darkness with flashlight illumination. Colors must be in the same brightness range as existing location colors (~`0x3x-0x7x` range). Adapted palette:
+- **open** (classic backrooms): floor `0x4a4530`, wall `0x5a5540` — muted olive-yellow
+- **maze** (industrial): floor `0x303238`, wall `0x484a52` — cool grey-blue
+- **columns** (dark/eerie): floor `0x282830`, wall `0x404048` — dark blue-grey
+- **corridor** (hallway): floor `0x45403a`, wall `0x5a5548` — warm olive-brown
+- **storage** (warehouse): floor `0x3a3530`, wall `0x504a40` — warm dark brown
+- **cubicles** (office): floor `0x303540`, wall `0x505560` — cool blue-grey
+
+### Architecture Decision
+- New pure-data module `src/systems/roomThemes.js` with `ROOM_THEMES` constant and `getRoomTheme(roomType)` function
+- GameScene calls `getRoomType(room.seed)` (already exported) + `getRoomTheme(type)` in `drawRoom()`, `drawDoorways()`, and `createRoomMaze()`
+- Room 0 still uses `locations.js` colors (unchanged)
+- No changes to room objects or level generation — room type is derived from seed on the fly

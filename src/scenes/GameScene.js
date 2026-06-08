@@ -1,7 +1,8 @@
 import Phaser from 'phaser';
 import { calculateVelocity } from '../systems/movement.js';
 import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES } from '../systems/furniture.js';
-import { generateMazeWalls } from '../systems/maze.js';
+import { generateMazeWalls, getRoomType } from '../systems/maze.js';
+import { getRoomTheme } from '../systems/roomThemes.js';
 import { getFlashlightPolygon } from '../systems/visibility.js';
 import { generateMultiFloorLevel, getFloorBounds, getFloorRoomCounts, STAIR_SIZE } from '../systems/stairs.js';
 import { generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_CHASE, CRAWLER_CHASE_SPEED, SPITTER_CHASE_SPEED } from '../systems/enemy.js';
@@ -241,26 +242,26 @@ export class GameScene extends Phaser.Scene {
     const furnitureGfx = this.add.graphics();
     furnitureGfx.setDepth(50);
 
+    this.roomThemes = new Map();
     for (const room of this.level.rooms) {
-      this.drawRoom(gfx, room);
+      const theme = room.id === 0 ? this.activeLocationData : getRoomTheme(getRoomType(room.seed));
+      this.roomThemes.set(room.id, theme);
+      this.drawRoom(gfx, room, theme);
       this.createRoomPhysics(room);
       this.createRoomFurniture(furnitureGfx, room);
       if (room.id !== 0) {
-        this.createRoomMaze(gfx, room);
+        this.createRoomMaze(gfx, room, theme);
       }
     }
 
     this.drawDoorways(gfx);
   }
 
-  drawRoom(gfx, room) {
-    const floorColor = room.id === 0 ? this.activeLocationData.floorColor : 0x333333;
-    const wallColor = room.id === 0 ? this.activeLocationData.wallColor : 0x555555;
-
-    gfx.fillStyle(floorColor, 1);
+  drawRoom(gfx, room, theme) {
+    gfx.fillStyle(theme.floorColor, 1);
     gfx.fillRect(room.x, room.y, room.width, room.height);
 
-    gfx.fillStyle(wallColor, 1);
+    gfx.fillStyle(theme.wallColor, 1);
     gfx.fillRect(room.x, room.y, room.width, WALL_THICKNESS);
     gfx.fillRect(room.x, room.y + room.height - WALL_THICKNESS, room.width, WALL_THICKNESS);
     gfx.fillRect(room.x, room.y, WALL_THICKNESS, room.height);
@@ -269,8 +270,8 @@ export class GameScene extends Phaser.Scene {
 
   drawDoorways(gfx) {
     for (const room of this.level.rooms) {
-      const floorColor = room.id === 0 ? this.activeLocationData.floorColor : 0x333333;
-      gfx.fillStyle(floorColor, 1);
+      const theme = this.roomThemes.get(room.id);
+      gfx.fillStyle(theme.floorColor, 1);
       for (const door of room.doors) {
         if (door.wall === 'north') {
           gfx.fillRect(room.x + door.offset, room.y, door.width, WALL_THICKNESS);
@@ -365,7 +366,7 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  createRoomMaze(gfx, room) {
+  createRoomMaze(gfx, room, theme) {
     const mazeSegments = generateMazeWalls(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed, room.doors);
     for (const seg of mazeSegments) {
       this.wallSegments.push(seg);
@@ -382,7 +383,7 @@ export class GameScene extends Phaser.Scene {
         this.walls.add(this.add.zone(cx, cy, WALL_THICKNESS, length));
       }
 
-      gfx.fillStyle(0x555555, 1);
+      gfx.fillStyle(theme.wallColor, 1);
       if (isHorizontal) {
         gfx.fillRect(Math.min(seg.x1, seg.x2), seg.y1 - WALL_THICKNESS / 2, length, WALL_THICKNESS);
       } else {
