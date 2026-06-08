@@ -22,3 +22,34 @@ export function resolveMoveVelocity({ touchMode, moveActive, stickVelocity, keyb
 export function detectTouchPrimary({ maxTouchPoints, coarsePointer }) {
   return coarsePointer === true || maxTouchPoints > 0;
 }
+
+export function computeTouchLayout({ width, height, stickRadius }) {
+  const edge = 30;
+  const fireRadius = 52;
+  const actionSpacing = 90;
+  const actionBottomMargin = 72;
+
+  const inset = stickRadius + edge;
+  const midY = Math.round(height / 2);
+  const centerX = Math.round(width / 2);
+
+  const moveStick = { x: inset, y: midY };
+  const aimStick = { x: width - inset, y: midY };
+
+  return {
+    moveStick,
+    aimStick,
+    fireButton: {
+      x: aimStick.x - stickRadius - fireRadius - 12,
+      y: midY,
+      radius: fireRadius,
+    },
+    actionRow: {
+      y: height - actionBottomMargin,
+      useX: centerX - actionSpacing,
+      weaponX: centerX,
+      batteryX: centerX + actionSpacing,
+    },
+    fullscreenButton: { x: centerX, y: 40 },
+  };
+}

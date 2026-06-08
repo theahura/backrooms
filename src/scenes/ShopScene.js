@@ -47,6 +47,9 @@ export class ShopScene extends Phaser.Scene {
 
   create() {
     this.cameras.main.setBackgroundColor('#111111');
+    this.fitShopCamera();
+    const onResize = () => this.fitShopCamera();
+    this.scale.on('resize', onResize);
 
     this.add.text(512, 40, 'THE SHOP', {
       fontSize: '36px',
@@ -185,11 +188,19 @@ export class ShopScene extends Phaser.Scene {
     }
 
     this.events.once('shutdown', () => {
+      this.scale.off('resize', onResize);
       if (this._audioUnlockHandler && this.sound) {
         this.sound.off('unlocked', this._audioUnlockHandler);
         this._audioUnlockHandler = null;
       }
     });
+  }
+
+  fitShopCamera() {
+    const cam = this.cameras.main;
+    const zoom = Math.min(this.scale.width / 1024, this.scale.height / 768);
+    cam.setZoom(zoom);
+    cam.centerOn(512, 384);
   }
 
   playSound(key) {

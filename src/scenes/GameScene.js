@@ -8,7 +8,7 @@ import { generateMultiFloorLevel, getFloorBounds, getFloorRoomCounts, STAIR_SIZE
 import { generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_CHASE, CRAWLER_CHASE_SPEED, SPITTER_CHASE_SPEED } from '../systems/enemy.js';
 import { createCombatState, applyDamage, applyHeal, updateCombat, getHealthFraction, isInvulnerable, applyEnemyDamage, isEnemyDead, ENEMY_CONTACT_DAMAGE, ENEMY_MAX_HP, CRAWLER_MAX_HP, SPITTER_MAX_HP, CRAWLER_CONTACT_DAMAGE, SPITTER_CONTACT_DAMAGE, SPITTER_PROJECTILE_DAMAGE, CORPSE_TINT, CORPSE_ALPHA, CORPSE_ANGLE, CORPSE_DEPTH, MEDKIT_HEAL_AMOUNT } from '../systems/combat.js';
 import { calculateBulletVelocity, calculateShotgunSpread, canFire, updateFireCooldown, isBulletExpired, getBulletVelocityFromAngle, SPITTER_PROJECTILE_SPEED, SPITTER_PROJECTILE_RANGE } from '../systems/shooting.js';
-import { getMoveVelocity, resolveAimAngle, resolveFireIntent, resolveMoveVelocity, detectTouchPrimary } from '../systems/touchControls.js';
+import { getMoveVelocity, resolveAimAngle, resolveFireIntent, resolveMoveVelocity, detectTouchPrimary, computeTouchLayout } from '../systems/touchControls.js';
 import { WEAPON_TYPES, createWeaponState, switchWeapon, pickupWeapon, getActiveWeapon, getEffectiveStats, generateLevelWeapons, hasAmmo, consumeAmmo, addAmmo, AMMO_PER_PICKUP } from '../systems/weapons.js';
 import { getEnemyHP, getEnemyCount, getEnemyChaseSpeed, getEnemyDamage } from '../systems/scaling.js';
 import { createBatteryState, updateBattery, getBatteryFraction, getFlashlightConeAngle, shouldFlicker, rechargeBattery, BATTERY_RECHARGE_AMOUNT } from '../systems/battery.js';
@@ -1693,8 +1693,11 @@ export class GameScene extends Phaser.Scene {
   createTouchControls() {
     if (!this.touchMode) return;
 
-    const w = this.scale.width;
-    const h = this.scale.height;
+    const layout = computeTouchLayout({
+      width: this.scale.width,
+      height: this.scale.height,
+      stickRadius: TOUCH_STICK_RADIUS,
+    });
     const thumbRadius = TOUCH_STICK_RADIUS * 0.45;
 
     const moveBase = this.add.circle(0, 0, TOUCH_STICK_RADIUS, 0x88cc88, 0.12)
@@ -1702,8 +1705,8 @@ export class GameScene extends Phaser.Scene {
     const moveThumb = this.add.circle(0, 0, thumbRadius, 0x88cc88, 0.35)
       .setScrollFactor(0).setDepth(TOUCH_UI_DEPTH + 1);
     this.moveStick = this.plugins.get('rexVirtualJoystick').add(this, {
-      x: 170,
-      y: h - 160,
+      x: layout.moveStick.x,
+      y: layout.moveStick.y,
       radius: TOUCH_STICK_RADIUS,
       base: moveBase,
       thumb: moveThumb,
@@ -1716,8 +1719,8 @@ export class GameScene extends Phaser.Scene {
     const aimThumb = this.add.circle(0, 0, thumbRadius, 0xccaa55, 0.35)
       .setScrollFactor(0).setDepth(TOUCH_UI_DEPTH + 1);
     this.aimStick = this.plugins.get('rexVirtualJoystick').add(this, {
-      x: w - 170,
-      y: h - 160,
+      x: layout.aimStick.x,
+      y: layout.aimStick.y,
       radius: TOUCH_STICK_RADIUS,
       base: aimBase,
       thumb: aimThumb,
@@ -1725,24 +1728,23 @@ export class GameScene extends Phaser.Scene {
       enable: true,
     });
 
-    this.fireButtonRadius = 52;
-    this.fireButton = this.add.circle(w - 320, h - 230, this.fireButtonRadius, 0xcc4444, 0.3)
+    this.fireButtonRadius = layout.fireButton.radius;
+    this.fireButton = this.add.circle(layout.fireButton.x, layout.fireButton.y, this.fireButtonRadius, 0xcc4444, 0.3)
       .setStrokeStyle(2, 0xff6666, 0.6).setScrollFactor(0).setDepth(TOUCH_UI_DEPTH);
-    this.fireButtonLabel = this.add.text(w - 320, h - 230, 'FIRE', {
+    this.fireButtonLabel = this.add.text(layout.fireButton.x, layout.fireButton.y, 'FIRE', {
       fontSize: '16px', color: '#ffcccc', fontFamily: 'monospace',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(TOUCH_UI_DEPTH + 1);
 
-    const cx = w / 2;
-    const rowY = h - 60;
-    this.useButton = this.makeTouchButton(cx - 130, rowY, 'USE', () => this.triggerInteract());
-    this.weaponButton = this.makeTouchButton(cx - 44, rowY, 'WPN', () => this.triggerWeaponSwitch());
-    this.batteryButton = this.makeTouchButton(cx + 44, rowY, 'BATT', () => {
+    const row = layout.actionRow;
+    this.useButton = this.makeTouchButton(row.useX, row.y, 'USE', () => this.triggerInteract());
+    this.weaponButton = this.makeTouchButton(row.weaponX, row.y, 'WPN', () => this.triggerWeaponSwitch());
+    this.batteryButton = this.makeTouchButton(row.batteryX, row.y, 'BATT', () => {
       if (this.combatState.isDead || this.dayEnding || this.hidingState.isHiding) return;
       this.onUseBattery();
     });
 
     if (this.scale.fullscreen && this.scale.fullscreen.available) {
-      this.fullscreenButton = this.makeTouchButton(w - 40, 40, 'FS', () => {
+      this.fullscreenButton = this.makeTouchButton(layout.fullscreenButton.x, layout.fullscreenButton.y, 'FS', () => {
         if (this.scale.isFullscreen) {
           this.scale.stopFullscreen();
         } else {
@@ -1754,10 +1756,54 @@ export class GameScene extends Phaser.Scene {
     this.setButtonVisible(this.useButton, false);
     this.setButtonVisible(this.weaponButton, false);
 
+    this.input.once('pointerdown', () => {
+      if (this.scale.fullscreen && this.scale.fullscreen.available && !this.scale.isFullscreen) {
+        this.scale.startFullscreen();
+      }
+    });
+
+    const onResize = () => this.layoutTouchControls();
+    this.scale.on('resize', onResize);
+
     this.events.once('shutdown', () => {
+      this.scale.off('resize', onResize);
       if (this.moveStick) { this.moveStick.destroy(); this.moveStick = null; }
       if (this.aimStick) { this.aimStick.destroy(); this.aimStick = null; }
     });
+  }
+
+  layoutTouchControls() {
+    if (!this.touchMode) return;
+
+    const layout = computeTouchLayout({
+      width: this.scale.width,
+      height: this.scale.height,
+      stickRadius: TOUCH_STICK_RADIUS,
+    });
+
+    if (this.moveStick) this.moveStick.setPosition(layout.moveStick.x, layout.moveStick.y);
+    if (this.aimStick) this.aimStick.setPosition(layout.aimStick.x, layout.aimStick.y);
+
+    if (this.fireButton) {
+      this.fireButton.setPosition(layout.fireButton.x, layout.fireButton.y);
+      this.fireButtonLabel.setPosition(layout.fireButton.x, layout.fireButton.y);
+    }
+
+    const row = layout.actionRow;
+    this.moveTouchButton(this.useButton, row.useX, row.y);
+    this.moveTouchButton(this.weaponButton, row.weaponX, row.y);
+    this.moveTouchButton(this.batteryButton, row.batteryX, row.y);
+    this.moveTouchButton(this.fullscreenButton, layout.fullscreenButton.x, layout.fullscreenButton.y);
+
+    if (this.floorText) {
+      this.floorText.setPosition(this.scale.width - 180, 145);
+    }
+  }
+
+  moveTouchButton(button, x, y) {
+    if (!button) return;
+    button.circle.setPosition(x, y);
+    button.text.setPosition(x, y);
   }
 
   makeTouchButton(x, y, label, onTap) {

@@ -5,6 +5,7 @@ import {
   resolveFireIntent,
   resolveMoveVelocity,
   detectTouchPrimary,
+  computeTouchLayout,
 } from '../touchControls.js';
 
 describe('getMoveVelocity', () => {
@@ -155,5 +156,60 @@ describe('detectTouchPrimary', () => {
 
   it('is true when the hardware reports touch points', () => {
     expect(detectTouchPrimary({ maxTouchPoints: 5, coarsePointer: false })).toBe(true);
+  });
+});
+
+describe('computeTouchLayout', () => {
+  const radius = 90;
+
+  it('centers both sticks vertically so the thumb can travel the full radius down', () => {
+    const wideShortPhone = computeTouchLayout({ width: 844, height: 390, stickRadius: radius });
+    expect(wideShortPhone.moveStick.y).toBe(195);
+    expect(wideShortPhone.aimStick.y).toBe(195);
+    // full downward (and upward) travel must fit on screen even on a short landscape phone
+    expect(wideShortPhone.moveStick.y + radius).toBeLessThanOrEqual(390);
+    expect(wideShortPhone.moveStick.y - radius).toBeGreaterThanOrEqual(0);
+  });
+
+  it('puts the move stick on the left and the aim stick on the right, symmetric and inset', () => {
+    const layout = computeTouchLayout({ width: 1024, height: 768, stickRadius: radius });
+    expect(layout.moveStick.x).toBeLessThan(512);
+    expect(layout.aimStick.x).toBeGreaterThan(512);
+    expect(layout.moveStick.x).toBe(1024 - layout.aimStick.x);
+    // full radius must fit horizontally within the screen
+    expect(layout.moveStick.x - radius).toBeGreaterThanOrEqual(0);
+    expect(layout.aimStick.x + radius).toBeLessThanOrEqual(1024);
+  });
+
+  it('places the fire button on-screen near the aim stick (right thumb)', () => {
+    const layout = computeTouchLayout({ width: 844, height: 390, stickRadius: radius });
+    const fb = layout.fireButton;
+    expect(fb.radius).toBeGreaterThan(0);
+    expect(fb.x - fb.radius).toBeGreaterThanOrEqual(0);
+    expect(fb.x + fb.radius).toBeLessThanOrEqual(844);
+    expect(fb.y - fb.radius).toBeGreaterThanOrEqual(0);
+    expect(fb.y + fb.radius).toBeLessThanOrEqual(390);
+    // it lives on the aim-stick (right) side, not over the move stick
+    expect(fb.x).toBeGreaterThan(layout.moveStick.x);
+    expect(fb.x).toBeLessThan(layout.aimStick.x);
+  });
+
+  it('lays the action row across the bottom-center, ordered and clear of the very bottom edge', () => {
+    const layout = computeTouchLayout({ width: 844, height: 390, stickRadius: radius });
+    const row = layout.actionRow;
+    expect(row.useX).toBeLessThan(row.weaponX);
+    expect(row.weaponX).toBeLessThan(row.batteryX);
+    // centered horizontally
+    expect(row.weaponX).toBe(422);
+    // below the centered sticks but not flush against the bottom edge
+    expect(row.y).toBeGreaterThan(195);
+    expect(row.y).toBeLessThan(390);
+  });
+
+  it('keeps the fullscreen button on-screen near the top', () => {
+    const layout = computeTouchLayout({ width: 844, height: 390, stickRadius: radius });
+    expect(layout.fullscreenButton.x).toBeGreaterThanOrEqual(0);
+    expect(layout.fullscreenButton.x).toBeLessThanOrEqual(844);
+    expect(layout.fullscreenButton.y).toBeLessThan(195);
   });
 });
