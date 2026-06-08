@@ -49,9 +49,10 @@ index.html
        |    -> src/systems/persistence.js (saveGame after runCount increment)
        |    -> src/systems/random.js     (shared seeded PRNG)
        |
-       -> src/scenes/ShopScene.js (between-run upgrade shop + location selector)
+       -> src/scenes/ShopScene.js (between-run upgrade shop + location selector + lore journal)
        |    -> src/systems/shop.js       (upgrade defs, pricing, purchase logic, state)
        |    -> src/systems/locations.js  (location name lookup for display)
+       |    -> src/systems/lore.js       (journal entries + pagination for lore review overlay)
        |    -> src/systems/persistence.js (saveGame at each mutation point)
        |
        -> src/systems/persistence.js  (loadGame on boot, saveGame on lifecycle events)
