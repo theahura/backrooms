@@ -1817,6 +1817,51 @@ No new pure module needed — the journal UI logic belongs in ShopScene since it
 
 The ShopScene enter button is already at y~770 (beyond 768 canvas). The journal button should NOT add to the vertical stack — placed horizontally next to the title or gold balance instead.
 
+## Balance Tuning: Making the Player Feel More Lost
+
+### Objective
+Make the game more disorienting — players explore longer, see less, earn less, and progress slower through upgrades.
+
+### Changes Summary
+
+**1. Flashlight FOV: PI/4 (45°) → PI/6 (30°)**
+- Horror games use restricted vision to create vulnerability
+- 30° forces tunnel vision where threats approach from periphery unseen
+- Below 25° risks frustrating navigation; 30° is the sweet spot
+- Upgrade perLevel stays at PI/12 (+15° per tier) — at max level (3): 30° + 45° = 75° total (generous reward for investment)
+
+**2. Battery Duration: 90s → 150s**
+- Longer duration gives players confidence to explore deeper, then they get lost
+- At upgraded max (capacity 190 at level 3): 150000 * 190/100 = 285s (~4.75 min)
+- Players have more time to wander but the thinner FOV means they don't know where they are
+- Change: BATTERY_DRAIN_PER_MS divisor from 90000 to 150000
+
+**3. Item Rarity: Fewer items, weighted toward non-treasure**
+- Items per room: 2-5 → 1-3 (formula: `1 + Math.floor(rand() * 3)`)
+- Reweight loot table: increase battery/ammo weights, decrease coin/gem weights
+  - battery: 15 → 25, ammo: 12 → 20, copper_coin: 40 → 30, silver_coin: 25 → 15, gold_coin: 15 → 8, gem: 5 → 2
+  - Treasure probability drops from ~76% to ~55%
+  - Expected treasure value per room drops significantly
+
+**4. Shop Costs: [100, 300, 800] → [200, 600, 1500]**
+- Standard upgrades cost 2x at tier 1, 2x at tier 2, ~1.9x at tier 3
+- Starting Pistol: 500 → 1000
+- Minimap: 1500 → 3000
+- With reduced income AND increased costs, progression takes ~3-4x longer
+- First upgrade now requires 2+ successful runs of saving instead of 1
+
+### Test Impact
+- battery.test.js: Many tests assert drain amounts over specific ms values — all need recalculation for 150s drain
+- items.test.js: Item count bounds assertion (2-5 → 1-3)
+- shop.test.js: Cost assertions, upgrade value assertions for any changed base/perLevel values
+- GameScene.js hardcoded offsets (lines 42-44) if weapon base values change: NOT changing these
+
+### Design Rationale
+- Combined effect: thinner FOV + longer battery = player explores more rooms but feels lost
+- Fewer/lower-value treasures + higher costs = progression is slower and each find matters more
+- Battery upgrade still provides strong relative improvement (100→190 capacity = 90% more time)
+- The tension shifts from "will I run out of battery?" to "can I find my way back?"
+
 ## Enemy Cross-Room Movement Research
 
 ### Problem Statement

@@ -150,6 +150,18 @@ describe('UPGRADES', () => {
 
 });
 
+describe('flashlight upgrade', () => {
+  it('returns base cone angle of PI/6 at level 0', () => {
+    expect(getUpgradeValue('flashlight', 0)).toBeCloseTo(Math.PI / 6);
+  });
+
+  it('each level widens the cone by PI/12', () => {
+    const val0 = getUpgradeValue('flashlight', 0);
+    const val1 = getUpgradeValue('flashlight', 1);
+    expect(val1 - val0).toBeCloseTo(Math.PI / 12);
+  });
+});
+
 describe('weapon damage upgrade', () => {
   it('returns 25 base damage at level 0', () => {
     expect(getUpgradeValue('weaponDamage', 0)).toBe(25);
@@ -212,8 +224,8 @@ describe('backpack upgrade', () => {
 });
 
 describe('starting pistol upgrade', () => {
-  it('can be purchased with 500 gold', () => {
-    let state = addGold(createShopState(), 500);
+  it('can be purchased with 1000 gold', () => {
+    let state = addGold(createShopState(), 1000);
     expect(canPurchase(state, 'startingPistol')).toBe(true);
     state = purchaseUpgrade(state, 'startingPistol');
     expect(state.upgrades.startingPistol).toBe(1);
@@ -234,12 +246,12 @@ describe('minimap upgrade', () => {
   });
 
   it('cannot be purchased with insufficient gold', () => {
-    const state = addGold(createShopState(), 1499);
+    const state = addGold(createShopState(), 2999);
     expect(canPurchase(state, 'minimap')).toBe(false);
   });
 
-  it('can be purchased with exactly 1500 gold', () => {
-    let state = addGold(createShopState(), 1500);
+  it('can be purchased with exactly 3000 gold', () => {
+    let state = addGold(createShopState(), 3000);
     expect(canPurchase(state, 'minimap')).toBe(true);
     state = purchaseUpgrade(state, 'minimap');
     expect(state.upgrades.minimap).toBe(1);
