@@ -22,7 +22,7 @@ export class ShopScene extends Phaser.Scene {
     shopState = { ...shopState, upgrades: { ...defaults, ...shopState.upgrades } };
     shopState = addGold(shopState, treasureEarned);
     this.registry.set('shopState', shopState);
-    saveGame(shopState, this.registry.get('runCount') ?? 0);
+    saveGame(shopState, this.registry.get('runCount') ?? 0, this.registry.get('collectedLore') ?? []);
     this.shopState = shopState;
     this.treasureEarned = treasureEarned;
   }
@@ -70,7 +70,7 @@ export class ShopScene extends Phaser.Scene {
     enterBtn.on('pointerout', () => enterBtn.setColor('#44cc44'));
     enterBtn.on('pointerdown', () => {
       this.registry.set('shopState', this.shopState);
-      saveGame(this.shopState, this.registry.get('runCount') ?? 0);
+      saveGame(this.shopState, this.registry.get('runCount') ?? 0, this.registry.get('collectedLore') ?? []);
       this.scene.start('GameScene');
     });
 
@@ -118,7 +118,7 @@ export class ShopScene extends Phaser.Scene {
       if (canPurchase(this.shopState, upgrade.id)) {
         this.shopState = purchaseUpgrade(this.shopState, upgrade.id);
         this.registry.set('shopState', this.shopState);
-        saveGame(this.shopState, this.registry.get('runCount') ?? 0);
+        saveGame(this.shopState, this.registry.get('runCount') ?? 0, this.registry.get('collectedLore') ?? []);
         this.refreshDisplay();
       }
     });

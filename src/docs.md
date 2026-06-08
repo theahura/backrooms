@@ -14,7 +14,7 @@ Path: @/src
 - The architecture enforces a one-way dependency: scenes import from systems, but systems never import from scenes or Phaser. Systems may import from each other (e.g., `enemy.js` imports `raySegmentIntersection` from `visibility.js`)
 
 ### Core Implementation
-- **Game initialization** (`@/src/main.js`): creates a `Phaser.Game` with 1024x768 resolution, Arcade physics (zero gravity for top-down), and registers GameScene and ShopScene. GameScene is listed first, so it is the initial scene on game launch. Immediately after creating the game, `main.js` calls `loadGame()` from `@/src/systems/persistence.js` and, if a valid save exists, populates `game.registry` with the saved `shopState` and `runCount`. This happens before any scene's `init()` runs, so scenes always see persisted state in the registry. `main.js` also installs two browser lifecycle listeners (`visibilitychange` with `hidden` check, and `beforeunload`) that flush the current registry state to localStorage via `saveGame()` as safety nets for unexpected tab closures
+- **Game initialization** (`@/src/main.js`): creates a `Phaser.Game` with 1024x768 resolution, Arcade physics (zero gravity for top-down), and registers GameScene and ShopScene. GameScene is listed first, so it is the initial scene on game launch. Immediately after creating the game, `main.js` calls `loadGame()` from `@/src/systems/persistence.js` and, if a valid save exists, populates `game.registry` with the saved `shopState`, `runCount`, and `collectedLore`. This happens before any scene's `init()` runs, so scenes always see persisted state in the registry. `main.js` also installs two browser lifecycle listeners (`visibilitychange` with `hidden` check, and `beforeunload`) that flush the current registry state (including `collectedLore`) to localStorage via `saveGame()` as safety nets for unexpected tab closures
 - **Scene flow**: the game alternates between GameScene (gameplay) and ShopScene (upgrade shop). On exit or death, GameScene transitions to ShopScene, passing `treasureEarned`. On "Enter Backrooms", ShopScene transitions to GameScene. Cross-scene state (shop upgrades, gold, run counter) flows through `game.registry` in memory and is backed by localStorage via `@/src/systems/persistence.js` for cross-session persistence. Scenes call `saveGame()` at every point where they mutate registry state (e.g., after adding gold, after purchasing upgrades, after incrementing runCount), and `main.js` adds lifecycle listeners as safety nets
 - **Frame loop**: Phaser calls `GameScene.update()` every frame, which reads input, computes velocity via the movement system (at half speed while hiding via `HIDING_SPEED_MULTIPLIER`, full speed otherwise), ticks combat/fire/battery state, processes shooting input (disabled while hiding; fires per-weapon bullets using weapon-specific textures, speeds, and spread patterns), resolves E-key interaction (nearest door, switch, hideable furniture, or weapon pickup by distance), processes Q-key weapon switching, checks bullet expiry for both player and enemy bullets (per-bullet range via `setData`), runs enemy AI updates (with lit-room freezing, hiding-based detection suppression, and spitter projectile firing), updates exploration state (tracking which rooms the player has visited), redraws the player/doors/switches/HUD/minimap (including inventory counts and capacity indicator, weapon name, hiding visual state, per-floor fog-of-war room reveal, and stair glow animation), and recomputes the flashlight/darkness overlay (including lit rooms). The update loop early-returns if the player is dead, a day-ending transition is in progress, or a stair teleportation is in progress (`isTeleporting`)
 - **Level generation**: at scene creation, `GameScene` calls `generateMultiFloorLevel()` from `@/src/systems/stairs.js` with a per-run seed (derived from `runCount` in registry) and `FLOOR_ROOM_COUNTS` (default [4, 3]), which wraps `generateLevel()` per floor to produce a multi-floor set of connected rooms with doorways (including extra doors between grid-adjacent rooms) and up to 2 stair connections using distinct rooms. Floors are separated by 10000px in world-space Y. The scene then iterates over all rooms for rendering, physics setup, furniture placement, maze wall/column generation (via `@/src/systems/maze.js`), enemy spawning, and creates stair zones for floor-to-floor teleportation
@@ -44,6 +44,7 @@ index.html
        |    -> src/systems/exploration.js (exploration state + minimap data computation)
        |    -> src/systems/startroom.js  (store layout, crack points, exit position, store colors)
        |    -> src/systems/shop.js       (getUpgradeValue for stat + weapon initialization)
+       |    -> src/systems/lore.js        (lore note spawning per room)
        |    -> src/systems/persistence.js (saveGame after runCount increment)
        |    -> src/systems/random.js     (shared seeded PRNG)
        |
@@ -54,11 +55,12 @@ index.html
        -> src/systems/persistence.js  (loadGame on boot, saveGame on lifecycle events)
 
   game.registry (cross-scene in-memory state, backed by localStorage):
-    shopState  -> { gold, upgrades: { battery, flashlight, health, speed, weaponDamage, fireRate, bulletRange, backpack, startingPistol, minimap } }
-    runCount   -> incrementing integer used as level seed
+    shopState      -> { gold, upgrades: { battery, flashlight, health, speed, weaponDamage, fireRate, bulletRange, backpack, startingPistol, minimap } }
+    runCount       -> incrementing integer used as level seed
+    collectedLore  -> array of lore entry IDs collected across all runs (meta-progression)
 
   localStorage (cross-session persistence via persistence.js):
-    backrooms_save -> { version, shopState, runCount }
+    backrooms_save -> { version: 2, shopState, runCount, collectedLore }
 ```
 
 ### Things to Know

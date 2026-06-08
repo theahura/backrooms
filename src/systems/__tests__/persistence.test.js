@@ -40,6 +40,7 @@ describe('saveGame and loadGame round-trip', () => {
     expect(loaded).toEqual({
       shopState: { gold: 450, upgrades: { battery: 2, flashlight: 1, health: 0, speed: 3 } },
       runCount: 7,
+      collectedLore: [],
     });
   });
 
@@ -119,6 +120,43 @@ describe('saveGame', () => {
     };
 
     expect(() => saveGame({ gold: 0, upgrades: {} }, 0)).not.toThrow();
+  });
+});
+
+describe('collectedLore persistence', () => {
+  it('round-trips collectedLore through save/load', () => {
+    const shopState = {
+      gold: 100,
+      upgrades: { battery: 0, flashlight: 0, health: 0, speed: 0 },
+    };
+    saveGame(shopState, 3, [1, 5, 12]);
+    const loaded = loadGame();
+    expect(loaded.collectedLore).toEqual([1, 5, 12]);
+  });
+
+  it('defaults collectedLore to empty array for v1 saves', () => {
+    const oldData = {
+      version: 1,
+      shopState: { gold: 200, upgrades: { battery: 1, flashlight: 0, health: 0, speed: 0 } },
+      runCount: 2,
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(oldData));
+    const loaded = loadGame();
+    expect(loaded.collectedLore).toEqual([]);
+  });
+
+  it('preserves collectedLore across multiple save cycles', () => {
+    const shopState = {
+      gold: 50,
+      upgrades: { battery: 0, flashlight: 0, health: 0, speed: 0 },
+    };
+    saveGame(shopState, 1, [3, 7]);
+    const loaded1 = loadGame();
+    expect(loaded1.collectedLore).toEqual([3, 7]);
+
+    saveGame(loaded1.shopState, loaded1.runCount, [...loaded1.collectedLore, 15]);
+    const loaded2 = loadGame();
+    expect(loaded2.collectedLore).toEqual([3, 7, 15]);
   });
 });
 

@@ -19,6 +19,7 @@ import { createHidingState, enterHiding, exitHiding, findNearestHideable, HIDE_I
 import { saveGame } from '../systems/persistence.js';
 import { createExplorationState, updateExploration, getMinimapData, MINIMAP_COLORS } from '../systems/exploration.js';
 import { generateStoreLayout, generateCrackPoints, getExitPosition, STORE_FLOOR_COLOR, STORE_WALL_COLOR } from '../systems/startroom.js';
+import { generateRoomLore } from '../systems/lore.js';
 
 const WALL_THICKNESS = 16;
 
@@ -60,7 +61,8 @@ export class GameScene extends Phaser.Scene {
     this.scaledCrawlerDamage = getEnemyDamage(CRAWLER_CONTACT_DAMAGE, runCount);
     this.scaledSpitterDamage = getEnemyDamage(SPITTER_CONTACT_DAMAGE, runCount);
     this.extraEnemyCount = getEnemyCount(runCount);
-    saveGame(shopState || createShopState(), runCount + 1);
+    this.collectedLore = new Set(this.registry.get('collectedLore') ?? []);
+    saveGame(shopState || createShopState(), runCount + 1, [...this.collectedLore]);
   }
 
   updateWeaponStats() {
@@ -109,6 +111,7 @@ export class GameScene extends Phaser.Scene {
     this.createEnemies();
     this.createItemTextures();
     this.createItems();
+    this.createLoreItems();
     this.createBullets();
     this.createEnemyBullets();
     this.createWeaponPickups();
@@ -521,6 +524,105 @@ export class GameScene extends Phaser.Scene {
       this.weaponState = addAmmo(this.weaponState, amount);
     }
     itemSprite.destroy();
+  }
+
+  createLoreItems() {
+    const gfx = this.make.graphics({ add: false });
+    gfx.fillStyle(0xddccaa, 1);
+    gfx.fillRect(0, 0, 12, 10);
+    gfx.lineStyle(1, 0x998866, 0.8);
+    gfx.beginPath();
+    gfx.moveTo(2, 3);
+    gfx.lineTo(10, 3);
+    gfx.moveTo(2, 5);
+    gfx.lineTo(10, 5);
+    gfx.moveTo(2, 7);
+    gfx.lineTo(8, 7);
+    gfx.strokePath();
+    gfx.generateTexture('lore_note', 12, 10);
+    gfx.destroy();
+
+    this.loreGroup = this.physics.add.staticGroup();
+
+    for (const room of this.level.rooms) {
+      const furniture = this.roomFurniture.get(room.id) || [];
+      const loreItems = generateRoomLore(
+        room.x, room.y, room.width, room.height,
+        WALL_THICKNESS, room.seed, furniture, room.id, this.collectedLore
+      );
+
+      for (const item of loreItems) {
+        const sprite = this.loreGroup.create(item.x, item.y, 'lore_note');
+        sprite.setDepth(5);
+        sprite.setData('loreId', item.loreId);
+        sprite.setData('loreText', item.text);
+      }
+    }
+
+    this.physics.add.overlap(this.player, this.loreGroup, this.onLorePickup, null, this);
+    this.lorePopup = null;
+  }
+
+  onLorePickup(player, loreSprite) {
+    if (!loreSprite.active) return;
+    if (this.dayEnding || this.isTeleporting) return;
+
+    const loreId = loreSprite.getData('loreId');
+    const loreText = loreSprite.getData('loreText');
+
+    this.collectedLore.add(loreId);
+    this.registry.set('collectedLore', [...this.collectedLore]);
+
+    loreSprite.destroy();
+    this.showLorePopup(loreText);
+  }
+
+  showLorePopup(text) {
+    if (this.lorePopup) {
+      this.lorePopup.bg.destroy();
+      this.lorePopup.text.destroy();
+      if (this.lorePopup.timer) this.lorePopup.timer.remove();
+      this.lorePopup = null;
+    }
+
+    const cam = this.cameras.main;
+    const bg = this.add.graphics();
+    bg.setScrollFactor(0);
+    bg.setDepth(1001);
+    bg.fillStyle(0x000000, 0.75);
+    bg.fillRoundedRect(cam.width / 2 - 250, cam.height - 140, 500, 80, 8);
+    bg.setAlpha(0);
+
+    const loreText = this.add.text(cam.width / 2, cam.height - 100, text, {
+      fontSize: '13px',
+      color: '#ddccaa',
+      fontFamily: 'monospace',
+      wordWrap: { width: 460 },
+      align: 'center',
+    });
+    loreText.setOrigin(0.5);
+    loreText.setScrollFactor(0);
+    loreText.setDepth(1002);
+    loreText.setAlpha(0);
+
+    this.tweens.add({ targets: [bg, loreText], alpha: 1, duration: 300 });
+
+    const timer = this.time.delayedCall(5000, () => {
+      this.tweens.add({
+        targets: [bg, loreText],
+        alpha: 0,
+        duration: 500,
+        onComplete: () => {
+          bg.destroy();
+          loreText.destroy();
+          if (this.lorePopup && this.lorePopup.bg === bg) {
+            this.lorePopup = null;
+          }
+        },
+      });
+    });
+
+    this.lorePopup = { bg, text: loreText, timer };
   }
 
   createPlayer() {

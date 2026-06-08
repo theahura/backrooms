@@ -1,9 +1,9 @@
 export const SAVE_KEY = 'backrooms_save';
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 
-export function saveGame(shopState, runCount) {
+export function saveGame(shopState, runCount, collectedLore = []) {
   try {
-    const data = { version: SAVE_VERSION, shopState, runCount };
+    const data = { version: SAVE_VERSION, shopState, runCount, collectedLore };
     localStorage.setItem(SAVE_KEY, JSON.stringify(data));
   } catch (e) {
   }
@@ -19,6 +19,7 @@ export function loadGame() {
     return {
       shopState: data.shopState,
       runCount: data.runCount ?? 0,
+      collectedLore: data.collectedLore ?? [],
     };
   } catch (e) {
     return null;

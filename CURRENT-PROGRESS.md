@@ -1,6 +1,10 @@
 # Current Progress
 
-## Status: Starting Location Entry Consistency & Shop Positioning
+## Status: Lore Items in Rooms
+
+Collectible lore notes now spawn in rooms. ~25% of non-room-0 rooms contain a lore note (max 1 per room). Key changes: (1) New pure function module `lore.js` with 20 Backrooms-themed lore entries and `generateRoomLore()` spawning function (seed offset +90000, same placement pattern as `items.js`). (2) Lore items do NOT consume inventory space — they are meta-progression collectibles. (3) On pickup, a tween-animated text popup appears at the bottom of the screen (dark semi-transparent background, monospace text) and auto-dismisses after 5 seconds with fade-out. (4) Collected lore IDs are persisted across runs via `persistence.js` — save format bumped from v1 to v2 with new `collectedLore` field (backward compatible: v1 saves default to `[]`). (5) Already-collected notes don't respawn. (6) GameScene creates a separate `loreGroup` physics static group with its own overlap handler. (7) Lore textures are small paper/note shapes (off-white, 12x10px with line details) at depth 5 (hidden by darkness). 12 new tests: 9 for lore spawning behavior, 3 for persistence round-trip.
+
+## Previous: Starting Location Entry Consistency & Shop Positioning
 
 Room 0 now has a consistent layout: (1) The crack to the backrooms is always on the east wall — `generateLevel()` forces `DIRECTIONS[1]` (east) for the first room connection (`i === 1`), consuming the PRNG roll but discarding it to preserve sequence for subsequent rooms. (2) The exit zone (front entrance) moved from center-north to west-center of room 0 (`x: room.x + wallThickness + 40, y: room.y + room.height / 2`) — representing the furniture store's front door, ~544px from player spawn at center. (3) The shop counter moved from far-left (`relX: 0.08`) to center-left (`relX: 0.35, relY: 0.42`) — centered within the store without overlapping the 60x60 spawn exclusion zone. (4) Bookcases moved from `relX: 0.75` to `relX: 0.62` to avoid blocking the now-guaranteed east doorway. 7 new tests covering east direction consistency, exit positioning, and furniture layout.
 
@@ -277,7 +281,16 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
   - SWITCH_CHANCE reduced from 0.4 (40%) to 0.15 (15%)
   - Most rooms no longer have switches — darker, scarier atmosphere
   - 1 new statistical test validating ~15% distribution
-- 377 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, weapon upgrades, enemy types, stairs, weapons, inventory capacity, maze generation, room connections, weaponless start, ammo system, minimap upgrade, and switch frequency
+- Lore items in rooms
+  - Pure function module `lore.js`: 20 Backrooms-themed entries, `generateRoomLore()` with seed offset +90000
+  - ~25% of non-room-0 rooms contain 1 lore note, spawned with furniture overlap avoidance
+  - Lore does not consume inventory space (meta-progression collectible)
+  - On pickup: tween-animated text popup at bottom of screen, auto-dismiss after 5s
+  - Collected lore IDs persisted across runs in localStorage (save format v2, backward compatible with v1)
+  - Already-collected notes don't respawn
+  - Separate `loreGroup` physics static group and 'lore_note' texture (off-white paper with line details)
+  - 12 new tests: 9 lore spawning behavior, 3 persistence round-trip
+- 399 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, weapon upgrades, enemy types, stairs, weapons, inventory capacity, maze generation, room connections, weaponless start, ammo system, minimap upgrade, switch frequency, lore spawning, and lore persistence
 - Documentation (docs.md files for root, src, systems, scenes)
 - Bug fix: flashlight mouse tracking drift during WASD movement
   - Root cause: Phaser 3 `pointer.worldX`/`worldY` are cached properties only refreshed on mouse events, not camera scroll
@@ -285,7 +298,7 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
   - Also fixes bullet direction when shooting while moving
 
 ## Architecture
-- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop, doors, lightswitch, hiding, persistence, exploration, startroom, scaling, stairs, weapons, maze) — testable without Phaser
+- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop, doors, lightswitch, hiding, persistence, exploration, startroom, scaling, stairs, weapons, maze, lore) — testable without Phaser
 - `src/scenes/` — Phaser scene classes that wire systems together for rendering (GameScene for gameplay, ShopScene for upgrades between runs)
 - Darkness uses BitmapMask with invertAlpha on a Graphics overlay
 - Furniture segments use the same `{x1,y1,x2,y2}` format as walls — concatenated into `wallSegments` for raycasting with zero visibility code changes
@@ -294,10 +307,10 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
 - Enemy LOS reuses `raySegmentIntersection` from visibility.js — single ray from enemy to player, checked against wall segments
 - Enemy AI is a pure function state machine — takes state in, returns updated state with velocity. Three enemy types (basic, crawler, spitter) share the same FSM with type-aware speed constants via `getTypeSpeeds()`. Spitters add a 4th `attack` state with `wantsToFire` signaling to the scene.
 - Enemy type is assigned at spawn time by `getEnemyType(rand, runCount)` — run-gated distribution ensures gradual introduction of new types
-- Combat/shooting/battery/inventory/hiding/exploration/startroom/scaling/weapons are pure function modules (`combat.js`, `shooting.js`, `battery.js`, `inventory.js`, `hiding.js`, `exploration.js`, `startroom.js`, `scaling.js`, `weapons.js`) — same architecture pattern as enemy/movement
+- Combat/shooting/battery/inventory/hiding/exploration/startroom/scaling/weapons/lore are pure function modules (`combat.js`, `shooting.js`, `battery.js`, `inventory.js`, `hiding.js`, `exploration.js`, `startroom.js`, `scaling.js`, `weapons.js`, `lore.js`) — same architecture pattern as enemy/movement
 - Items system (`items.js`) follows same spawning pattern as enemy.js: seeded PRNG, furniture overlap avoidance, skip room 0
 - Player combat, battery, inventory, hiding, exploration, weapon, and shop states are immutable objects; enemy health is a mutable field on the enemy state (asymmetry: player state is passed through pure functions, enemy health is mutated in-place in the scene callback)
-- Item spawning uses seed offset +20000 (furniture: +0, enemies: +10000, items: +20000, doors: +30000, switches: +40000, weapons: +60000, maze: +70000, extra doors: +80000) to avoid correlation
+- Item spawning uses seed offset +20000 (furniture: +0, enemies: +10000, items: +20000, doors: +30000, switches: +40000, weapons: +60000, maze: +70000, extra doors: +80000, lore: +90000) to avoid correlation
 - Closable door segments are dynamically pushed/spliced from `wallSegments` — same mutable array pattern as furniture, but toggled at runtime via `body.enable` on Phaser static bodies
 - Light switch lit rooms are drawn as fillRect into maskGraphics (same BitmapMask as flashlight) — drawn before the flashlight early-return so lit rooms stay visible even when battery is dead
 - E-key interaction resolves nearest interactable (door, switch, hideable furniture, or weapon pickup) via distance-sorted candidates array in `updateInteractPrompt()`
@@ -328,7 +341,7 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
 - Stair zones use identical overlap + camera fade pattern as exit zone — `onStairEnter()` mirrors `onDayComplete()` structure with `body.reset()` instead of scene transition
 - `getMinimapData(state, rooms, bounds, playerPos, exitPos, screenWidth, floorFilter)` — 7th param filters rooms by floor; null/undefined shows all (backward compatible)
 - Weapon system: `weapons.js` defines WEAPON_TYPES (pistol, shotgun, rifle) with per-weapon stats. `createWeaponState()` returns 2-slot inventory (pistol default + one pickup slot). Upgrade bonuses computed as deltas from pistol base values and applied additively to any weapon via `getEffectiveStats()`. Q-key cycles `activeSlot`, E-key on weapon pickup calls `pickupWeapon()` which fills empty slot or swaps.
-- Seed offset scheme: furniture +0, enemies +10000, items +20000, doors +30000, switches +40000, stairs +50000, weapons +60000, maze +70000, extra doors +80000, floor seed +1000*floorIndex
+- Seed offset scheme: furniture +0, enemies +10000, items +20000, doors +30000, switches +40000, stairs +50000, weapons +60000, maze +70000, extra doors +80000, lore +90000, floor seed +1000*floorIndex
 - Inventory capacity: `inventory.js` exports `canPickupItem(state)` predicate. State now includes `itemCount` (incremented on pickup, decremented on battery use) and `maxItems` (set from backpack upgrade at run start). GameScene checks predicate before destroying item sprites — items stay on ground when full. Constants: `BASE_INVENTORY_CAPACITY=8`, `INVENTORY_CAPACITY_PER_LEVEL=4`.
 - Maze/room variety: `maze.js` classifies rooms into types (open/maze/columns) using seeded PRNG. Maze rooms use recursive division (depth 2) to place internal wall segments with 80px passage gaps. Column rooms use a staggered grid of 24x24 pillars at 200px spacing. Both types produce `{x1,y1,x2,y2}` segments that integrate directly into the existing `wallSegments` array — no raycasting changes needed. `generateMazeWalls()` accepts the room's `doors` array and avoids placing walls that would block door entry zones.
 - Furniture light-blocking: `FURNITURE_TYPES` has `blocksLight` field. GameScene checks `FURNITURE_TYPES[item.type].blocksLight` before pushing furniture segments to `wallSegments`. Low furniture (tables, desks) has physics collision but doesn't cast shadows. Items with unknown types (store furniture like 'counter', 'couch') fall through gracefully (no segments pushed — irrelevant since room 0 is always lit).
@@ -336,8 +349,11 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
 - Multiple stairs: `createStairConnections` now uses a `usedFrom`/`usedTo` Set to pick distinct rooms for each stair pair. Falls back to fewer stairs if insufficient rooms are available.
 - Minimap gating: `this.hasMinimap` boolean in GameScene set from `levels.minimap` upgrade. When false, `minimapGraphics` and `floorText` are never created, `drawMinimap()` early-returns. Exploration tracking still runs (cheap, no Phaser dependency in the pure module).
 - Light switch frequency: `SWITCH_CHANCE = 0.15` in lightswitch.js (previously 0.4). With 6 eligible rooms per level, expect ~0.9 switches per run (often zero).
+- Lore items: `lore.js` defines 20 `LORE_ENTRIES` (Backrooms-themed notes) and `generateRoomLore()` which spawns 0-1 notes per non-room-0 room (~25% chance) using seed offset +90000. Same placement retry pattern as `items.js` (furniture overlap avoidance). Returns `[{ x, y, loreId, text }]`. Already-collected IDs (passed as Set) are filtered out at generation time.
+- Lore persistence: `persistence.js` save format v2 adds `collectedLore` (array of numeric IDs). v1 saves load with `collectedLore` defaulting to `[]`. `saveGame()` accepts optional third parameter. All call sites (GameScene, ShopScene, main.js) pass `collectedLore` from `game.registry`.
+- Lore display: GameScene `showLorePopup(text)` renders a dark semi-transparent rounded rectangle (depth 1001) with monospace text (depth 1002) at the bottom of the screen. Uses Phaser tweens for fade-in (300ms) and delayed fade-out (5000ms wait + 500ms fade). Only one popup shown at a time — new pickups dismiss the current popup.
+- Lore physics: `this.loreGroup` is a separate `physics.add.staticGroup()` from `this.itemGroup`. Lore sprites use a distinct 'lore_note' texture (12x10 off-white paper with line details). `onLorePickup()` skips inventory checks — lore never consumes backpack space.
 
 ## Next Steps
 - Add different exit locations (spec: discovering alternate exits leads to different locations)
-- Add lore items in rooms
 - Add more floors (extend FLOOR_ROOM_COUNTS array) for later runs

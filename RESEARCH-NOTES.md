@@ -1550,3 +1550,54 @@ Flow: Player spawns at center → walks east to crack → explores backrooms →
 - East-wall bookcases in store layout might visually overlap the crack doorway — reposition them
 - `createCrackVisual()` already handles all 4 wall directions generically via switch on `door.wall`
 - `addExtraDoors` may add extra doors to room 0 on other walls — room.doors[0] remains the east door since it was pushed first
+
+## Lore Items Research
+
+### Design Decisions
+- Lore items are collectible notes/papers found in rooms — read-only, do NOT consume inventory space
+- Follow existing item spawning pattern: seeded PRNG, furniture overlap avoidance, skip room 0
+- Seed offset: +90000 (next available in the scheme: +0 furniture, +10000 enemies, +20000 items, +30000 doors, +40000 switches, +50000 stairs, +60000 weapons, +70000 maze, +80000 extra doors)
+- Separate `lore.js` module rather than mixing into `items.js` — keeps spawn sequences independent
+- ~25% chance per non-room-0 room to contain a lore note (sparse, not every room)
+- 0-1 lore items per room (when present)
+- Persist collected lore IDs across runs in localStorage (meta-progression)
+- Each lore entry has a unique numeric ID for deduplication
+
+### Lore Display UX
+- When player walks over a lore note, show a text popup on screen
+- Text popup: semi-transparent dark background, light text, centered on screen
+- Auto-dismiss after ~5 seconds (short notes don't need player-dismissed in an action game where enemies may be nearby)
+- Phaser Text object with setScrollFactor(0) at depth 1000 (same as HUD)
+- Fade-in/fade-out via Phaser tweens for polish
+
+### Lore Content Themes (Backrooms-authentic)
+- Survival warnings (practical tips from predecessors)
+- Psychological deterioration journals (diary entries showing mental decline)
+- Cryptic/ominous fragments (unsettling observations)
+- Desperate pleas (final messages)
+- Existential dread (time distortion, identity loss)
+- Sensory details (the buzzing, the yellow, the carpet smell)
+
+### Visual Design
+- Small paper/note shape — off-white/aged paper color (0xDDCCAA)
+- Rendered at depth 5 (same as items — hidden by darkness, only visible in flashlight)
+- Distinct from coins/batteries/ammo to be visually recognizable
+
+### Persistence Integration
+- Add `collectedLore` field (array of IDs) to save format
+- Bump SAVE_VERSION to 2 (v1 saves load fine with `collectedLore` defaulting to [])
+- Update saveGame/loadGame signatures
+- Skip spawning notes the player has already collected (deduplication per-seed)
+- Since level seeds change per run, lore ID = index into global LORE_ENTRIES array, assigned deterministically per room via seeded PRNG
+
+### Implementation Pattern
+- `src/systems/lore.js` — pure function module
+  - LORE_ENTRIES: array of { id, text } — ~20 entries
+  - generateRoomLore(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, furnitureItems, roomId, collectedLoreIds)
+  - Returns [] for room 0, or 0-1 lore items with position and entry ID
+- GameScene integration:
+  - createLoreTexture() — paper icon
+  - createLoreItems() — separate physics group
+  - onLorePickup() — show text, add to collected set, destroy sprite
+  - showLorePopup(text) — tween-animated text overlay
+  - hideLorePopup() — auto-called after timeout
