@@ -2449,3 +2449,114 @@ All changes confined to `maze.js`:
 - Cubicles: ~15-25 cells × 2-3 segments = 30-75 segments
 - All well within raycasting budget (existing rooms with furniture already produce 50+ segments)
 - Generation is one-time cost in `create()` — no per-frame impact
+
+## Pixel Art Sprite System Research
+
+### Design Decision: Programmatic Pixel Art via `textures.generate()`
+
+Phaser 3 provides `textures.generate(key, config)` which creates textures from character-based data arrays. Each character maps to a color in a 16-color palette. This is purpose-built for pixel art and avoids external image asset dependencies (consistent with the procedural audio approach).
+
+### Phaser 3 API: `textures.generate()`
+
+```javascript
+this.textures.generate('sprite_key', {
+  data: ['..11..', '.1221.', '122221', '122221', '.1221.', '..11..'],
+  palette: { 0: '#000', 1: '#cc3333', 2: '#ff4444' },
+  pixelWidth: 2,  // each data character = 2x2 screen pixels
+  pixelHeight: 2,
+});
+```
+
+- `data`: array of strings, each character is a pixel (0-9, A-F, `.`/space = transparent)
+- `palette`: object mapping single characters to hex color strings. Default: Arne16 palette.
+- `pixelWidth`/`pixelHeight`: multiplier per cell (controls "chunkiness")
+- Characters `.` and ` ` are transparent
+
+### Game Config: `pixelArt: true`
+
+Critical for crisp rendering. Sets `antialias: false`, `antialiasGL: false`, `roundPixels: true`. Without this, scaled pixel art is blurred by bilinear filtering. Current game config in `main.js` does NOT set this.
+
+Potential concern: `pixelArt: true` may affect BitmapMask flashlight polygon edges. However, the mask is a Graphics-drawn polygon shape, not a texture — the antialias setting primarily affects texture filtering. The flashlight boundaries may be slightly crisper, which fits the pixel art aesthetic.
+
+### Per-Texture Alternative
+
+If global `pixelArt` causes issues, can set nearest-neighbor per texture:
+```javascript
+this.textures.get('key').setFilter(Phaser.Textures.FilterMode.NEAREST);
+```
+
+### Scaling Strategy
+
+Objects at different size scales need different pixel densities:
+- **Small objects (8-16px)**: items, bullets, switches, lore notes → native pixel resolution (pixelWidth=1), no scaling needed
+- **Medium objects (16-20px)**: weapon pickups, enemies → native or pixelWidth=2
+- **Large objects (30-100px)**: furniture → pixelWidth=5 (e.g., table 80x50 = 16x10 data at 5x)
+- **Very large objects (60-64px)**: stairs, exit zones → pixelWidth=4 or 5
+
+### Current Rendering Patterns to Change
+
+| Object | Current | Target |
+|--------|---------|--------|
+| Furniture | `fillRect` on shared Graphics | Individual sprites with pixel art textures |
+| Items | `generateTexture` colored shapes | `textures.generate` pixel art |
+| Weapons | `generateTexture` cross shapes | `textures.generate` gun silhouettes |
+| Bullets | `generateTexture` colored circles | `textures.generate` pixel art |
+| Lore notes | `generateTexture` rect with lines | `textures.generate` detailed paper |
+| Doors | Per-frame `fillRect` on Graphics | Sprites with visibility toggling |
+| Switches | Per-frame `fillRect` on Graphics | Sprites with frame/texture swapping |
+| Enemies | `generateTexture` colored circles | Unchanged (next commit: animations) |
+| Player | Per-frame Graphics drawing | Unchanged (next commit: animations) |
+| Stairs | Graphics `fillRect` + lines | Keep Graphics (complex visual) |
+| Exit zone | Graphics `fillRect` + stroke | Keep Graphics (simple glow effect) |
+
+### Furniture Conversion: Graphics → Sprites
+
+Current: all furniture drawn to a single `furnitureGfx` Graphics object with `fillRect` calls.
+Target: each furniture piece is a Phaser sprite with a pixel art texture.
+
+Steps:
+1. Generate textures for each furniture type in `createRooms()` or a new `createFurnitureTextures()` method
+2. In `createRoomFurniture()`: replace `gfx.fillRect(...)` with `this.add.sprite(...)` at depth 50
+3. Physics zones (furnitureGroup) remain unchanged — they're separate from visuals
+4. The shared `furnitureGfx` object can be removed (or kept for room floor/wall drawing only)
+
+Impact: ~35-56 furniture sprites across 7 rooms. Negligible performance impact.
+
+### Door Conversion: Per-Frame Graphics → Sprites
+
+Current: `drawDoors()` clears and redraws `doorGraphics` every frame.
+Target: each door is a sprite, visibility toggled on close/open.
+
+Steps:
+1. Generate a door texture (wood plank pattern)
+2. Create a sprite per closable door in `createDoors()`
+3. `toggleDoor`: set sprite visible/invisible instead of redrawing
+4. Remove `doorGraphics` and `drawDoors()` per-frame call
+
+### Switch Conversion: Per-Frame Graphics → Sprites
+
+Current: `drawSwitches()` clears and redraws `switchGraphics` every frame.
+Target: each switch has two textures (on/off), swapped on toggle.
+
+Steps:
+1. Generate `switch_on` and `switch_off` textures
+2. Create a sprite per switch in `createSwitches()`
+3. `toggleSwitch`: swap texture key instead of redrawing
+4. Remove `switchGraphics` and `drawSwitches()` per-frame call
+
+### Architecture: New Module `sprites.js`
+
+`src/systems/sprites.js` — pure data module defining pixel art arrays and palettes:
+- `SPRITE_DEFS` object mapping sprite keys to `{ data, palette, pixelWidth }` configs
+- Categories: furniture, items, weapons, bullets, doors, switches, lore
+- No Phaser dependency — testable data validation
+- GameScene calls `this.textures.generate(key, SPRITE_DEFS[key])` for each sprite
+- Palette limited to 16 colors per sprite — sufficient for the game's muted color scheme
+
+### Pixel Art Design Principles for Backrooms Theme
+
+- **Muted, desaturated colors** — yellowed whites, faded browns, institutional grays
+- **Minimal detail** — backrooms aesthetic is about mundane, featureless spaces
+- **Consistent lighting assumption** — sprites are drawn as if lit from above (top highlight, bottom shadow)
+- **No outlines on furniture** — furniture blends into environment, discovered by flashlight
+- **Distinct silhouettes for items** — must be recognizable at a glance in flashlight beam

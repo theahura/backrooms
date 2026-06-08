@@ -25,6 +25,7 @@ import { buildRoomGraph, buildFullRoomGraph, bfsFromRoom, getNextDoorway, getClo
 import { createDangerState, updateDangerTime, shouldSpawnWave, advanceWave, getWaveComposition, getSpawnRoom } from '../systems/danger.js';
 import { getFootstepInterval, getAmbientSoundDelay } from '../systems/audio.js';
 import { generateAllSounds, createAmbientDrone, playAmbientSound } from '../systems/audioEngine.js';
+import { SPRITE_DEFS, getAllSpriteKeys } from '../systems/sprites.js';
 
 const WALL_THICKNESS = 16;
 
@@ -117,12 +118,12 @@ export class GameScene extends Phaser.Scene {
     this.fullRoomGraph = null;
     this.roomGraphDirty = true;
 
+    this.generateSpriteTextures();
     this.createRooms();
     this.createDoors();
     this.createSwitches();
     this.createPlayer();
     this.createEnemies();
-    this.createItemTextures();
     this.createItems();
     this.createLoreItems();
     this.createBullets();
@@ -211,6 +212,18 @@ export class GameScene extends Phaser.Scene {
     if (this.ambientTimer) {
       this.ambientTimer.remove();
       this.ambientTimer = null;
+    }
+  }
+
+  generateSpriteTextures() {
+    for (const key of getAllSpriteKeys()) {
+      const def = SPRITE_DEFS[key];
+      this.textures.generate(key, {
+        data: def.data,
+        pixelWidth: def.pixelWidth || 1,
+        pixelHeight: def.pixelHeight || def.pixelWidth || 1,
+        palette: def.palette,
+      });
     }
   }
 
@@ -314,8 +327,19 @@ export class GameScene extends Phaser.Scene {
     this.roomFurniture.set(room.id, furniture);
 
     for (const item of furniture) {
-      gfx.fillStyle(item.color, 1);
-      gfx.fillRect(item.x, item.y, item.width, item.height);
+      const spriteKey = `furniture_${item.type}`;
+      if (SPRITE_DEFS[spriteKey]) {
+        const sprite = this.add.sprite(
+          item.x + item.width / 2,
+          item.y + item.height / 2,
+          spriteKey
+        );
+        sprite.setDisplaySize(item.width, item.height);
+        sprite.setDepth(50);
+      } else {
+        gfx.fillStyle(item.color, 1);
+        gfx.fillRect(item.x, item.y, item.width, item.height);
+      }
 
       const zone = this.add.zone(
         item.x + item.width / 2,
@@ -362,8 +386,7 @@ export class GameScene extends Phaser.Scene {
     this.doorStates = createDoorStates(this.level.rooms, this.levelSeed);
     this.doorGroup = this.physics.add.staticGroup();
     this.doorZones = new Map();
-    this.doorGraphics = this.add.graphics();
-    this.doorGraphics.setDepth(50);
+    this.doorSprites = new Map();
 
     for (const door of this.doorStates) {
       const center = getDoorCenter(door, this.level.rooms);
@@ -373,6 +396,12 @@ export class GameScene extends Phaser.Scene {
 
       const zone = this.add.zone(center.x, center.y, zoneW, zoneH);
       this.doorGroup.add(zone);
+
+      const doorSprite = this.add.sprite(center.x, center.y, 'door_closed');
+      doorSprite.setDisplaySize(zoneW, zoneH);
+      doorSprite.setDepth(50);
+      doorSprite.setVisible(door.isClosed);
+      this.doorSprites.set(door.id, doorSprite);
 
       if (door.isClosed) {
         this.wallSegments.push(door.segment);
@@ -397,8 +426,13 @@ export class GameScene extends Phaser.Scene {
 
   createSwitches() {
     this.switchStates = createSwitchStates(this.level.rooms, this.levelSeed, WALL_THICKNESS);
-    this.switchGraphics = this.add.graphics();
-    this.switchGraphics.setDepth(50);
+    this.switchSprites = new Map();
+    for (const sw of this.switchStates) {
+      const texKey = sw.isOn ? 'switch_on' : 'switch_off';
+      const sprite = this.add.sprite(sw.x, sw.y, texKey);
+      sprite.setDepth(50);
+      this.switchSprites.set(sw.id, sprite);
+    }
   }
 
   onToggleSwitch(switchId) {
@@ -451,24 +485,16 @@ export class GameScene extends Phaser.Scene {
   }
 
   drawDoors() {
-    this.doorGraphics.clear();
     for (const door of this.doorStates) {
-      if (!door.isClosed) continue;
-      const center = getDoorCenter(door, this.level.rooms);
-      const isHorizontal = door.wall === 'north' || door.wall === 'south';
-      const w = isHorizontal ? door.width : WALL_THICKNESS;
-      const h = isHorizontal ? WALL_THICKNESS : door.width;
-
-      this.doorGraphics.fillStyle(0x664422, 1);
-      this.doorGraphics.fillRect(center.x - w / 2, center.y - h / 2, w, h);
+      const sprite = this.doorSprites.get(door.id);
+      if (sprite) sprite.setVisible(door.isClosed);
     }
   }
 
   drawSwitches() {
-    this.switchGraphics.clear();
     for (const sw of this.switchStates) {
-      this.switchGraphics.fillStyle(sw.isOn ? 0xffff44 : 0xcccccc, 1);
-      this.switchGraphics.fillRect(sw.x - 5, sw.y - 7, 10, 14);
+      const sprite = this.switchSprites.get(sw.id);
+      if (sprite) sprite.setTexture(sw.isOn ? 'switch_on' : 'switch_off');
     }
   }
 
@@ -543,23 +569,6 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  createItemTextures() {
-    for (const itemType of ITEM_TYPES) {
-      const gfx = this.make.graphics({ add: false });
-      gfx.fillStyle(itemType.color, 1);
-      if (itemType.type === 'gem') {
-        gfx.fillTriangle(
-          itemType.size.w / 2, 0,
-          0, itemType.size.h,
-          itemType.size.w, itemType.size.h
-        );
-      } else {
-        gfx.fillRect(0, 0, itemType.size.w, itemType.size.h);
-      }
-      gfx.generateTexture(`item_${itemType.type}`, itemType.size.w, itemType.size.h);
-      gfx.destroy();
-    }
-  }
 
   createItems() {
     this.itemGroup = this.physics.add.staticGroup();
@@ -607,21 +616,6 @@ export class GameScene extends Phaser.Scene {
   }
 
   createLoreItems() {
-    const gfx = this.make.graphics({ add: false });
-    gfx.fillStyle(0xddccaa, 1);
-    gfx.fillRect(0, 0, 12, 10);
-    gfx.lineStyle(1, 0x998866, 0.8);
-    gfx.beginPath();
-    gfx.moveTo(2, 3);
-    gfx.lineTo(10, 3);
-    gfx.moveTo(2, 5);
-    gfx.lineTo(10, 5);
-    gfx.moveTo(2, 7);
-    gfx.lineTo(8, 7);
-    gfx.strokePath();
-    gfx.generateTexture('lore_note', 12, 10);
-    gfx.destroy();
-
     this.loreGroup = this.physics.add.staticGroup();
 
     for (const room of this.level.rooms) {
@@ -857,19 +851,6 @@ export class GameScene extends Phaser.Scene {
   }
 
   createBullets() {
-    const bulletTextures = [
-      { key: 'bullet_pistol', color: 0xffdd44, radius: 3 },
-      { key: 'bullet_shotgun', color: 0xff8844, radius: 2 },
-      { key: 'bullet_rifle', color: 0x44ddff, radius: 3 },
-    ];
-    for (const tex of bulletTextures) {
-      const gfx = this.make.graphics({ add: false });
-      gfx.fillStyle(tex.color, 1);
-      gfx.fillCircle(tex.radius, tex.radius, tex.radius);
-      gfx.generateTexture(tex.key, tex.radius * 2, tex.radius * 2);
-      gfx.destroy();
-    }
-
     this.bulletGroup = this.physics.add.group({ maxSize: 30 });
 
     this.physics.add.collider(this.bulletGroup, this.walls, this.onBulletHitWall, null, this);
@@ -879,12 +860,6 @@ export class GameScene extends Phaser.Scene {
   }
 
   createEnemyBullets() {
-    const gfx = this.make.graphics({ add: false });
-    gfx.fillStyle(0xff4444, 1);
-    gfx.fillCircle(3, 3, 3);
-    gfx.generateTexture('enemyBullet', 6, 6);
-    gfx.destroy();
-
     this.enemyBulletGroup = this.physics.add.group({ maxSize: 30 });
 
     this.physics.add.collider(this.enemyBulletGroup, this.walls, this.onBulletHitWall, null, this);
@@ -895,15 +870,6 @@ export class GameScene extends Phaser.Scene {
 
   createWeaponPickups() {
     this.weaponPickupSprites = [];
-
-    for (const wpn of WEAPON_TYPES) {
-      const gfx = this.make.graphics({ add: false });
-      gfx.fillStyle(wpn.pickupColor, 1);
-      gfx.fillRect(0, 2, 16, 6);
-      gfx.fillRect(6, 0, 4, 10);
-      gfx.generateTexture(`pickup_${wpn.id}`, 16, 10);
-      gfx.destroy();
-    }
 
     const weapons = generateLevelWeapons(this.level.rooms, this.levelSeed, this.roomFurniture);
     for (const wpnData of weapons) {
