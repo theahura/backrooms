@@ -31,7 +31,7 @@ index.html
        |    -> src/systems/furniture.js  (obstacle segments + placement, type-dependent light blocking)
        |    -> src/systems/maze.js       (room interior variety: maze walls + staggered columns)
        |    -> src/systems/enemy.js      (enemy spawning + LOS + AI state machine + cross-room navContext)
-       |    -> src/systems/pathfinding.js (BFS room graph + doorway routing for enemy cross-room movement)
+       |    -> src/systems/pathfinding.js (BFS room graphs: standard + full with closed-door edges for crawler pathfinding)
        |    -> src/systems/scaling.js    (run-based enemy difficulty scaling)
        |    -> src/systems/danger.js     (time-based danger escalation: wave spawning in unsafe rooms)
        |    -> src/systems/combat.js     (player/enemy health + damage + invulnerability)

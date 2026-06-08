@@ -21,7 +21,7 @@ import { createExplorationState, updateExploration, getMinimapData, getCurrentRo
 import { generateCrackPoints } from '../systems/startroom.js';
 import { getLocation, getLocationLayout, getLocationExitPosition, generateAlternateExit } from '../systems/locations.js';
 import { generateRoomLore } from '../systems/lore.js';
-import { buildRoomGraph, bfsFromRoom, getNextDoorway, getRoomDistance, getDoorwayCenter, DOORWAY_SEEK_CHANCE, ROOM_TRANSITION_COOLDOWN, MAX_ROOM_DISTANCE, MAX_ROOM_ENEMIES } from '../systems/pathfinding.js';
+import { buildRoomGraph, buildFullRoomGraph, bfsFromRoom, getNextDoorway, getClosedDoorOnPath, getRoomDistance, getDoorwayCenter, DOORWAY_SEEK_CHANCE, ROOM_TRANSITION_COOLDOWN, MAX_ROOM_DISTANCE, MAX_ROOM_ENEMIES } from '../systems/pathfinding.js';
 import { createDangerState, updateDangerTime, shouldSpawnWave, advanceWave, getWaveComposition, getSpawnRoom } from '../systems/danger.js';
 import { getFootstepInterval, getAmbientSoundDelay } from '../systems/audio.js';
 import { generateAllSounds, createAmbientDrone, playAmbientSound } from '../systems/audioEngine.js';
@@ -114,6 +114,7 @@ export class GameScene extends Phaser.Scene {
     this.explorationState = createExplorationState();
 
     this.roomGraph = null;
+    this.fullRoomGraph = null;
     this.roomGraphDirty = true;
 
     this.createRooms();
@@ -797,6 +798,8 @@ export class GameScene extends Phaser.Scene {
         currentRoomId: room.id,
         roomTransitionCooldown: 0,
         targetDoorway: null,
+        doorOpenTimer: 0,
+        targetDoorId: null,
       });
     }
   }
@@ -840,6 +843,8 @@ export class GameScene extends Phaser.Scene {
           currentRoomId: room.id,
           roomTransitionCooldown: 0,
           targetDoorway: null,
+          doorOpenTimer: 0,
+          targetDoorId: null,
         });
       }
     }
@@ -1423,12 +1428,14 @@ export class GameScene extends Phaser.Scene {
 
     if (this.roomGraphDirty || !this.roomGraph) {
       this.roomGraph = buildRoomGraph(this.level.rooms, this.doorStates);
+      this.fullRoomGraph = buildFullRoomGraph(this.level.rooms, this.doorStates);
       this.roomGraphDirty = false;
     }
 
     const playerRoom = getCurrentRoom(playerPos.x, playerPos.y, this.level.rooms);
     const playerRoomId = playerRoom ? playerRoom.id : -1;
     const cameFrom = bfsFromRoom(this.roomGraph, playerRoomId);
+    const cameFromFull = bfsFromRoom(this.fullRoomGraph, playerRoomId);
 
     const isInSafeRoom = litRoomIds.includes(playerRoomId);
     this.dangerState = updateDangerTime(this.dangerState, delta, isInSafeRoom);
@@ -1461,7 +1468,10 @@ export class GameScene extends Phaser.Scene {
       }
 
       const enemyRoomId = es.currentRoomId;
-      const doorway = getNextDoorway(this.roomGraph, cameFrom, enemyRoomId, playerRoomId);
+      const isCrawler = es.type === 'crawler';
+      const doorway = isCrawler
+        ? getNextDoorway(this.fullRoomGraph, cameFromFull, enemyRoomId, playerRoomId)
+        : getNextDoorway(this.roomGraph, cameFrom, enemyRoomId, playerRoomId);
 
       let seekDoorway = false;
       let wanderDoorway = doorway;
@@ -1487,6 +1497,10 @@ export class GameScene extends Phaser.Scene {
         }
       }
 
+      const closedDoorOnPath = isCrawler
+        ? getClosedDoorOnPath(this.fullRoomGraph, cameFromFull, enemyRoomId, playerRoomId, this.doorStates, this.level.rooms)
+        : null;
+
       const navContext = {
         enemyRoomId,
         playerRoomId,
@@ -1497,6 +1511,7 @@ export class GameScene extends Phaser.Scene {
         maxRoomDistance: MAX_ROOM_DISTANCE,
         roomEnemyCounts,
         seekDoorway,
+        closedDoorOnPath,
       };
 
       const chaseSpeed = this.getScaledChaseSpeed(es.type);
@@ -1513,6 +1528,16 @@ export class GameScene extends Phaser.Scene {
       es.attackCooldown = updated.attackCooldown;
       es.roomTransitionCooldown = updated.roomTransitionCooldown;
       es.targetDoorway = updated.targetDoorway;
+      es.doorOpenTimer = updated.doorOpenTimer;
+      es.targetDoorId = updated.targetDoorId;
+
+      if (updated.wantsToOpenDoor) {
+        const door = this.doorStates.find(d => d.id === updated.targetDoorId);
+        if (door && door.isClosed) {
+          this.onToggleDoor(updated.targetDoorId);
+        }
+        es.wantsToOpenDoor = false;
+      }
 
       if (updated.wantsToFire) {
         this.fireEnemyBullet(es.x, es.y, playerPos.x, playerPos.y);

@@ -43,16 +43,10 @@ Other details (from playtesting):
 - enemies should be able to move between rooms
 
 Next things to build:
-- add audio
-- add more enemy types
 - add more room types
 - add actual pixel art elements for things like tables, light switches, rewards, etc. instead of the current rectangle boxes
   - use this opportunity to also give the backrooms each more flavor
 - add actual pixel art animations for the enemies and the main player character
-- when an enemy dies, its body should remain
-- enemies shouldnt disappear in rooms with light automatically
-- make it so that one kind of enemy can open doors
-- make it so that more and more difficult enemies spawn as the player spends more time outside of the safe rooms
 
 Known bugs:
 - NA

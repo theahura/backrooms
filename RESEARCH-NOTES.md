@@ -2304,3 +2304,56 @@ Use `0.001` (not `0`) as target for `exponentialRampToValueAtTime`.
 - Playback: Phaser's sound manager handles pooling/recycling
 - Ambient drone: 4-5 live oscillator nodes — negligible CPU
 - No audio files = no loading/bandwidth cost
+
+## Crawler Door-Opening Research
+
+### Design Decision: Crawlers Open Doors
+
+From APPLICATION_SPEC.md: "make it so that one kind of enemy can open doors." The crawler is the natural choice — fast, aggressive, melee-only. This creates asymmetric threat: basic zombies and spitters are blocked by closed doors, but crawlers bypass this defense after a brief delay.
+
+### Game Design References
+
+- **Resident Evil 7 (Jack Baker)**: Only one enemy type opens doors, making that enemy uniquely terrifying. Exclusivity is key.
+- **Resident Evil 2 Remake (Mr. X)**: Door opening accompanied by loud audio telegraph (slam, footsteps). Player hears threat before seeing it.
+- **Amnesia: The Dark Descent**: Monster breaks through doors over several seconds. Delay is explicitly designed to give player time to find a hiding spot.
+- **Attack telegraphing research**: Player reaction time ~0.25s. Door-opening delay should be 1.0-1.5s — long enough to hear and react, short enough to feel threatening.
+
+### Implementation Design
+
+**New enemy state: `opening_door`**
+- When a crawler in `chase` state reaches a closed door on its path, it transitions to `opening_door`
+- Crawler stops moving, counts down `doorOpenTimer` (1000ms)
+- When timer expires, sets `wantsToOpenDoor: true` and `targetDoorId: <id>` on the return object (same pattern as spitter's `wantsToFire`)
+- Then transitions back to `chase` state
+
+**Pathfinding changes:**
+- `buildRoomGraph` currently excludes closed doors entirely. For crawlers, need a variant that includes closed-door edges.
+- New function `buildFullRoomGraph(rooms, doorStates)` includes all edges, marking closed-door edges with `closedDoorId`.
+- GameScene builds both graphs: standard (for basic/spitter) and full (for crawler BFS).
+- Alternative considered: single graph with cost annotation. Rejected — BFS is unweighted, and the existing graph is already rebuilt every door toggle. Two graphs is simpler and follows YAGNI.
+
+**NavContext changes:**
+- Add `closedDoorOnPath` field to navContext: `{ doorId, center: {x, y} }` or null
+- When a crawler is navigating toward a doorway that has a closed door, the scene pre-computes this and passes it in navContext
+- The AI function uses proximity to the closed door center to trigger the `opening_door` state transition
+
+**GameScene integration:**
+- After `updateEnemyAI()`, check `updated.wantsToOpenDoor` and call `this.onToggleDoor(updated.targetDoorId)` — identical pattern to `wantsToFire`
+- Build a second "full" room graph for crawler pathfinding (includes closed doors)
+- Run a separate BFS for crawlers (or reuse if all enemies on same path)
+
+### Key Constants
+- `DOOR_OPEN_TIME = 1000` — ms the crawler pauses before opening a door
+- `CRAWLER_DOOR_INTERACT_RANGE = 60` — how close the crawler must be to the door center to start opening it
+- Only crawlers can open doors (type check in AI function)
+
+### Risk: Multiple crawlers opening same door
+- If two crawlers both set `wantsToOpenDoor` for the same door in one frame, the second `onToggleDoor` call would re-close it (toggle behavior)
+- Fix: scene-side check — only call `onToggleDoor` if the door is still closed
+
+### Files to Modify
+1. `src/systems/enemy.js` — add `opening_door` state, `DOOR_OPEN_TIME`, `CRAWLER_DOOR_INTERACT_RANGE` constants, proximity check in chase state for crawlers
+2. `src/systems/pathfinding.js` — add `buildFullRoomGraph()` that includes closed-door edges with `closedDoorId` annotation
+3. `src/scenes/GameScene.js` — build full graph for crawlers, compute `closedDoorOnPath` in navContext, handle `wantsToOpenDoor` signal
+4. `src/systems/__tests__/enemy.test.js` — tests for opening_door state transitions, timer behavior, wantsToOpenDoor signal
+5. `src/systems/__tests__/pathfinding.test.js` — tests for buildFullRoomGraph including closed-door edges

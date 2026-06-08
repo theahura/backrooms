@@ -24,6 +24,13 @@ function isDoorClosed(doorStates, roomIdA, roomIdB) {
   return ds ? ds.isClosed : false;
 }
 
+function getClosedDoorId(doorStates, roomIdA, roomIdB) {
+  const lo = Math.min(roomIdA, roomIdB);
+  const hi = Math.max(roomIdA, roomIdB);
+  const ds = doorStates.find(d => d.roomId === lo && d.targetRoomId === hi);
+  return (ds && ds.isClosed) ? ds.id : null;
+}
+
 export function buildRoomGraph(rooms, doorStates) {
   const graph = new Map();
 
@@ -40,6 +47,42 @@ export function buildRoomGraph(rooms, doorStates) {
   }
 
   return graph;
+}
+
+export function buildFullRoomGraph(rooms, doorStates) {
+  const graph = new Map();
+
+  for (const room of rooms) {
+    graph.set(room.id, []);
+  }
+
+  for (const room of rooms) {
+    for (const door of room.doors) {
+      const closedDoorId = getClosedDoorId(doorStates, room.id, door.targetRoomId);
+      const doorway = getDoorwayCenter(room, door);
+      graph.get(room.id).push({ targetRoomId: door.targetRoomId, doorway, closedDoorId });
+    }
+  }
+
+  return graph;
+}
+
+export function getClosedDoorOnPath(fullGraph, cameFrom, enemyRoomId, playerRoomId, doorStates, rooms) {
+  if (enemyRoomId === playerRoomId) return null;
+  if (!cameFrom.has(enemyRoomId)) return null;
+
+  const stepToward = cameFrom.get(enemyRoomId);
+  const edges = fullGraph.get(enemyRoomId) || [];
+  const edge = edges.find(e => e.targetRoomId === stepToward);
+  if (!edge || edge.closedDoorId === null) return null;
+
+  const doorState = doorStates.find(d => d.id === edge.closedDoorId);
+  if (!doorState) return null;
+
+  const room = rooms.find(r => r.id === doorState.roomId);
+  if (!room) return null;
+  const center = getDoorwayCenter(room, doorState);
+  return { doorId: edge.closedDoorId, center };
 }
 
 export function bfsFromRoom(graph, startRoomId) {
