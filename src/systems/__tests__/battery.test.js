@@ -41,6 +41,13 @@ describe('updateBattery', () => {
     expect(getBatteryFraction(large)).toBeLessThan(getBatteryFraction(small));
   });
 
+  it('is not depleted at 80 seconds', () => {
+    const state = createBatteryState();
+    const notYet = updateBattery(state, 80000);
+    expect(getBatteryFraction(notYet)).toBeGreaterThan(0);
+    expect(notYet.isDepleted).toBe(false);
+  });
+
   it('depletes fully after enough time', () => {
     const state = createBatteryState();
     const depleted = updateBattery(state, 200000);
@@ -101,7 +108,7 @@ describe('shouldFlicker', () => {
 
   it('flickers at low battery for some time values', () => {
     const state = createBatteryState();
-    const low = updateBattery(state, 80000);
+    const low = updateBattery(state, 120000);
     expect(getBatteryFraction(low)).toBeLessThan(0.25);
     const results = [];
     for (let t = 0; t < 2000; t += 16) {

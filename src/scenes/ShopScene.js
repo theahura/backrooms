@@ -8,6 +8,11 @@ import {
   getUpgradeValue,
   UPGRADES,
 } from '../systems/shop.js';
+import { saveGame } from '../systems/persistence.js';
+import { getLocation } from '../systems/locations.js';
+import { getJournalEntries, getJournalPage } from '../systems/lore.js';
+
+const JOURNAL_ENTRIES_PER_PAGE = 5;
 
 export class ShopScene extends Phaser.Scene {
   constructor() {
@@ -16,11 +21,27 @@ export class ShopScene extends Phaser.Scene {
 
   init(data) {
     const treasureEarned = data?.treasureEarned ?? 0;
+    const newLocation = data?.newLocation ?? null;
     let shopState = this.registry.get('shopState') || createShopState();
+    const defaults = createShopState().upgrades;
+    shopState = { ...shopState, upgrades: { ...defaults, ...shopState.upgrades } };
     shopState = addGold(shopState, treasureEarned);
     this.registry.set('shopState', shopState);
+
+    this.unlockedLocations = this.registry.get('unlockedLocations') ?? ['store'];
+    if (newLocation && !this.unlockedLocations.includes(newLocation)) {
+      this.unlockedLocations = [...this.unlockedLocations, newLocation];
+      this.registry.set('unlockedLocations', this.unlockedLocations);
+    }
+    this.activeLocation = this.registry.get('activeLocation') ?? 'store';
+
+    saveGame(shopState, this.registry.get('runCount') ?? 0, this.registry.get('collectedLore') ?? [], this.unlockedLocations, this.activeLocation);
     this.shopState = shopState;
     this.treasureEarned = treasureEarned;
+    this.newLocation = newLocation;
+    this.collectedLore = new Set(this.registry.get('collectedLore') ?? []);
+    this.journalOverlay = null;
+    this.journalPage = 0;
   }
 
   create() {
@@ -46,8 +67,8 @@ export class ShopScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     this.upgradeRows = [];
-    const startY = 200;
-    const rowHeight = 80;
+    const startY = 160;
+    const rowHeight = 55;
 
     for (let i = 0; i < UPGRADES.length; i++) {
       const upgrade = UPGRADES[i];
@@ -56,7 +77,49 @@ export class ShopScene extends Phaser.Scene {
       this.upgradeRows.push(row);
     }
 
-    const enterBtn = this.add.text(512, startY + UPGRADES.length * rowHeight + 40, '[ ENTER BACKROOMS ]', {
+    const locationY = startY + UPGRADES.length * rowHeight + 20;
+    if (this.unlockedLocations.length > 1) {
+      this.locationText = this.add.text(512, locationY, '', {
+        fontSize: '16px',
+        color: '#88aaff',
+        fontFamily: 'monospace',
+      }).setOrigin(0.5);
+
+      const prevBtn = this.add.text(340, locationY, '<', {
+        fontSize: '20px',
+        color: '#88aaff',
+        fontFamily: 'monospace',
+      }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+      prevBtn.on('pointerdown', () => this.cycleLocation(-1));
+
+      const nextBtn = this.add.text(684, locationY, '>', {
+        fontSize: '20px',
+        color: '#88aaff',
+        fontFamily: 'monospace',
+      }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+      nextBtn.on('pointerdown', () => this.cycleLocation(1));
+
+      this.updateLocationDisplay();
+    } else {
+      const locData = getLocation(this.activeLocation);
+      this.add.text(512, locationY, `Starting from: ${locData ? locData.name : this.activeLocation}`, {
+        fontSize: '14px',
+        color: '#666666',
+        fontFamily: 'monospace',
+      }).setOrigin(0.5);
+    }
+
+    if (this.newLocation) {
+      const locData = getLocation(this.newLocation);
+      this.add.text(512, locationY - 25, `New location discovered: ${locData ? locData.name : this.newLocation}!`, {
+        fontSize: '14px',
+        color: '#ffdd44',
+        fontFamily: 'monospace',
+      }).setOrigin(0.5);
+    }
+
+    const enterBtnY = locationY + 40;
+    const enterBtn = this.add.text(512, enterBtnY, '[ ENTER BACKROOMS ]', {
       fontSize: '24px',
       color: '#44cc44',
       fontFamily: 'monospace',
@@ -66,8 +129,21 @@ export class ShopScene extends Phaser.Scene {
     enterBtn.on('pointerout', () => enterBtn.setColor('#44cc44'));
     enterBtn.on('pointerdown', () => {
       this.registry.set('shopState', this.shopState);
+      this.registry.set('activeLocation', this.activeLocation);
+      saveGame(this.shopState, this.registry.get('runCount') ?? 0, this.registry.get('collectedLore') ?? [], this.unlockedLocations, this.activeLocation);
       this.scene.start('GameScene');
     });
+
+    const journalData = getJournalEntries(this.collectedLore);
+    const journalBtn = this.add.text(900, 90, `[ NOTES ${journalData.collectedCount}/${journalData.totalCount} ]`, {
+      fontSize: '14px',
+      color: '#88aaff',
+      fontFamily: 'monospace',
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+
+    journalBtn.on('pointerover', () => journalBtn.setColor('#bbddff'));
+    journalBtn.on('pointerout', () => journalBtn.setColor('#88aaff'));
+    journalBtn.on('pointerdown', () => this.showJournal());
 
     this.refreshDisplay();
   }
@@ -79,8 +155,8 @@ export class ShopScene extends Phaser.Scene {
       fontFamily: 'monospace',
     });
 
-    const descText = this.add.text(100, y + 22, upgrade.description, {
-      fontSize: '12px',
+    const descText = this.add.text(100, y + 20, upgrade.description, {
+      fontSize: '11px',
       color: '#888888',
       fontFamily: 'monospace',
     });
@@ -113,11 +189,26 @@ export class ShopScene extends Phaser.Scene {
       if (canPurchase(this.shopState, upgrade.id)) {
         this.shopState = purchaseUpgrade(this.shopState, upgrade.id);
         this.registry.set('shopState', this.shopState);
+        saveGame(this.shopState, this.registry.get('runCount') ?? 0, this.registry.get('collectedLore') ?? [], this.unlockedLocations, this.activeLocation);
         this.refreshDisplay();
       }
     });
 
     return { upgrade, nameText, descText, levelText, costText, buyBtn };
+  }
+
+  cycleLocation(direction) {
+    const idx = this.unlockedLocations.indexOf(this.activeLocation);
+    const newIdx = (idx + direction + this.unlockedLocations.length) % this.unlockedLocations.length;
+    this.activeLocation = this.unlockedLocations[newIdx];
+    this.registry.set('activeLocation', this.activeLocation);
+    this.updateLocationDisplay();
+  }
+
+  updateLocationDisplay() {
+    if (!this.locationText) return;
+    const locData = getLocation(this.activeLocation);
+    this.locationText.setText(`Start: ${locData ? locData.name : this.activeLocation}`);
   }
 
   refreshButton(upgrade, buyBtn) {
@@ -147,6 +238,148 @@ export class ShopScene extends Phaser.Scene {
         row.costText.setColor('#44cc44');
         row.buyBtn.setVisible(false);
       }
+    }
+  }
+
+  showJournal() {
+    if (this.journalOverlay) return;
+
+    const ENTRIES_PER_PAGE = JOURNAL_ENTRIES_PER_PAGE;
+    const journalData = getJournalEntries(this.collectedLore);
+    this.journalEntries = journalData.entries;
+    this.journalPage = 0;
+
+    const objects = [];
+
+    const bg = this.add.graphics().setDepth(2000);
+    bg.fillStyle(0x111111, 1);
+    bg.fillRect(0, 0, 1024, 768);
+    bg.setInteractive(new Phaser.Geom.Rectangle(0, 0, 1024, 768), Phaser.Geom.Rectangle.Contains);
+    objects.push(bg);
+
+    const title = this.add.text(512, 50, `COLLECTED NOTES  ${journalData.collectedCount}/${journalData.totalCount}`, {
+      fontSize: '24px',
+      color: '#cccccc',
+      fontFamily: 'monospace',
+    }).setOrigin(0.5).setDepth(2001);
+    objects.push(title);
+
+    const divider = this.add.graphics().setDepth(2001);
+    divider.lineStyle(1, 0x555555);
+    divider.lineBetween(100, 80, 924, 80);
+    objects.push(divider);
+
+    this.journalSlots = [];
+    for (let i = 0; i < ENTRIES_PER_PAGE; i++) {
+      const y = 100 + i * 110;
+
+      const label = this.add.text(100, y, '', {
+        fontSize: '14px',
+        color: '#ffffff',
+        fontFamily: 'monospace',
+      }).setDepth(2001);
+
+      const text = this.add.text(100, y + 22, '', {
+        fontSize: '13px',
+        color: '#cccccc',
+        fontFamily: 'monospace',
+        wordWrap: { width: 824 },
+      }).setDepth(2001);
+
+      const line = this.add.graphics().setDepth(2001);
+      line.lineStyle(1, 0x333333);
+      line.lineBetween(100, y + 95, 924, y + 95);
+
+      objects.push(label, text, line);
+      this.journalSlots.push({ label, text });
+    }
+
+    this.journalPrevBtn = this.add.text(400, 670, '< PREV', {
+      fontSize: '16px',
+      color: '#88aaff',
+      fontFamily: 'monospace',
+    }).setOrigin(0.5).setDepth(2001).setInteractive({ useHandCursor: true });
+    this.journalPrevBtn.on('pointerdown', () => {
+      this.journalPage--;
+      this.renderJournalPage();
+    });
+    objects.push(this.journalPrevBtn);
+
+    this.journalPageText = this.add.text(512, 670, '', {
+      fontSize: '16px',
+      color: '#888888',
+      fontFamily: 'monospace',
+    }).setOrigin(0.5).setDepth(2001);
+    objects.push(this.journalPageText);
+
+    this.journalNextBtn = this.add.text(624, 670, 'NEXT >', {
+      fontSize: '16px',
+      color: '#88aaff',
+      fontFamily: 'monospace',
+    }).setOrigin(0.5).setDepth(2001).setInteractive({ useHandCursor: true });
+    this.journalNextBtn.on('pointerdown', () => {
+      this.journalPage++;
+      this.renderJournalPage();
+    });
+    objects.push(this.journalNextBtn);
+
+    const closeBtn = this.add.text(512, 730, '[ CLOSE ]', {
+      fontSize: '18px',
+      color: '#44cc44',
+      fontFamily: 'monospace',
+    }).setOrigin(0.5).setDepth(2001).setInteractive({ useHandCursor: true });
+    closeBtn.on('pointerover', () => closeBtn.setColor('#88ff88'));
+    closeBtn.on('pointerout', () => closeBtn.setColor('#44cc44'));
+    closeBtn.on('pointerdown', () => this.hideJournal());
+    objects.push(closeBtn);
+
+    this.journalEscHandler = () => this.hideJournal();
+    this.input.keyboard.on('keydown-ESC', this.journalEscHandler);
+
+    this.journalOverlay = objects;
+    this.renderJournalPage();
+  }
+
+  renderJournalPage() {
+    const ENTRIES_PER_PAGE = JOURNAL_ENTRIES_PER_PAGE;
+    const { pageEntries, currentPage, totalPages } = getJournalPage(this.journalEntries, this.journalPage, ENTRIES_PER_PAGE);
+    this.journalPage = currentPage;
+
+    for (let i = 0; i < this.journalSlots.length; i++) {
+      const slot = this.journalSlots[i];
+      if (i < pageEntries.length) {
+        const entry = pageEntries[i];
+        if (entry.collected) {
+          slot.label.setText(`Note #${entry.id + 1}`).setColor('#ffffff');
+          slot.text.setText(`"${entry.text}"`).setColor('#cccccc');
+        } else {
+          slot.label.setText(`Note #${entry.id + 1}`).setColor('#555555');
+          slot.text.setText('???').setColor('#555555');
+        }
+        slot.label.setVisible(true);
+        slot.text.setVisible(true);
+      } else {
+        slot.label.setVisible(false);
+        slot.text.setVisible(false);
+      }
+    }
+
+    this.journalPageText.setText(`${currentPage + 1} / ${totalPages}`);
+    this.journalPrevBtn.setVisible(currentPage > 0);
+    this.journalNextBtn.setVisible(currentPage < totalPages - 1);
+  }
+
+  hideJournal() {
+    if (!this.journalOverlay) return;
+    for (const obj of this.journalOverlay) {
+      obj.destroy();
+    }
+    this.journalOverlay = null;
+    this.journalSlots = null;
+    this.journalEntries = null;
+    if (this.journalEscHandler) {
+      this.input.keyboard.off('keydown-ESC', this.journalEscHandler);
+      this.journalEscHandler = null;
     }
   }
 }

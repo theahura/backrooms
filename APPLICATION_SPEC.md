@@ -1,3 +1,5 @@
+<system-reminder> I will continually update this document as time goes on based on playtesting feedback. Simply commit changes to this doc like anything else. </system-reminder>
+
 Backrooms is a survival horror top down 2d twin stick shooter, based on the 'backrooms' creepypasta concept.
 
 The game is built entirely with web technologies -- html, js, css. Node libraries are fine, so are game engines if needed.
@@ -23,10 +25,25 @@ The basic idea:
 
 The actual view of the top down should be that the camera is centered on the player character, fixed fov. As the player moves, the camera stays on them.
 
-movement is with wasd, looking is with the mouse, shooting is left click, using items is right click, q/e is to switch weapons if multiple are held
+movement is with wasd, looking is with the mouse, shooting is left click, using items is right click or e, q or scroll to switch weapons if multiple are held
 
-the player character should be a simple character 'model' (pixel art / shapes are fine as long as it looks like a person roughly)
+The player character should be a simple character 'model' (pixel art / shapes are fine as long as it looks like a person roughly)
 
-Fill out any details that are missing, e.g. the theming around where the player is getting their upgraded equipment from, what kind of valuables are discovered, the design / feel of the rooms, the design / feel of the enemies, and so on
+The old flash game Motherload is the direct inspiration for this game.
 
-The old flash game Motherload is the direct inspiration for this game if that helps.
+Other details (from playtesting):
+- tables shouldnt block light
+- there should be more doors and stairs per room
+- the map should not be available immediately (it should be very expensive)
+- guns should have ammo
+- player shouldnt start with a gun
+- the starting location should have a standard entry -- that entry shouldnt move; and the 'shop' should be in the center of the 'furniture shop' and not in the edge blocking the door
+- the player should be able to move around under a table while hidden
+- most rooms should NOT have light switches -- these should be extremely rare
+- enemies should be able to move between rooms
+
+Next things to build:
+- we want the player to get more lost: increase the cost of most of the items, make the rewards / treasures far more rare, and make the initial flashlight battery longer (but the fov thinner)
+
+Known bugs:
+- NA

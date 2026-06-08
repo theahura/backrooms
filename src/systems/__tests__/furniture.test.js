@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createFurnitureSegments, generateRoomFurniture } from '../furniture.js';
+import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES } from '../furniture.js';
 import { getFlashlightPolygon } from '../visibility.js';
 import { createRoomWalls } from '../room.js';
 
@@ -80,6 +80,50 @@ describe('generateRoomFurniture', () => {
     expect(first).not.toEqual(second);
   });
 
+});
+
+describe('furniture light blocking behavior', () => {
+  it('a table between origin and far wall does NOT reduce visible polygon reach', () => {
+    const roomSegments = createRoomWalls(0, 0, 200, 200);
+    const tableSegments = createFurnitureSegments(80, 80, 80, 50);
+    // Only include segments for light-blocking furniture
+    const blocksLight = FURNITURE_TYPES.table.blocksLight;
+    const allSegments = blocksLight ? [...roomSegments, ...tableSegments] : roomSegments;
+
+    const origin = { x: 50, y: 100 };
+    const angle = 0;
+    const coneAngle = Math.PI / 6;
+
+    const polyWithTable = getFlashlightPolygon(origin, angle, coneAngle, allSegments);
+    const polyWithoutTable = getFlashlightPolygon(origin, angle, coneAngle, roomSegments);
+
+    const maxXWith = Math.max(...polyWithTable.map(p => p.x));
+    const maxXWithout = Math.max(...polyWithoutTable.map(p => p.x));
+
+    // Table should NOT block light (same reach)
+    expect(maxXWith).toBe(maxXWithout);
+  });
+
+  it('a shelf between origin and far wall DOES reduce visible polygon reach', () => {
+    // Use a large room with a shelf that fully blocks a narrow cone
+    const roomSegments = createRoomWalls(0, 0, 600, 200);
+    // Wide shelf spanning most of the room, positioned to block a narrow cone aimed right
+    const shelfSegments = createFurnitureSegments(100, 70, 20, 60);
+    const blocksLight = FURNITURE_TYPES.shelf.blocksLight;
+    const allSegments = blocksLight ? [...roomSegments, ...shelfSegments] : roomSegments;
+
+    const origin = { x: 50, y: 100 };
+    const angle = 0;
+    const coneAngle = Math.PI / 16;
+
+    const polyWithShelf = getFlashlightPolygon(origin, angle, coneAngle, allSegments);
+    const polyWithoutShelf = getFlashlightPolygon(origin, angle, coneAngle, roomSegments);
+
+    const maxXWith = Math.max(...polyWithShelf.map(p => p.x));
+    const maxXWithout = Math.max(...polyWithoutShelf.map(p => p.x));
+
+    expect(maxXWith).toBeLessThan(maxXWithout);
+  });
 });
 
 describe('furniture blocks flashlight rays', () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateRoomItems, ITEM_TYPES } from '../items.js';
+import { generateRoomItems } from '../items.js';
 
 const ROOM_X = 0;
 const ROOM_Y = 0;
@@ -13,11 +13,11 @@ describe('generateRoomItems', () => {
     expect(items).toEqual([]);
   });
 
-  it('returns 2-5 items for non-starting rooms', () => {
+  it('returns 1-3 items for non-starting rooms', () => {
     for (let seed = 0; seed < 10; seed++) {
       const items = generateRoomItems(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1);
-      expect(items.length).toBeGreaterThanOrEqual(2);
-      expect(items.length).toBeLessThanOrEqual(5);
+      expect(items.length).toBeGreaterThanOrEqual(1);
+      expect(items.length).toBeLessThanOrEqual(3);
     }
   });
 
@@ -55,7 +55,7 @@ describe('generateRoomItems', () => {
   it('produces deterministic output for the same seed', () => {
     const first = generateRoomItems(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 99, [], 1);
     const second = generateRoomItems(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 99, [], 1);
-    expect(first.length).toBeGreaterThanOrEqual(2);
+    expect(first.length).toBeGreaterThanOrEqual(1);
     expect(first).toEqual(second);
   });
 
@@ -75,5 +75,16 @@ describe('generateRoomItems', () => {
       }
     }
     expect(Object.keys(typeCounts).length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('can spawn ammo type items', () => {
+    const typeCounts = {};
+    for (let seed = 0; seed < 100; seed++) {
+      const items = generateRoomItems(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1);
+      for (const item of items) {
+        typeCounts[item.type] = (typeCounts[item.type] || 0) + 1;
+      }
+    }
+    expect(typeCounts['ammo']).toBeGreaterThan(0);
   });
 });

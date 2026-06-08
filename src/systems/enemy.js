@@ -8,6 +8,28 @@ const SEARCH_TIMEOUT = 3000;
 const WANDER_INTERVAL = 2000;
 const SEARCH_ARRIVAL_DIST = 10;
 
+export const CRAWLER_CHASE_SPEED = 112;
+export const CRAWLER_WANDER_SPEED = 50;
+export const SPITTER_CHASE_SPEED = 60;
+export const SPITTER_WANDER_SPEED = 20;
+export const SPITTER_ATTACK_RANGE = 250;
+export const SPITTER_ATTACK_COOLDOWN = 2000;
+export const SPITTER_TELEGRAPH_MS = 300;
+
+export function getEnemyType(rand, runCount) {
+  const roll = rand();
+  if (runCount >= 2) {
+    if (roll < 0.50) return 'basic';
+    if (roll < 0.75) return 'crawler';
+    return 'spitter';
+  }
+  if (runCount >= 1) {
+    if (roll < 0.80) return 'basic';
+    return 'crawler';
+  }
+  return 'basic';
+}
+
 function velocityToward(fromX, fromY, toX, toY, speed) {
   const dx = toX - fromX;
   const dy = toY - fromY;
@@ -33,7 +55,7 @@ export function hasLineOfSight(enemyPos, playerPos, segments, maxRange) {
   return true;
 }
 
-export function generateRoomEnemies(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, furnitureItems, roomId) {
+export function generateRoomEnemies(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, furnitureItems, roomId, extraCount = 0, runCount = 0) {
   if (roomId === 0) return [];
 
   const rand = mulberry32(seed + 10000);
@@ -43,7 +65,7 @@ export function generateRoomEnemies(roomX, roomY, roomWidth, roomHeight, wallThi
   const maxX = roomX + roomWidth - wallThickness - margin;
   const maxY = roomY + roomHeight - wallThickness - margin;
 
-  const count = 1 + Math.floor(rand() * 2);
+  const count = Math.min(1 + Math.floor(rand() * 2) + extraCount, 5);
   const placed = [];
   const enemyRadius = 10;
 
@@ -65,38 +87,83 @@ export function generateRoomEnemies(roomX, roomY, roomWidth, roomHeight, wallThi
     }
 
     if (!overlaps) {
-      placed.push({ x, y, wanderAngle: rand() * Math.PI * 2 });
+      placed.push({ x, y, wanderAngle: rand() * Math.PI * 2, type: getEnemyType(rand, runCount) });
     }
   }
 
   return placed;
 }
 
-export function updateEnemyAI(enemy, playerPos, segments, delta) {
-  const canSee = hasLineOfSight(enemy, playerPos, segments, DETECTION_RANGE);
+function getTypeSpeeds(type, chaseSpeed) {
+  if (type === 'crawler') return { chase: CRAWLER_CHASE_SPEED, wander: CRAWLER_WANDER_SPEED };
+  if (type === 'spitter') return { chase: SPITTER_CHASE_SPEED, wander: SPITTER_WANDER_SPEED };
+  return { chase: chaseSpeed, wander: ENEMY_SPEED_WANDER };
+}
+
+function distanceBetween(ax, ay, bx, by) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+export function updateEnemyAI(enemy, playerPos, segments, delta, playerHidden = false, chaseSpeed = ENEMY_SPEED_CHASE, navContext = null) {
+  const canSee = !playerHidden && hasLineOfSight(enemy, playerPos, segments, DETECTION_RANGE);
   const result = { ...enemy };
+  const type = enemy.type || 'basic';
+  const speeds = getTypeSpeeds(type, chaseSpeed);
+
+  if (navContext) {
+    result.roomTransitionCooldown = Math.max(0, (navContext.roomTransitionCooldown || 0) - delta);
+    result.targetDoorway = navContext.targetDoorway || null;
+  }
 
   switch (enemy.state) {
     case 'idle': {
       if (canSee) {
         result.state = 'chase';
-        const { vx, vy } = velocityToward(enemy.x, enemy.y, playerPos.x, playerPos.y, ENEMY_SPEED_CHASE);
+        const { vx, vy } = velocityToward(enemy.x, enemy.y, playerPos.x, playerPos.y, speeds.chase);
         result.velocityX = vx;
         result.velocityY = vy;
+        result.targetDoorway = null;
       } else {
         result.wanderTimer = (enemy.wanderTimer || 0) - delta;
         if (result.wanderTimer <= 0) {
-          result.wanderAngle = (enemy.wanderAngle || 0) + 1 + Math.PI * 0.7;
           result.wanderTimer = WANDER_INTERVAL;
+
+          if (navContext && navContext.seekDoorway && result.roomTransitionCooldown <= 0 && navContext.doorway) {
+            result.targetDoorway = navContext.doorway;
+          } else {
+            result.wanderAngle = (enemy.wanderAngle || 0) + 1 + Math.PI * 0.7;
+            result.targetDoorway = navContext ? null : result.targetDoorway;
+          }
         }
-        result.velocityX = Math.cos(result.wanderAngle) * ENEMY_SPEED_WANDER;
-        result.velocityY = Math.sin(result.wanderAngle) * ENEMY_SPEED_WANDER;
+
+        if (result.targetDoorway) {
+          const { vx, vy } = velocityToward(enemy.x, enemy.y, result.targetDoorway.x, result.targetDoorway.y, speeds.wander);
+          result.velocityX = vx;
+          result.velocityY = vy;
+        } else {
+          result.velocityX = Math.cos(result.wanderAngle || enemy.wanderAngle || 0) * speeds.wander;
+          result.velocityY = Math.sin(result.wanderAngle || enemy.wanderAngle || 0) * speeds.wander;
+        }
       }
       break;
     }
     case 'chase': {
       if (canSee) {
-        const { vx, vy } = velocityToward(enemy.x, enemy.y, playerPos.x, playerPos.y, ENEMY_SPEED_CHASE);
+        const dist = distanceBetween(enemy.x, enemy.y, playerPos.x, playerPos.y);
+        if (type === 'spitter' && dist <= SPITTER_ATTACK_RANGE) {
+          result.state = 'attack';
+          result.velocityX = 0;
+          result.velocityY = 0;
+          result.attackCooldown = SPITTER_TELEGRAPH_MS;
+        } else {
+          const { vx, vy } = velocityToward(enemy.x, enemy.y, playerPos.x, playerPos.y, speeds.chase);
+          result.velocityX = vx;
+          result.velocityY = vy;
+        }
+      } else if (navContext && navContext.enemyRoomId !== navContext.playerRoomId && navContext.doorway) {
+        const { vx, vy } = velocityToward(enemy.x, enemy.y, navContext.doorway.x, navContext.doorway.y, speeds.chase);
         result.velocityX = vx;
         result.velocityY = vy;
       } else {
@@ -104,16 +171,43 @@ export function updateEnemyAI(enemy, playerPos, segments, delta) {
         result.lastKnownX = playerPos.x;
         result.lastKnownY = playerPos.y;
         result.searchTimer = SEARCH_TIMEOUT;
-        const { vx, vy } = velocityToward(enemy.x, enemy.y, playerPos.x, playerPos.y, ENEMY_SPEED_WANDER);
+        const { vx, vy } = velocityToward(enemy.x, enemy.y, playerPos.x, playerPos.y, speeds.wander);
         result.velocityX = vx;
         result.velocityY = vy;
+      }
+      break;
+    }
+    case 'attack': {
+      if (!canSee) {
+        result.state = 'search';
+        result.lastKnownX = playerPos.x;
+        result.lastKnownY = playerPos.y;
+        result.searchTimer = SEARCH_TIMEOUT;
+        result.velocityX = 0;
+        result.velocityY = 0;
+      } else {
+        const dist = distanceBetween(enemy.x, enemy.y, playerPos.x, playerPos.y);
+        if (dist > SPITTER_ATTACK_RANGE) {
+          result.state = 'chase';
+          const { vx, vy } = velocityToward(enemy.x, enemy.y, playerPos.x, playerPos.y, speeds.chase);
+          result.velocityX = vx;
+          result.velocityY = vy;
+        } else {
+          result.velocityX = 0;
+          result.velocityY = 0;
+          result.attackCooldown = (enemy.attackCooldown || 0) - delta;
+          if (result.attackCooldown <= 0) {
+            result.wantsToFire = true;
+            result.attackCooldown = SPITTER_ATTACK_COOLDOWN;
+          }
+        }
       }
       break;
     }
     case 'search': {
       if (canSee) {
         result.state = 'chase';
-        const { vx, vy } = velocityToward(enemy.x, enemy.y, playerPos.x, playerPos.y, ENEMY_SPEED_CHASE);
+        const { vx, vy } = velocityToward(enemy.x, enemy.y, playerPos.x, playerPos.y, speeds.chase);
         result.velocityX = vx;
         result.velocityY = vy;
       } else {
@@ -134,7 +228,7 @@ export function updateEnemyAI(enemy, playerPos, segments, delta) {
             result.velocityY = 0;
             result.wanderTimer = 0;
           } else {
-            const { vx, vy } = velocityToward(enemy.x, enemy.y, enemy.lastKnownX, enemy.lastKnownY, ENEMY_SPEED_WANDER);
+            const { vx, vy } = velocityToward(enemy.x, enemy.y, enemy.lastKnownX, enemy.lastKnownY, speeds.wander);
             result.velocityX = vx;
             result.velocityY = vy;
           }

@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { createInventoryState, pickupItem, useBattery } from '../inventory.js';
+import { createInventoryState, pickupItem, useBattery, canPickupItem } from '../inventory.js';
 
 describe('createInventoryState', () => {
-  it('starts with 0 batteries and 0 treasure value', () => {
+  it('starts with 0 batteries, 0 treasure value, and default capacity', () => {
     const state = createInventoryState();
     expect(state.batteries).toBe(0);
     expect(state.treasureValue).toBe(0);
+    expect(state.maxItems).toBe(8);
   });
 });
 
@@ -63,5 +64,41 @@ describe('useBattery', () => {
 
     const result = useBattery(state);
     expect(result.state.treasureValue).toBe(200);
+  });
+
+  it('does not decrement itemCount below 0 when no batteries', () => {
+    const state = createInventoryState();
+    const result = useBattery(state);
+    expect(result.state.itemCount).toBe(0);
+  });
+});
+
+describe('inventory capacity', () => {
+  it('createInventoryState accepts custom maxItems', () => {
+    const state = createInventoryState(12);
+    expect(state.maxItems).toBe(12);
+  });
+
+  it('canPickupItem returns true when under capacity', () => {
+    const state = createInventoryState(8);
+    expect(canPickupItem(state)).toBe(true);
+  });
+
+  it('canPickupItem returns false when at capacity', () => {
+    let state = createInventoryState(3);
+    state = pickupItem(state, { type: 'battery', value: 0 });
+    state = pickupItem(state, { type: 'copper_coin', value: 10 });
+    state = pickupItem(state, { type: 'gold_coin', value: 200 });
+    expect(canPickupItem(state)).toBe(false);
+  });
+
+  it('using a battery frees a slot allowing more pickups', () => {
+    let state = createInventoryState(2);
+    state = pickupItem(state, { type: 'battery', value: 0 });
+    state = pickupItem(state, { type: 'copper_coin', value: 10 });
+    expect(canPickupItem(state)).toBe(false);
+
+    const result = useBattery(state);
+    expect(canPickupItem(result.state)).toBe(true);
   });
 });

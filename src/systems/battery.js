@@ -1,5 +1,5 @@
 export const BATTERY_MAX = 100;
-export const BATTERY_DRAIN_PER_MS = BATTERY_MAX / 90000;
+export const BATTERY_DRAIN_PER_MS = BATTERY_MAX / 150000;
 export const FLICKER_THRESHOLD = 0.25;
 
 export function createBatteryState(maxCharge = BATTERY_MAX) {
