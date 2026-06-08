@@ -1601,3 +1601,68 @@ Flow: Player spawns at center → walks east to crack → explores backrooms →
   - onLorePickup() — show text, add to collected set, destroy sprite
   - showLorePopup(text) — tween-animated text overlay
   - hideLorePopup() — auto-called after timeout
+
+## Run-Scaling Floor Counts Research
+
+### Design Decision: Run-Count Gated Floor Progression
+
+Based on research across Spelunky 2 (shortcut-gated worlds), Dead Cells (boss-stem-cell gated biomes), Binding of Isaac (boss-defeat gated chapters), and Enter the Gungeon (secret-condition gated chambers):
+
+- Win-count gating is ideal but requires tracking wins (not currently tracked)
+- Run-count gating is simpler and still provides progression — experienced players see more content
+- No bosses exist in this game yet, so boss-gating is not applicable
+
+### Progression Table
+
+| Run Count | Floors | Rooms per Floor | Total Rooms | Notes |
+|-----------|--------|-----------------|-------------|-------|
+| 0-1       | 2      | [4, 3]          | 7           | Current baseline |
+| 2-3       | 3      | [4, 3, 3]       | 10          | +1 floor, more to explore |
+| 4+        | 4      | [4, 3, 3, 2]    | 12          | Maximum depth |
+
+### Key Design Constraints
+
+- **Battery timer is the natural limiter**: more floors = more traversal time = more battery drain
+- **3-5 rooms per floor** keeps horror pacing tight (unlike action roguelikes with 20+ rooms/floor)
+- **New floors start small (2-3 rooms)** — contained introduction before expansion
+- **4 floor cap** prevents battery from becoming impossible without max upgrades
+- **Deeper floors have fewer rooms** — more dangerous per room (harder enemies from scaling.js) but less total area
+
+### Architecture: Generalized N-Floor Stair Connections
+
+Current limitation: `createStairConnections()` in stairs.js is hardcoded to connect floor 0 and floor 1 only. For N floors:
+
+1. Iterate adjacent floor pairs: floor 0→1, floor 1→2, floor 2→3, etc.
+2. For each pair, create up to 2 stair connections between distinct rooms
+3. Skip room 0 (starting room) for floor 0 stairs (existing constraint)
+4. Each stair gets `fromFloor` and `toFloor` fields for GameScene to use
+
+### GameScene Changes for N-Floor Stairs
+
+Current `createStairs()` hardcodes `destFloor` to 0 or 1:
+```javascript
+fromZone.setData('destFloor', 1);  // always 1
+toZone.setData('destFloor', 0);    // always 0
+```
+
+Fix: derive `destFloor` from stair data:
+```javascript
+fromZone.setData('destFloor', stair.toFloor);
+toZone.setData('destFloor', stair.fromFloor);
+```
+
+Stair visual direction ('up'/'down') should also be derived from floor indices rather than assumed.
+
+### Minimap/HUD Changes
+
+- Floor indicator already uses `B${this.currentFloor + 1}` — works for N floors
+- `getFloorBounds()` already accepts any floor index — works for N floors
+- `getMinimapData()` already accepts `floorFilter` — works for N floors
+- No minimap changes needed
+
+### Seed Offset Scheme for Additional Floors
+
+Existing scheme: `floorSeed = seed + floor * 1000`. For floors 2 and 3:
+- Floor 2: `seed + 2000`
+- Floor 3: `seed + 3000`
+No collision with per-system offsets (+10000, +20000, etc.) since floor offsets are < 10000.

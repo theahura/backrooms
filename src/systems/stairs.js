@@ -5,6 +5,12 @@ export const FLOOR_Y_OFFSET = 10000;
 export const STAIR_SIZE = 60;
 export const FLOOR_ROOM_COUNTS = [4, 3];
 
+export function getFloorRoomCounts(runCount) {
+  if (runCount >= 4) return [4, 3, 3, 2];
+  if (runCount >= 2) return [4, 3, 3];
+  return [4, 3];
+}
+
 export function generateMultiFloorLevel(seed, floorRoomCounts) {
   const allRooms = [];
   const allSegments = [];
@@ -42,45 +48,71 @@ export function generateMultiFloorLevel(seed, floorRoomCounts) {
 
 function createStairConnections(rooms, seed) {
   const rand = mulberry32(seed + 50000);
-  const floor0Rooms = rooms.filter(r => r.floor === 0 && r.id !== 0);
-  const floor1Rooms = rooms.filter(r => r.floor === 1);
+  const floors = new Map();
+  for (const room of rooms) {
+    if (!floors.has(room.floor)) floors.set(room.floor, []);
+    floors.get(room.floor).push(room);
+  }
 
-  if (floor0Rooms.length === 0 || floor1Rooms.length === 0) return [];
-
+  const floorIndices = [...floors.keys()].sort((a, b) => a - b);
   const stairs = [];
-  const targetCount = Math.min(2, floor0Rooms.length, floor1Rooms.length);
-  const usedFrom = new Set();
-  const usedTo = new Set();
+  let stairId = 0;
+  const roomStairCount = new Map();
 
-  for (let i = 0; i < targetCount; i++) {
-    const availableFrom = floor0Rooms.filter(r => !usedFrom.has(r.id));
-    const availableTo = floor1Rooms.filter(r => !usedTo.has(r.id));
-    if (availableFrom.length === 0 || availableTo.length === 0) break;
+  for (let i = 0; i < floorIndices.length - 1; i++) {
+    const fromFloor = floorIndices[i];
+    const toFloor = floorIndices[i + 1];
+    let fromCandidates = floors.get(fromFloor);
+    const toCandidates = floors.get(toFloor);
 
-    const fromRoom = availableFrom[Math.floor(rand() * availableFrom.length)];
-    const toRoom = availableTo[Math.floor(rand() * availableTo.length)];
+    if (fromFloor === 0) {
+      fromCandidates = fromCandidates.filter(r => r.id !== 0);
+    }
 
-    usedFrom.add(fromRoom.id);
-    usedTo.add(toRoom.id);
+    if (fromCandidates.length === 0 || toCandidates.length === 0) continue;
 
-    stairs.push({
-      id: i,
-      fromRoomId: fromRoom.id,
-      toRoomId: toRoom.id,
-      fromPos: getStairPosition(fromRoom),
-      toPos: getStairPosition(toRoom),
-    });
+    const targetCount = Math.min(2, fromCandidates.length, toCandidates.length);
+    const usedFrom = new Set();
+    const usedTo = new Set();
+
+    for (let j = 0; j < targetCount; j++) {
+      const availableFrom = fromCandidates.filter(r => !usedFrom.has(r.id));
+      const availableTo = toCandidates.filter(r => !usedTo.has(r.id));
+      if (availableFrom.length === 0 || availableTo.length === 0) break;
+
+      const fromRoom = availableFrom[Math.floor(rand() * availableFrom.length)];
+      const toRoom = availableTo[Math.floor(rand() * availableTo.length)];
+
+      usedFrom.add(fromRoom.id);
+      usedTo.add(toRoom.id);
+
+      const fromIdx = roomStairCount.get(fromRoom.id) || 0;
+      const toIdx = roomStairCount.get(toRoom.id) || 0;
+      roomStairCount.set(fromRoom.id, fromIdx + 1);
+      roomStairCount.set(toRoom.id, toIdx + 1);
+
+      stairs.push({
+        id: stairId++,
+        fromRoomId: fromRoom.id,
+        toRoomId: toRoom.id,
+        fromPos: getStairPosition(fromRoom, fromIdx),
+        toPos: getStairPosition(toRoom, toIdx),
+        fromFloor,
+        toFloor,
+      });
+    }
   }
 
   return stairs;
 }
 
-function getStairPosition(room) {
+function getStairPosition(room, index) {
   const margin = 100;
-  return {
-    x: room.x + margin + (room.width - 2 * margin - STAIR_SIZE) / 2,
-    y: room.y + margin + (room.height - 2 * margin - STAIR_SIZE) / 2,
-  };
+  const innerW = room.width - 2 * margin;
+  const cx = room.x + margin + (innerW - STAIR_SIZE) / 2;
+  const cy = room.y + margin + (room.height - 2 * margin - STAIR_SIZE) / 2;
+  const offset = (index || 0) * (STAIR_SIZE + 20);
+  return { x: cx + offset, y: cy };
 }
 
 export function getFloorBounds(rooms, floor) {

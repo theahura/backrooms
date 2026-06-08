@@ -1,6 +1,10 @@
 # Current Progress
 
-## Status: Lore Items in Rooms
+## Status: Run-Scaling Floor Counts
+
+Floor count now increases with run progression, giving experienced players more content and risk. Key changes: (1) New pure function `getFloorRoomCounts(runCount)` in `stairs.js` returns the floor array: run 0-1 = `[4, 3]` (2 floors, 7 rooms), run 2-3 = `[4, 3, 3]` (3 floors, 10 rooms), run 4+ = `[4, 3, 3, 2]` (4 floors, 12 rooms). (2) `createStairConnections()` generalized from hardcoded floor 0-to-1 to N adjacent floor pairs — iterates floor pairs and creates up to 2 stair connections per pair. (3) Each stair object now has `fromFloor` and `toFloor` fields. (4) GameScene uses `getFloorRoomCounts(this.runCount)` instead of static `FLOOR_ROOM_COUNTS` constant. (5) `createStairs()` reads `stair.fromFloor`/`stair.toFloor` for destination floor and visual direction instead of hardcoded values. 17 new tests covering floor count progression, 3-floor and 4-floor generation, and generalized stair connections.
+
+## Previous: Lore Items in Rooms
 
 Collectible lore notes now spawn in rooms. ~25% of non-room-0 rooms contain a lore note (max 1 per room). Key changes: (1) New pure function module `lore.js` with 20 Backrooms-themed lore entries and `generateRoomLore()` spawning function (seed offset +90000, same placement pattern as `items.js`). (2) Lore items do NOT consume inventory space — they are meta-progression collectibles. (3) On pickup, a tween-animated text popup appears at the bottom of the screen (dark semi-transparent background, monospace text) and auto-dismisses after 5 seconds with fade-out. (4) Collected lore IDs are persisted across runs via `persistence.js` — save format bumped from v1 to v2 with new `collectedLore` field (backward compatible: v1 saves default to `[]`). (5) Already-collected notes don't respawn. (6) GameScene creates a separate `loreGroup` physics static group with its own overlap handler. (7) Lore textures are small paper/note shapes (off-white, 12x10px with line details) at depth 5 (hidden by darkness). 12 new tests: 9 for lore spawning behavior, 3 for persistence round-trip.
 
@@ -290,7 +294,7 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
   - Already-collected notes don't respawn
   - Separate `loreGroup` physics static group and 'lore_note' texture (off-white paper with line details)
   - 12 new tests: 9 lore spawning behavior, 3 persistence round-trip
-- 399 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, weapon upgrades, enemy types, stairs, weapons, inventory capacity, maze generation, room connections, weaponless start, ammo system, minimap upgrade, switch frequency, lore spawning, and lore persistence
+- 417 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, weapon upgrades, enemy types, stairs, weapons, inventory capacity, maze generation, room connections, weaponless start, ammo system, minimap upgrade, switch frequency, lore spawning, lore persistence, floor scaling, and multi-floor stair connections
 - Documentation (docs.md files for root, src, systems, scenes)
 - Bug fix: flashlight mouse tracking drift during WASD movement
   - Root cause: Phaser 3 `pointer.worldX`/`worldY` are cached properties only refreshed on mouse events, not camera scroll
@@ -337,7 +341,8 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
 - Room 0 is permanently lit by unconditionally adding it to `litRoomIds` in both `updateDarkness()` and `updateEnemies()` — same mechanism as light switch lit rooms
 - Crack visual uses two Graphics objects: static crack line at depth 2 (baked once in `create()`) and animated glow at depth 1 (redrawn per frame with time-based sine-wave alpha)
 - Exit zone position computed by `getExitPosition()` from `startroom.js` — west-center of room 0 (front entrance of furniture store)
-- Multi-floor level: `stairs.js` wraps `generateLevel()` per floor, offsets room IDs and Y positions, then creates stair connections. `generateMultiFloorLevel` replaces direct `generateLevel` call in GameScene.
+- Multi-floor level: `stairs.js` wraps `generateLevel()` per floor, offsets room IDs and Y positions, then creates stair connections. `generateMultiFloorLevel` replaces direct `generateLevel` call in GameScene. `getFloorRoomCounts(runCount)` returns the floor array for the current run (2→3→4 floors as runs progress).
+- Stair connections: `createStairConnections()` iterates adjacent floor pairs (0→1, 1→2, 2→3) and creates up to 2 stair connections per pair using distinct rooms. Each stair has `fromFloor`/`toFloor` fields. Room 0 is excluded from floor 0 stairs.
 - Stair zones use identical overlap + camera fade pattern as exit zone — `onStairEnter()` mirrors `onDayComplete()` structure with `body.reset()` instead of scene transition
 - `getMinimapData(state, rooms, bounds, playerPos, exitPos, screenWidth, floorFilter)` — 7th param filters rooms by floor; null/undefined shows all (backward compatible)
 - Weapon system: `weapons.js` defines WEAPON_TYPES (pistol, shotgun, rifle) with per-weapon stats. `createWeaponState()` returns 2-slot inventory (pistol default + one pickup slot). Upgrade bonuses computed as deltas from pistol base values and applied additively to any weapon via `getEffectiveStats()`. Q-key cycles `activeSlot`, E-key on weapon pickup calls `pickupWeapon()` which fills empty slot or swaps.
@@ -346,7 +351,7 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
 - Maze/room variety: `maze.js` classifies rooms into types (open/maze/columns) using seeded PRNG. Maze rooms use recursive division (depth 2) to place internal wall segments with 80px passage gaps. Column rooms use a staggered grid of 24x24 pillars at 200px spacing. Both types produce `{x1,y1,x2,y2}` segments that integrate directly into the existing `wallSegments` array — no raycasting changes needed. `generateMazeWalls()` accepts the room's `doors` array and avoids placing walls that would block door entry zones.
 - Furniture light-blocking: `FURNITURE_TYPES` has `blocksLight` field. GameScene checks `FURNITURE_TYPES[item.type].blocksLight` before pushing furniture segments to `wallSegments`. Low furniture (tables, desks) has physics collision but doesn't cast shadows. Items with unknown types (store furniture like 'counter', 'couch') fall through gracefully (no segments pushed — irrelevant since room 0 is always lit).
 - Extra doors: `addExtraDoors(rooms, grid, seed)` in `level.js` iterates all rooms post-placement, checks each of 4 directions for grid-adjacent rooms without existing connections, and adds doors with 50% probability. Uses `alreadyConnected` check to prevent duplicates. Doors are always bidirectional.
-- Multiple stairs: `createStairConnections` now uses a `usedFrom`/`usedTo` Set to pick distinct rooms for each stair pair. Falls back to fewer stairs if insufficient rooms are available.
+- Multiple stairs: `createStairConnections` uses `usedFrom`/`usedTo` Sets per floor pair to pick distinct rooms for each stair connection. Falls back to fewer stairs if insufficient rooms are available. Generalized from hardcoded 2-floor to N-floor support.
 - Minimap gating: `this.hasMinimap` boolean in GameScene set from `levels.minimap` upgrade. When false, `minimapGraphics` and `floorText` are never created, `drawMinimap()` early-returns. Exploration tracking still runs (cheap, no Phaser dependency in the pure module).
 - Light switch frequency: `SWITCH_CHANCE = 0.15` in lightswitch.js (previously 0.4). With 6 eligible rooms per level, expect ~0.9 switches per run (often zero).
 - Lore items: `lore.js` defines 20 `LORE_ENTRIES` (Backrooms-themed notes) and `generateRoomLore()` which spawns 0-1 notes per non-room-0 room (~25% chance) using seed offset +90000. Same placement retry pattern as `items.js` (furniture overlap avoidance). Returns `[{ x, y, loreId, text }]`. Already-collected IDs (passed as Set) are filtered out at generation time.
@@ -356,4 +361,3 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
 
 ## Next Steps
 - Add different exit locations (spec: discovering alternate exits leads to different locations)
-- Add more floors (extend FLOOR_ROOM_COUNTS array) for later runs

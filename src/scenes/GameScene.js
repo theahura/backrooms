@@ -3,7 +3,7 @@ import { calculateVelocity } from '../systems/movement.js';
 import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES } from '../systems/furniture.js';
 import { generateMazeWalls } from '../systems/maze.js';
 import { getFlashlightPolygon } from '../systems/visibility.js';
-import { generateMultiFloorLevel, getFloorBounds, FLOOR_ROOM_COUNTS, STAIR_SIZE } from '../systems/stairs.js';
+import { generateMultiFloorLevel, getFloorBounds, getFloorRoomCounts, STAIR_SIZE } from '../systems/stairs.js';
 import { generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_CHASE, CRAWLER_CHASE_SPEED, SPITTER_CHASE_SPEED } from '../systems/enemy.js';
 import { createCombatState, applyDamage, updateCombat, getHealthFraction, isInvulnerable, applyEnemyDamage, isEnemyDead, ENEMY_CONTACT_DAMAGE, ENEMY_MAX_HP, CRAWLER_MAX_HP, SPITTER_MAX_HP, CRAWLER_CONTACT_DAMAGE, SPITTER_CONTACT_DAMAGE, SPITTER_PROJECTILE_DAMAGE } from '../systems/combat.js';
 import { calculateBulletVelocity, calculateShotgunSpread, canFire, updateFireCooldown, isBulletExpired, SPITTER_PROJECTILE_SPEED, SPITTER_PROJECTILE_RANGE } from '../systems/shooting.js';
@@ -88,7 +88,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   create() {
-    this.level = generateMultiFloorLevel(this.levelSeed, FLOOR_ROOM_COUNTS);
+    this.level = generateMultiFloorLevel(this.levelSeed, getFloorRoomCounts(this.runCount));
     this.walls = this.physics.add.staticGroup();
     this.furnitureGroup = this.physics.add.staticGroup();
     this.wallSegments = [...this.level.wallSegments];
@@ -985,8 +985,9 @@ export class GameScene extends Phaser.Scene {
       const stairGfx = this.add.graphics();
       stairGfx.setDepth(2);
 
-      this.drawStairVisual(stairGfx, stair.fromPos.x, stair.fromPos.y, 'down');
-      this.drawStairVisual(stairGfx, stair.toPos.x, stair.toPos.y, 'up');
+      const goingDown = stair.fromFloor < stair.toFloor;
+      this.drawStairVisual(stairGfx, stair.fromPos.x, stair.fromPos.y, goingDown ? 'down' : 'up');
+      this.drawStairVisual(stairGfx, stair.toPos.x, stair.toPos.y, goingDown ? 'up' : 'down');
 
       const fromZone = this.add.zone(
         stair.fromPos.x + STAIR_SIZE / 2,
@@ -996,7 +997,7 @@ export class GameScene extends Phaser.Scene {
       this.physics.add.existing(fromZone, true);
       fromZone.setData('destX', stair.toPos.x + STAIR_SIZE / 2);
       fromZone.setData('destY', stair.toPos.y + STAIR_SIZE / 2);
-      fromZone.setData('destFloor', 1);
+      fromZone.setData('destFloor', stair.toFloor);
       this.physics.add.overlap(this.player, fromZone, this.onStairEnter, null, this);
       this.stairZones.push(fromZone);
 
@@ -1008,7 +1009,7 @@ export class GameScene extends Phaser.Scene {
       this.physics.add.existing(toZone, true);
       toZone.setData('destX', stair.fromPos.x + STAIR_SIZE / 2);
       toZone.setData('destY', stair.fromPos.y + STAIR_SIZE / 2);
-      toZone.setData('destFloor', 0);
+      toZone.setData('destFloor', stair.fromFloor);
       this.physics.add.overlap(this.player, toZone, this.onStairEnter, null, this);
       this.stairZones.push(toZone);
     }
