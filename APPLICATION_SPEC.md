@@ -27,6 +27,8 @@ The actual view of the top down should be that the camera is centered on the pla
 
 movement is with wasd, looking is with the mouse, shooting is left click, using items is right click or e, q or scroll to switch weapons if multiple are held
 
+on mobile/touch devices the game uses full-screen landscape twin-stick controls instead: the left on-screen stick moves the player, the right on-screen stick aims the flashlight, a dedicated FIRE button shoots (a generic screen touch never fires), and on-screen USE / WPN / BATT / FS buttons handle interact, weapon switch, battery use, and fullscreen. The game is landscape-only -- in portrait a full-screen prompt asks the player to rotate the device sideways
+
 The player character should be a simple character 'model' (pixel art / shapes are fine as long as it looks like a person roughly)
 
 The old flash game Motherload is the direct inspiration for this game.

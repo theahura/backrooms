@@ -16,6 +16,13 @@ export function calculateBulletVelocity(originX, originY, targetX, targetY, spee
   };
 }
 
+export function getBulletVelocityFromAngle(angle, speed) {
+  return {
+    vx: Math.cos(angle) * speed,
+    vy: Math.sin(angle) * speed,
+  };
+}
+
 export function canFire(cooldown) {
   return cooldown <= 0;
 }

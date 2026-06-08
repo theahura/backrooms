@@ -7,7 +7,8 @@ import { getFlashlightPolygon } from '../systems/visibility.js';
 import { generateMultiFloorLevel, getFloorBounds, getFloorRoomCounts, STAIR_SIZE } from '../systems/stairs.js';
 import { generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_CHASE, CRAWLER_CHASE_SPEED, SPITTER_CHASE_SPEED } from '../systems/enemy.js';
 import { createCombatState, applyDamage, applyHeal, updateCombat, getHealthFraction, isInvulnerable, applyEnemyDamage, isEnemyDead, ENEMY_CONTACT_DAMAGE, ENEMY_MAX_HP, CRAWLER_MAX_HP, SPITTER_MAX_HP, CRAWLER_CONTACT_DAMAGE, SPITTER_CONTACT_DAMAGE, SPITTER_PROJECTILE_DAMAGE, CORPSE_TINT, CORPSE_ALPHA, CORPSE_ANGLE, CORPSE_DEPTH, MEDKIT_HEAL_AMOUNT } from '../systems/combat.js';
-import { calculateBulletVelocity, calculateShotgunSpread, canFire, updateFireCooldown, isBulletExpired, SPITTER_PROJECTILE_SPEED, SPITTER_PROJECTILE_RANGE } from '../systems/shooting.js';
+import { calculateBulletVelocity, calculateShotgunSpread, canFire, updateFireCooldown, isBulletExpired, getBulletVelocityFromAngle, SPITTER_PROJECTILE_SPEED, SPITTER_PROJECTILE_RANGE } from '../systems/shooting.js';
+import { getMoveVelocity, resolveAimAngle, resolveFireIntent, resolveMoveVelocity, detectTouchPrimary } from '../systems/touchControls.js';
 import { WEAPON_TYPES, createWeaponState, switchWeapon, pickupWeapon, getActiveWeapon, getEffectiveStats, generateLevelWeapons, hasAmmo, consumeAmmo, addAmmo, AMMO_PER_PICKUP } from '../systems/weapons.js';
 import { getEnemyHP, getEnemyCount, getEnemyChaseSpeed, getEnemyDamage } from '../systems/scaling.js';
 import { createBatteryState, updateBattery, getBatteryFraction, getFlashlightConeAngle, shouldFlicker, rechargeBattery, BATTERY_RECHARGE_AMOUNT } from '../systems/battery.js';
@@ -29,6 +30,10 @@ import { generateAllSounds, createAmbientDrone, playAmbientSound } from '../syst
 import { SPRITE_DEFS, getAllSpriteKeys, ANIM_DEFS, getAllAnimKeys, getEnemyTextureKey, getAnimKeyForState } from '../systems/sprites.js';
 
 const WALL_THICKNESS = 16;
+
+const TOUCH_STICK_RADIUS = 90;
+const TOUCH_STICK_DEADZONE_PX = 12;
+const TOUCH_UI_DEPTH = 1500;
 
 export class GameScene extends Phaser.Scene {
   constructor() {
@@ -109,6 +114,7 @@ export class GameScene extends Phaser.Scene {
     this.batteryState = createBatteryState(this.maxCharge);
     this.inventoryState = createInventoryState(this.maxItems);
     this.fireCooldown = 0;
+    this.playerAngle = 0;
     this.dayEnding = false;
     this.isTeleporting = false;
     this.currentFloor = 0;
@@ -138,6 +144,7 @@ export class GameScene extends Phaser.Scene {
     this.setupCamera();
     this.createDarknessOverlay();
     this.createHUD();
+    this.createTouchControls();
     this.createSounds();
   }
 
@@ -1257,12 +1264,21 @@ export class GameScene extends Phaser.Scene {
     const weapon = getActiveWeapon(this.weaponState);
     this.playSound(`${weapon.id}_fire`);
     const textureKey = `bullet_${weapon.id}`;
-    const pointer = this.input.activePointer;
+
+    let targetX, targetY;
+    if (this.touchMode) {
+      targetX = this.player.x + Math.cos(this.playerAngle) * 100;
+      targetY = this.player.y + Math.sin(this.playerAngle) * 100;
+    } else {
+      const pointer = this.input.activePointer;
+      targetX = pointer.worldX;
+      targetY = pointer.worldY;
+    }
 
     if (this.bulletCount > 1 && this.bulletSpreadAngle > 0) {
       const pellets = calculateShotgunSpread(
         this.player.x, this.player.y,
-        pointer.worldX, pointer.worldY,
+        targetX, targetY,
         this.bulletSpeed, this.bulletCount, this.bulletSpreadAngle
       );
       for (const pellet of pellets) {
@@ -1271,12 +1287,11 @@ export class GameScene extends Phaser.Scene {
     } else {
       let { vx, vy } = calculateBulletVelocity(
         this.player.x, this.player.y,
-        pointer.worldX, pointer.worldY,
+        targetX, targetY,
         this.bulletSpeed
       );
       if (vx === 0 && vy === 0) {
-        vx = Math.cos(this.playerAngle) * this.bulletSpeed;
-        vy = Math.sin(this.playerAngle) * this.bulletSpeed;
+        ({ vx, vy } = getBulletVelocityFromAngle(this.playerAngle, this.bulletSpeed));
       }
       this.spawnBullet(textureKey, vx, vy);
     }
@@ -1643,6 +1658,15 @@ export class GameScene extends Phaser.Scene {
       Q: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Q),
     };
 
+    const coarsePointer = typeof window !== 'undefined' && window.matchMedia
+      ? window.matchMedia('(pointer: coarse)').matches
+      : false;
+    const maxTouchPoints = typeof navigator !== 'undefined' ? (navigator.maxTouchPoints || 0) : 0;
+    this.touchMode = detectTouchPrimary({ maxTouchPoints, coarsePointer });
+    if (this.touchMode && this.input.pointer4 === undefined) {
+      this.input.addPointer(3);
+    }
+
     this.input.mouse.disableContextMenu();
     this.input.on('pointerdown', (pointer) => {
       if (pointer.rightButtonDown() && !this.combatState.isDead && !this.dayEnding && !this.hidingState.isHiding) {
@@ -1657,11 +1681,165 @@ export class GameScene extends Phaser.Scene {
       if (now - this.lastScrollTime < 200) return;
       this.lastScrollTime = now;
       if (deltaY !== 0) {
-        this.weaponState = switchWeapon(this.weaponState);
-        this.updateWeaponStats();
-        this.playSound('weapon_switch');
+        this.triggerWeaponSwitch();
       }
     });
+  }
+
+  createTouchControls() {
+    if (!this.touchMode) return;
+
+    const w = this.scale.width;
+    const h = this.scale.height;
+    const thumbRadius = TOUCH_STICK_RADIUS * 0.45;
+
+    const moveBase = this.add.circle(0, 0, TOUCH_STICK_RADIUS, 0x88cc88, 0.12)
+      .setStrokeStyle(2, 0x88cc88, 0.4).setScrollFactor(0).setDepth(TOUCH_UI_DEPTH);
+    const moveThumb = this.add.circle(0, 0, thumbRadius, 0x88cc88, 0.35)
+      .setScrollFactor(0).setDepth(TOUCH_UI_DEPTH + 1);
+    this.moveStick = this.plugins.get('rexVirtualJoystick').add(this, {
+      x: 170,
+      y: h - 160,
+      radius: TOUCH_STICK_RADIUS,
+      base: moveBase,
+      thumb: moveThumb,
+      fixed: true,
+      enable: true,
+    });
+
+    const aimBase = this.add.circle(0, 0, TOUCH_STICK_RADIUS, 0xccaa55, 0.12)
+      .setStrokeStyle(2, 0xccaa55, 0.4).setScrollFactor(0).setDepth(TOUCH_UI_DEPTH);
+    const aimThumb = this.add.circle(0, 0, thumbRadius, 0xccaa55, 0.35)
+      .setScrollFactor(0).setDepth(TOUCH_UI_DEPTH + 1);
+    this.aimStick = this.plugins.get('rexVirtualJoystick').add(this, {
+      x: w - 170,
+      y: h - 160,
+      radius: TOUCH_STICK_RADIUS,
+      base: aimBase,
+      thumb: aimThumb,
+      fixed: true,
+      enable: true,
+    });
+
+    this.fireButtonRadius = 52;
+    this.fireButton = this.add.circle(w - 320, h - 230, this.fireButtonRadius, 0xcc4444, 0.3)
+      .setStrokeStyle(2, 0xff6666, 0.6).setScrollFactor(0).setDepth(TOUCH_UI_DEPTH);
+    this.fireButtonLabel = this.add.text(w - 320, h - 230, 'FIRE', {
+      fontSize: '16px', color: '#ffcccc', fontFamily: 'monospace',
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(TOUCH_UI_DEPTH + 1);
+
+    const cx = w / 2;
+    const rowY = h - 60;
+    this.useButton = this.makeTouchButton(cx - 130, rowY, 'USE', () => this.triggerInteract());
+    this.weaponButton = this.makeTouchButton(cx - 44, rowY, 'WPN', () => this.triggerWeaponSwitch());
+    this.batteryButton = this.makeTouchButton(cx + 44, rowY, 'BATT', () => {
+      if (this.combatState.isDead || this.dayEnding || this.hidingState.isHiding) return;
+      this.onUseBattery();
+    });
+
+    if (this.scale.fullscreen && this.scale.fullscreen.available) {
+      this.fullscreenButton = this.makeTouchButton(w - 40, 40, 'FS', () => {
+        if (this.scale.isFullscreen) {
+          this.scale.stopFullscreen();
+        } else {
+          this.scale.startFullscreen();
+        }
+      });
+    }
+
+    this.setButtonVisible(this.useButton, false);
+    this.setButtonVisible(this.weaponButton, false);
+
+    this.events.once('shutdown', () => {
+      if (this.moveStick) { this.moveStick.destroy(); this.moveStick = null; }
+      if (this.aimStick) { this.aimStick.destroy(); this.aimStick = null; }
+    });
+  }
+
+  makeTouchButton(x, y, label, onTap) {
+    const radius = 34;
+    const circle = this.add.circle(x, y, radius, 0x224422, 0.4)
+      .setStrokeStyle(2, 0x88cc88, 0.5).setScrollFactor(0).setDepth(TOUCH_UI_DEPTH);
+    circle.setInteractive(new Phaser.Geom.Circle(radius, radius, radius), Phaser.Geom.Circle.Contains);
+    circle.on('pointerdown', (pointer, lx, ly, event) => {
+      if (event) event.stopPropagation();
+      onTap();
+    });
+    const text = this.add.text(x, y, label, {
+      fontSize: '13px', color: '#aaffaa', fontFamily: 'monospace',
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(TOUCH_UI_DEPTH + 1);
+    return { circle, text };
+  }
+
+  setButtonVisible(button, visible) {
+    if (!button) return;
+    button.circle.setVisible(visible);
+    button.text.setVisible(visible);
+    if (visible) {
+      button.circle.setInteractive();
+    } else {
+      button.circle.disableInteractive();
+    }
+  }
+
+  isFireHeld() {
+    if (!this.fireButton) return false;
+    const bx = this.fireButton.x;
+    const by = this.fireButton.y;
+    const r = this.fireButtonRadius;
+    const pointers = [
+      this.input.pointer1, this.input.pointer2,
+      this.input.pointer3, this.input.pointer4,
+    ];
+    for (const p of pointers) {
+      if (p && p.isDown) {
+        const dx = p.x - bx;
+        const dy = p.y - by;
+        if (dx * dx + dy * dy <= r * r) return true;
+      }
+    }
+    return false;
+  }
+
+  updateTouchButtons() {
+    if (!this.touchMode) return;
+
+    const showUse = this.hidingState.isHiding || !!this.nearestInteractable;
+    this.setButtonVisible(this.useButton, showUse);
+
+    const weaponCount = this.weaponState.slots.filter(Boolean).length;
+    this.setButtonVisible(this.weaponButton, weaponCount > 1);
+
+    if (this.fireButton) {
+      const canShoot = !!getActiveWeapon(this.weaponState) && hasAmmo(this.weaponState) && !this.hidingState.isHiding;
+      const alpha = canShoot ? 0.45 : 0.15;
+      this.fireButton.setFillStyle(0xcc4444, alpha);
+      this.fireButtonLabel.setAlpha(canShoot ? 1 : 0.4);
+    }
+  }
+
+  triggerWeaponSwitch() {
+    if (this.combatState.isDead || this.dayEnding || this.isTeleporting) return;
+    this.weaponState = switchWeapon(this.weaponState);
+    this.updateWeaponStats();
+    this.playSound('weapon_switch');
+  }
+
+  triggerInteract() {
+    if (this.combatState.isDead || this.dayEnding || this.isTeleporting) return;
+    if (this.hidingState.isHiding) {
+      this.onExitHiding();
+    } else if (this.nearestInteractable) {
+      if (this.nearestInteractable.type === 'door') {
+        this.onToggleDoor(this.nearestInteractable.item.id);
+      } else if (this.nearestInteractable.type === 'switch') {
+        this.onToggleSwitch(this.nearestInteractable.item.id);
+      } else if (this.nearestInteractable.type === 'furniture') {
+        this.onEnterHiding(this.nearestInteractable.item);
+      } else if (this.nearestInteractable.type === 'weapon') {
+        this.onWeaponPickup(this.nearestInteractable.item);
+      }
+    }
   }
 
   onWeaponPickup(wpnSprite) {
@@ -1796,12 +1974,26 @@ export class GameScene extends Phaser.Scene {
 
     const pointer = this.input.activePointer;
     pointer.updateWorldPoint(this.cameras.main);
-    this.playerAngle = Phaser.Math.Angle.Between(
+    const pointerAngle = Phaser.Math.Angle.Between(
       this.player.x,
       this.player.y,
       pointer.worldX,
       pointer.worldY
     );
+
+    let aimActive = false;
+    let aimAngle = this.playerAngle;
+    if (this.touchMode && this.aimStick) {
+      aimActive = this.aimStick.force > TOUCH_STICK_DEADZONE_PX;
+      aimAngle = this.aimStick.rotation;
+    }
+    this.playerAngle = resolveAimAngle({
+      touchMode: this.touchMode,
+      aimActive,
+      aimAngle,
+      pointerAngle,
+      lastAngle: this.playerAngle,
+    });
 
     const keyState = {
       up: this.keys.W.isDown,
@@ -1810,46 +2002,51 @@ export class GameScene extends Phaser.Scene {
       right: this.keys.D.isDown,
     };
 
-    if (this.hidingState.isHiding) {
-      const velocity = calculateVelocity(keyState, this.playerSpeed * HIDING_SPEED_MULTIPLIER);
-      this.player.setVelocity(velocity.x, velocity.y);
-    } else {
-      const velocity = calculateVelocity(keyState, this.playerSpeed);
-      this.player.setVelocity(velocity.x, velocity.y);
+    const moveSpeed = this.hidingState.isHiding
+      ? this.playerSpeed * HIDING_SPEED_MULTIPLIER
+      : this.playerSpeed;
+    const keyboardVelocity = calculateVelocity(keyState, moveSpeed);
+
+    let moveActive = false;
+    let stickVelocity = { x: 0, y: 0 };
+    if (this.touchMode && this.moveStick) {
+      moveActive = this.moveStick.force > TOUCH_STICK_DEADZONE_PX;
+      const moveForce = Math.min(this.moveStick.force / TOUCH_STICK_RADIUS, 1);
+      stickVelocity = getMoveVelocity(this.moveStick.rotation, moveForce, moveSpeed);
     }
+    const velocity = resolveMoveVelocity({
+      touchMode: this.touchMode,
+      moveActive,
+      stickVelocity,
+      keyboardVelocity,
+    });
+    this.player.setVelocity(velocity.x, velocity.y);
 
     this.combatState = updateCombat(this.combatState, delta);
     this.batteryState = updateBattery(this.batteryState, delta);
     this.fireCooldown = updateFireCooldown(this.fireCooldown, delta);
 
-    if (!this.hidingState.isHiding && pointer.leftButtonDown() && canFire(this.fireCooldown) && getActiveWeapon(this.weaponState) && hasAmmo(this.weaponState)) {
+    const fireButtonDown = this.touchMode ? this.isFireHeld() : false;
+    const wantFire = resolveFireIntent({
+      touchMode: this.touchMode,
+      fireButtonDown,
+      leftButtonDown: pointer.leftButtonDown(),
+    });
+    if (!this.hidingState.isHiding && wantFire && canFire(this.fireCooldown) && getActiveWeapon(this.weaponState) && hasAmmo(this.weaponState)) {
       this.fireBullet();
       this.weaponState = consumeAmmo(this.weaponState);
       this.fireCooldown = this.fireRate;
     }
 
     this.updateInteractPrompt();
+    this.updateTouchButtons();
 
     if (Phaser.Input.Keyboard.JustDown(this.keys.Q)) {
-      this.weaponState = switchWeapon(this.weaponState);
-      this.updateWeaponStats();
-      this.playSound('weapon_switch');
+      this.triggerWeaponSwitch();
     }
 
     if (Phaser.Input.Keyboard.JustDown(this.keys.E)) {
-      if (this.hidingState.isHiding) {
-        this.onExitHiding();
-      } else if (this.nearestInteractable) {
-        if (this.nearestInteractable.type === 'door') {
-          this.onToggleDoor(this.nearestInteractable.item.id);
-        } else if (this.nearestInteractable.type === 'switch') {
-          this.onToggleSwitch(this.nearestInteractable.item.id);
-        } else if (this.nearestInteractable.type === 'furniture') {
-          this.onEnterHiding(this.nearestInteractable.item);
-        } else if (this.nearestInteractable.type === 'weapon') {
-          this.onWeaponPickup(this.nearestInteractable.item);
-        }
-      }
+      this.triggerInteract();
     }
 
     this.updateBullets();
