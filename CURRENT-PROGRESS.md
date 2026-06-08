@@ -1,6 +1,10 @@
 # Current Progress
 
-## Status: Time-Based Enemy Difficulty Escalation
+## Status: Procedural Audio System
+
+Full procedural audio/sound effects system using Web Audio API — no audio file assets needed. Key changes: (1) New pure config module `audio.js` with `SOUND_CONFIGS` (24 sound definitions covering gunshots, noise bursts, chimes, tones, sweeps, growls, door sounds, and filtered noise), `AMBIENT_SOUND_TYPES` (distant_bang, drip, whisper), and behavioral functions `getFootstepInterval(speed)`, `getAmbientSoundDelay(time)`, `getSoundConfig(key)`. (2) New synthesis engine `audioEngine.js` with `generateAllSounds(audioContext, cache)` (pre-renders all sounds via OfflineAudioContext and injects AudioBuffers into Phaser's cache), `createAmbientDrone(audioContext, destination)` (live oscillator nodes: 120Hz + 120.5Hz sawtooth beat, 60Hz sine sub, 0.3Hz LFO), and `playAmbientSound(soundManager, time)` (randomly selects ambient one-shot). (3) GameScene integration: `createSounds()` handles browser autoplay policy (`sound.locked`), `playSound(key)` wraps `sound.play()` with `audioReady` guard. Sound triggers on all game events — weapon fire (`${weapon.id}_fire`), bullet_hit, enemy_death, player_damage, player_death, item_pickup, lore_pickup, ammo_pickup, battery_recharge, door_open/close, switch_click, hide_enter/exit, stair_transition, day_complete, weapon_switch. Update loop adds footstep timer (driven by player velocity via `getFootstepInterval`) and battery warning beep every 3s when battery ≤ 25%. Ambient drone starts on audio init, ambient one-shots scheduled on a recursive timer. (4) ShopScene integration: same `initAudio()`/`playSound()` pattern, shop_purchase on successful buy, shop_denied on failed buy, shop_click on all button interactions (journal, location cycle, enter, close, pagination). 11 new behavioral tests for audio config functions. 519 tests passing.
+
+## Previous: Time-Based Enemy Difficulty Escalation
 
 Enemies now spawn dynamically as the player spends time in unsafe rooms, creating escalating danger pressure. Key changes: (1) New pure function module `danger.js` tracks cumulative time in unsafe rooms (not room 0, not lit rooms). Timer pauses in safe rooms but does NOT reset — prevents cycling exploit. (2) Every 30 seconds of unsafe time (`DANGER_WAVE_INTERVAL = 30000`), a wave of enemies spawns in a valid nearby room (not room 0, not lit, not the player's current room, same floor). (3) Wave composition shifts toward harder enemy types as waves progress: waves 0-1 spawn only basic zombies, waves 2-3 add crawlers, waves 4-5 use crawlers and spitters, waves 6-7 mix all types. (4) Wave enemy count increases with wave number: `1 + floor(waveCount / 3)`, capped at 4. (5) Maximum 8 waves per run (`MAX_DANGER_WAVES = 8`) — 240 seconds of unsafe time to see all waves. (6) `getSpawnRoom()` filters candidate rooms by floor, excludes safe rooms and player's current room; returns null if no valid room exists (wave is silently skipped). (7) GameScene integration: `dangerState` initialized in `init()`, updated each frame in `updateEnemies()`, `spawnDangerWave()` creates enemy sprites via existing `enemyGroup.create()` — group colliders auto-cover new members, no new colliders needed. (8) HUD shows red "DANGER N" indicator when waves have spawned. New module `danger.js`, 29 new tests covering timing, wave thresholds, composition, room selection, and full session simulation. 508 tests passing.
 
@@ -349,7 +353,14 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
   - Enemies no longer despawn when light switches are toggled on — `onToggleSwitch` is now a pure state toggle
   - Enemies in lit rooms are frozen in place (velocity zeroed, AI skipped) by the existing `updateEnemies()` freeze check
   - If switch toggled off, frozen enemies resume their AI
-- 508 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, weapon upgrades, enemy types, stairs, weapons, inventory capacity, maze generation, room connections, weaponless start, ammo system, minimap upgrade, switch frequency, lore spawning, lore persistence, lore journal, floor scaling, multi-floor stair connections, alternate locations, location persistence, cross-room pathfinding, navContext-driven enemy AI, new furniture types, and time-based danger escalation
+- Procedural audio system (Web Audio API, no audio file assets)
+  - Pure config module `audio.js`: 24 sound definitions in `SOUND_CONFIGS`, 3 ambient types, `getFootstepInterval(speed)`, `getAmbientSoundDelay(time)`, `getSoundConfig(key)`
+  - Synthesis engine `audioEngine.js`: `generateAllSounds()` pre-renders all sounds via OfflineAudioContext → Phaser cache injection, `createAmbientDrone()` for live oscillator drone, `playAmbientSound()` for random ambient one-shots
+  - GameScene: all game events trigger sounds (weapon fire, hits, pickups, doors, switches, hiding, stairs, death, day complete), footstep timer in update loop, battery warning beep when ≤ 25%, ambient drone + scheduled ambient sounds
+  - ShopScene: purchase/denied/click sounds on all interactive elements
+  - Browser autoplay policy handled via `sound.locked` + `'unlocked'` event listener
+  - 11 behavioral tests for audio config pure functions
+- 519 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, weapon upgrades, enemy types, stairs, weapons, inventory capacity, maze generation, room connections, weaponless start, ammo system, minimap upgrade, switch frequency, lore spawning, lore persistence, lore journal, floor scaling, multi-floor stair connections, alternate locations, location persistence, cross-room pathfinding, navContext-driven enemy AI, new furniture types, time-based danger escalation, and audio system
 - Documentation (docs.md files for root, src, systems, scenes)
 - Bug fix: flashlight mouse tracking drift during WASD movement
   - Root cause: Phaser 3 `pointer.worldX`/`worldY` are cached properties only refreshed on mouse events, not camera scroll
@@ -357,7 +368,7 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
   - Also fixes bullet direction when shooting while moving
 
 ## Architecture
-- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop, doors, lightswitch, hiding, persistence, exploration, startroom, scaling, stairs, weapons, maze, lore, locations, pathfinding, danger) — testable without Phaser
+- `src/systems/` — Pure functions (movement, visibility/raycasting, room, furniture, level, random, enemy, items, inventory, shop, doors, lightswitch, hiding, persistence, exploration, startroom, scaling, stairs, weapons, maze, lore, locations, pathfinding, danger, audio) and browser-dependent synthesis (audioEngine) — pure modules testable without Phaser, audioEngine requires Web Audio API
 - `src/scenes/` — Phaser scene classes that wire systems together for rendering (GameScene for gameplay, ShopScene for upgrades between runs)
 - Darkness uses BitmapMask with invertAlpha on a Graphics overlay
 - Furniture segments use the same `{x1,y1,x2,y2}` format as walls — concatenated into `wallSegments` for raycasting with zero visibility code changes. 8 furniture types with three property combinations: hideable-only (table, desk, bed, vent), blocking-only (shelf, bookcase), and both hideable and blocking (armoire, closet)
@@ -421,7 +432,6 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
 - ShopScene location cycling: When `unlockedLocations.length > 1`, ShopScene renders `< LocationName >` with clickable arrow buttons. `cycleLocation(direction)` wraps around the unlocked array. Active location is stored in registry and persisted. "New location discovered!" banner shown when arriving via alternate exit.
 
 ## Next Steps (from APPLICATION_SPEC.md)
-- Add audio
 - Add more enemy types
 - Add more room types
 - Add actual pixel art elements for tables, light switches, rewards, etc. (give backrooms more flavor)

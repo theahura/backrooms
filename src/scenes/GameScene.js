@@ -23,6 +23,8 @@ import { getLocation, getLocationLayout, getLocationExitPosition, generateAltern
 import { generateRoomLore } from '../systems/lore.js';
 import { buildRoomGraph, bfsFromRoom, getNextDoorway, getRoomDistance, getDoorwayCenter, DOORWAY_SEEK_CHANCE, ROOM_TRANSITION_COOLDOWN, MAX_ROOM_DISTANCE, MAX_ROOM_ENEMIES } from '../systems/pathfinding.js';
 import { createDangerState, updateDangerTime, shouldSpawnWave, advanceWave, getWaveComposition, getSpawnRoom } from '../systems/danger.js';
+import { getFootstepInterval, getAmbientSoundDelay } from '../systems/audio.js';
+import { generateAllSounds, createAmbientDrone, playAmbientSound } from '../systems/audioEngine.js';
 
 const WALL_THICKNESS = 16;
 
@@ -133,6 +135,82 @@ export class GameScene extends Phaser.Scene {
     this.setupCamera();
     this.createDarknessOverlay();
     this.createHUD();
+    this.createSounds();
+  }
+
+  createSounds() {
+    this.audioReady = false;
+    this.footstepTimer = 0;
+    this.batteryWarningTimer = 0;
+    this.ambientDrone = null;
+    this.ambientTimer = null;
+
+    if (!this.sound || !this.sound.context) return;
+
+    const ctx = this.sound.context;
+    const cache = this.cache.audio;
+
+    const startAudio = () => {
+      generateAllSounds(ctx, cache).then(() => {
+        this.audioReady = true;
+        this.startAmbientAudio();
+      }).catch(() => {});
+    };
+
+    if (this.sound.locked) {
+      this._audioUnlockHandler = startAudio;
+      this.sound.once('unlocked', this._audioUnlockHandler);
+    } else {
+      startAudio();
+    }
+
+    this.events.once('shutdown', () => {
+      this.stopAmbientAudio();
+      if (this._audioUnlockHandler && this.sound) {
+        this.sound.off('unlocked', this._audioUnlockHandler);
+        this._audioUnlockHandler = null;
+      }
+    });
+  }
+
+  startAmbientAudio() {
+    if (!this.sound || !this.sound.context) return;
+
+    this.ambientDrone = createAmbientDrone(this.sound.context, this.sound.destination);
+    this.ambientDrone.start();
+
+    this.scheduleAmbientSound();
+  }
+
+  scheduleAmbientSound() {
+    const delay = getAmbientSoundDelay(this.time ? this.time.now : 0);
+    this.ambientTimer = this.time.addEvent({
+      delay,
+      callback: () => {
+        if (this.audioReady) {
+          playAmbientSound(this.sound, this.time.now);
+        }
+        this.scheduleAmbientSound();
+      },
+    });
+  }
+
+  playSound(key) {
+    if (!this.audioReady) return;
+    try {
+      this.sound.play(key, { volume: 1 });
+    } catch (_) {}
+  }
+
+  stopAmbientAudio() {
+    if (this.ambientDrone) {
+      this.ambientDrone.stop();
+      this.ambientDrone = null;
+    }
+    if (this.ambientTimer) {
+      this.ambientTimer.remove();
+      this.ambientTimer = null;
+    }
   }
 
   createRooms() {
@@ -324,6 +402,7 @@ export class GameScene extends Phaser.Scene {
 
   onToggleSwitch(switchId) {
     this.switchStates = toggleSwitch(this.switchStates, switchId);
+    this.playSound('switch_click');
   }
 
   onToggleDoor(doorId) {
@@ -346,9 +425,11 @@ export class GameScene extends Phaser.Scene {
       zone.body.enable = false;
     }
     this.roomGraphDirty = true;
+    this.playSound(updatedDoor.isClosed ? 'door_close' : 'door_open');
   }
 
   onEnterHiding(furniture) {
+    this.playSound('hide_enter');
     this.hidingState = enterHiding(this.hidingState, furniture);
     const centerX = furniture.x + furniture.width / 2;
     const centerY = furniture.y + furniture.height / 2;
@@ -361,6 +442,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   onExitHiding() {
+    this.playSound('hide_exit');
     this.hidingState = exitHiding(this.hidingState);
     this.player.body.setBoundsRectangle(null);
     this.player.body.setCollideWorldBounds(false);
@@ -516,6 +598,9 @@ export class GameScene extends Phaser.Scene {
       const weapon = getActiveWeapon(this.weaponState);
       const amount = AMMO_PER_PICKUP[weapon.id] || 10;
       this.weaponState = addAmmo(this.weaponState, amount);
+      this.playSound('ammo_pickup');
+    } else {
+      this.playSound('item_pickup');
     }
     itemSprite.destroy();
   }
@@ -568,6 +653,7 @@ export class GameScene extends Phaser.Scene {
     this.registry.set('collectedLore', [...this.collectedLore]);
 
     loreSprite.destroy();
+    this.playSound('lore_pickup');
     this.showLorePopup(loreText);
   }
 
@@ -674,6 +760,7 @@ export class GameScene extends Phaser.Scene {
     const types = getWaveComposition(this.dangerState.waveCount);
     const room = getSpawnRoom(this.level.rooms, playerRoomId, litRoomIds, this.currentFloor);
     if (!room) return;
+    this.playSound('distant_bang');
 
     const margin = 40;
     const minX = room.x + WALL_THICKNESS + margin;
@@ -849,6 +936,7 @@ export class GameScene extends Phaser.Scene {
     this.combatState = applyDamage(before, SPITTER_PROJECTILE_DAMAGE);
 
     if (this.combatState.hp < before.hp) {
+      this.playSound('player_damage');
       this.cameras.main.shake(100, 0.01);
       this.cameras.main.flash(150, 255, 0, 0);
 
@@ -1105,6 +1193,7 @@ export class GameScene extends Phaser.Scene {
 
   onStairEnter(player, stairZone) {
     if (this.isTeleporting || this.dayEnding || this.hidingState.isHiding) return;
+    this.playSound('stair_transition');
     this.isTeleporting = true;
     player.body.stop();
     player.body.enable = false;
@@ -1128,6 +1217,8 @@ export class GameScene extends Phaser.Scene {
 
   onDayComplete(newLocation) {
     if (this.dayEnding) return;
+    this.playSound('day_complete');
+    this.stopAmbientAudio();
     this.dayEnding = true;
     this.player.body.stop();
     this.player.body.enable = false;
@@ -1204,6 +1295,7 @@ export class GameScene extends Phaser.Scene {
 
   fireBullet() {
     const weapon = getActiveWeapon(this.weaponState);
+    this.playSound(`${weapon.id}_fire`);
     const textureKey = `bullet_${weapon.id}`;
     const pointer = this.input.activePointer;
 
@@ -1262,8 +1354,10 @@ export class GameScene extends Phaser.Scene {
 
     const damage = bullet.getData('damage') || this.bulletDamage;
     enemyState.health = applyEnemyDamage(enemyState.health, damage);
+    this.playSound('bullet_hit');
 
     if (isEnemyDead(enemyState.health)) {
+      this.playSound('enemy_death');
       enemySprite.setActive(false);
       enemySprite.body.stop();
       enemySprite.body.enable = false;
@@ -1294,6 +1388,7 @@ export class GameScene extends Phaser.Scene {
     this.combatState = applyDamage(before, damage);
 
     if (this.combatState.hp < before.hp) {
+      this.playSound('player_damage');
       this.cameras.main.shake(100, 0.01);
       this.cameras.main.flash(150, 255, 0, 0);
 
@@ -1304,6 +1399,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   onPlayerDeath() {
+    this.playSound('player_death');
+    this.stopAmbientAudio();
     this.player.body.stop();
     this.player.body.enable = false;
     this.cameras.main.fadeOut(500, 0, 0, 0);
@@ -1584,6 +1681,7 @@ export class GameScene extends Phaser.Scene {
       if (deltaY !== 0) {
         this.weaponState = switchWeapon(this.weaponState);
         this.updateWeaponStats();
+        this.playSound('weapon_switch');
       }
     });
   }
@@ -1597,6 +1695,7 @@ export class GameScene extends Phaser.Scene {
     const result = pickupWeapon(this.weaponState, weaponType, savedAmmo);
     this.weaponState = result.state;
     this.updateWeaponStats();
+    this.playSound('item_pickup');
 
     wpnSprite.setActive(false);
     wpnSprite.setVisible(false);
@@ -1619,6 +1718,7 @@ export class GameScene extends Phaser.Scene {
     if (result.used) {
       this.inventoryState = result.state;
       this.batteryState = rechargeBattery(this.batteryState, BATTERY_RECHARGE_AMOUNT);
+      this.playSound('battery_recharge');
     }
   }
 
@@ -1755,6 +1855,7 @@ export class GameScene extends Phaser.Scene {
     if (Phaser.Input.Keyboard.JustDown(this.keys.Q)) {
       this.weaponState = switchWeapon(this.weaponState);
       this.updateWeaponStats();
+      this.playSound('weapon_switch');
     }
 
     if (Phaser.Input.Keyboard.JustDown(this.keys.E)) {
@@ -1786,5 +1887,27 @@ export class GameScene extends Phaser.Scene {
     this.explorationState = updateExploration(this.explorationState, this.player.x, this.player.y, this.level.rooms);
     this.drawHUD();
     this.drawMinimap();
+
+    if (this.audioReady) {
+      const speed = Math.sqrt(this.player.body.velocity.x ** 2 + this.player.body.velocity.y ** 2);
+      const interval = getFootstepInterval(speed);
+      this.footstepTimer += delta;
+      if (this.footstepTimer >= interval) {
+        this.playSound('footstep');
+        this.footstepTimer = 0;
+      }
+
+      const batteryFraction = this.batteryState.charge / this.batteryState.maxCharge;
+      const isLow = batteryFraction > 0 && batteryFraction <= 0.25;
+      if (isLow) {
+        this.batteryWarningTimer += delta;
+        if (this.batteryWarningTimer >= 3000) {
+          this.playSound('battery_warning');
+          this.batteryWarningTimer = 0;
+        }
+      } else {
+        this.batteryWarningTimer = 0;
+      }
+    }
   }
 }

@@ -1,0 +1,246 @@
+export const SOUND_CONFIGS = {
+  pistol_fire: {
+    duration: 0.2,
+    gain: 0.4,
+    type: 'gunshot',
+    noiseFreq: 1200,
+    noiseQ: 0.8,
+    noiseDecay: 0.08,
+    bodyFreq: 160,
+    bodyDecay: 0.12,
+  },
+  shotgun_fire: {
+    duration: 0.3,
+    gain: 0.6,
+    type: 'gunshot',
+    noiseFreq: 800,
+    noiseQ: 0.5,
+    noiseDecay: 0.15,
+    bodyFreq: 100,
+    bodyDecay: 0.2,
+  },
+  rifle_fire: {
+    duration: 0.25,
+    gain: 0.5,
+    type: 'gunshot',
+    noiseFreq: 1500,
+    noiseQ: 1.0,
+    noiseDecay: 0.06,
+    bodyFreq: 200,
+    bodyDecay: 0.1,
+  },
+  bullet_hit: {
+    duration: 0.1,
+    gain: 0.3,
+    type: 'noise_burst',
+    freq: 2000,
+    Q: 1.5,
+    decay: 0.08,
+  },
+  enemy_death: {
+    duration: 0.5,
+    gain: 0.35,
+    type: 'growl',
+    carrierFreq: 60,
+    carrierEnd: 30,
+    lfoFreq: 8,
+    filterFreq: 250,
+  },
+  player_damage: {
+    duration: 0.2,
+    gain: 0.5,
+    type: 'noise_burst',
+    freq: 400,
+    Q: 0.5,
+    decay: 0.15,
+  },
+  player_death: {
+    duration: 0.8,
+    gain: 0.5,
+    type: 'sweep_down',
+    startFreq: 300,
+    endFreq: 40,
+    oscType: 'sawtooth',
+  },
+  item_pickup: {
+    duration: 0.15,
+    gain: 0.25,
+    type: 'chime',
+    notes: [660, 880],
+    noteDuration: 0.06,
+    noteGap: 0.07,
+  },
+  lore_pickup: {
+    duration: 0.2,
+    gain: 0.15,
+    type: 'noise_burst',
+    freq: 3000,
+    Q: 3,
+    decay: 0.15,
+  },
+  ammo_pickup: {
+    duration: 0.12,
+    gain: 0.2,
+    type: 'chime',
+    notes: [440, 550],
+    noteDuration: 0.05,
+    noteGap: 0.06,
+  },
+  battery_recharge: {
+    duration: 0.25,
+    gain: 0.2,
+    type: 'chime',
+    notes: [440, 660, 880],
+    noteDuration: 0.06,
+    noteGap: 0.06,
+  },
+  door_open: {
+    duration: 0.4,
+    gain: 0.3,
+    type: 'door',
+    carrierStart: 300,
+    carrierEnd: 450,
+    modFreqStart: 8,
+    modFreqEnd: 12,
+    modDepth: 400,
+  },
+  door_close: {
+    duration: 0.3,
+    gain: 0.35,
+    type: 'door_thud',
+    thudFreq: 200,
+    thudDecay: 0.12,
+  },
+  switch_click: {
+    duration: 0.05,
+    gain: 0.3,
+    type: 'noise_burst',
+    freq: 4000,
+    Q: 2,
+    decay: 0.03,
+  },
+  hide_enter: {
+    duration: 0.2,
+    gain: 0.15,
+    type: 'noise_burst',
+    freq: 1200,
+    Q: 1,
+    decay: 0.15,
+  },
+  hide_exit: {
+    duration: 0.15,
+    gain: 0.15,
+    type: 'noise_burst',
+    freq: 1500,
+    Q: 1,
+    decay: 0.1,
+  },
+  stair_transition: {
+    duration: 0.6,
+    gain: 0.25,
+    type: 'sweep_down',
+    startFreq: 500,
+    endFreq: 100,
+    oscType: 'sine',
+  },
+  day_complete: {
+    duration: 0.4,
+    gain: 0.3,
+    type: 'chime',
+    notes: [440, 554, 659, 880],
+    noteDuration: 0.08,
+    noteGap: 0.08,
+  },
+  battery_warning: {
+    duration: 0.15,
+    gain: 0.2,
+    type: 'tone',
+    freq: 220,
+    oscType: 'sine',
+  },
+  weapon_switch: {
+    duration: 0.05,
+    gain: 0.2,
+    type: 'noise_burst',
+    freq: 3000,
+    Q: 2,
+    decay: 0.04,
+  },
+  shop_purchase: {
+    duration: 0.2,
+    gain: 0.25,
+    type: 'chime',
+    notes: [523, 659, 784],
+    noteDuration: 0.05,
+    noteGap: 0.06,
+  },
+  shop_denied: {
+    duration: 0.2,
+    gain: 0.2,
+    type: 'tone',
+    freq: 150,
+    oscType: 'square',
+  },
+  shop_click: {
+    duration: 0.04,
+    gain: 0.15,
+    type: 'noise_burst',
+    freq: 5000,
+    Q: 3,
+    decay: 0.03,
+  },
+  footstep: {
+    duration: 0.06,
+    gain: 0.15,
+    type: 'noise_burst',
+    freq: 1800,
+    Q: 1.5,
+    decay: 0.04,
+  },
+  distant_bang: {
+    duration: 0.8,
+    gain: 0.12,
+    type: 'noise_burst',
+    freq: 150,
+    Q: 0.5,
+    decay: 0.6,
+  },
+  drip: {
+    duration: 0.06,
+    gain: 0.06,
+    type: 'tone',
+    freq: 3000,
+    oscType: 'sine',
+  },
+  whisper: {
+    duration: 1.5,
+    gain: 0.04,
+    type: 'filtered_noise',
+    freq: 3000,
+    Q: 5,
+    attackTime: 0.3,
+    releaseTime: 0.5,
+  },
+};
+
+export const AMBIENT_SOUND_TYPES = [
+  { name: 'distant_bang', duration: 0.8 },
+  { name: 'drip', duration: 0.06 },
+  { name: 'whisper', duration: 1.5 },
+];
+
+const BASE_FOOTSTEP_DISTANCE = 60;
+
+export function getFootstepInterval(speed) {
+  if (speed <= 0) return Infinity;
+  return (BASE_FOOTSTEP_DISTANCE / speed) * 1000;
+}
+
+export function getAmbientSoundDelay(time) {
+  const hash = ((time * 2654435761) >>> 0) / 4294967296;
+  return 5000 + hash * 25000;
+}
+
+export function getSoundConfig(key) {
+  return SOUND_CONFIGS[key] || null;
+}

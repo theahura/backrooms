@@ -2176,3 +2176,131 @@ DANGER_SEED_OFFSET = 110000    // seed offset for spawn positions
 - Dynamic enemies follow same death/corpse behavior as pre-placed enemies
 - Dynamic enemies have same pathfinding capability as pre-placed enemies (navContext)
 - Run count scaling still applies to dynamically spawned enemies (they use scaledEnemyHP etc.)
+
+## Audio System Research
+
+### Design Decision: Procedural Audio via Web Audio API
+
+The game generates all visuals procedurally (no image files). Same approach for audio: all sounds synthesized at runtime using Web Audio API, no .mp3/.ogg files.
+
+### Phaser 3.90.0 Audio Integration
+
+**Direct cache injection** (confirmed by reading Phaser source):
+```javascript
+const ctx = this.sound.context; // Phaser's AudioContext
+const buffer = ctx.createBuffer(1, ctx.sampleRate * 0.3, ctx.sampleRate);
+// ... fill buffer with waveform data ...
+this.cache.audio.add('gunshot', buffer);
+this.sound.play('gunshot');
+```
+
+- `this.sound.context` — exposes the Web Audio `AudioContext`
+- `this.cache.audio.add(key, audioBuffer)` — injects an `AudioBuffer` into Phaser's cache (BaseCache.add is type-agnostic)
+- `this.sound.add(key).play()` — plays via Phaser's sound manager (volume, mute, rate control)
+- `this.sound.destination` — the master volume GainNode (for real-time ambient audio)
+- Autoplay policy: Phaser auto-resumes AudioContext on first user interaction; check `this.sound.locked` for safety
+
+**Two approaches for sound generation:**
+1. **Pre-rendered via OfflineAudioContext** — for one-shot effects (gunshots, footsteps, pickups, door sounds). Generated once in `create()`, cached, played via `this.sound.play(key)`.
+2. **Real-time via live AudioContext nodes** — for ambient drone/hum. Connected to `this.sound.destination` for Phaser volume integration.
+
+### Sound Categories and Synthesis Recipes
+
+**Gunshot/weapon fire** (noise burst + low freq thump):
+- White noise through bandpass filter (1000Hz, Q:0.7), fast exponential decay (0.1s)
+- Triangle oscillator sweep 150Hz→0.001Hz for body thump
+- Duration: ~0.2s
+
+**Footsteps** (filtered noise burst):
+- White noise through bandpass filter (800-2000Hz), very short duration (~40-60ms)
+- Randomize filter frequency ±10% between steps for variation
+- Play based on movement velocity (not every frame)
+
+**Item pickup chime** (ascending tones):
+- Two sine oscillators at 660Hz then 880Hz, 60ms each, 70ms gap
+- exponentialRamp gain decay
+
+**Door toggle** (FM synthesis creak + noise thud):
+- Carrier sine 300→500Hz, modulated by 8→12Hz sine with depth 400
+- Bandpass filter at 800Hz, envelope with attack and decay
+- Close: add short noise burst through lowpass 200Hz
+
+**Light switch** (short click):
+- Very brief noise burst (~20ms) through highpass filter
+
+**Enemy growl** (low sawtooth + distortion + AM tremolo):
+- Sawtooth 50→40Hz through WaveShaperNode distortion
+- LFO at 6Hz for amplitude modulation (tremolo)
+- Bandpass noise at 100Hz for texture
+- Duration: ~0.8s
+
+**Ambient drone/hum** (real-time, Backrooms fluorescent buzz):
+- Two detuned sawtooth oscillators at 120Hz and 120.5Hz (rectified mains buzz)
+- Sub-bass sine at 60Hz
+- LFO at 0.3Hz modulating master gain for breathing/flicker effect
+- Brown noise through lowpass 200Hz for deep rumble texture
+- All connected to `this.sound.destination` (live nodes, not pre-rendered)
+
+**Horror atmosphere** (random environmental sounds at 5-30s intervals):
+- Distant bang: lowpass-filtered noise burst, slow decay
+- Drip: high sine ping (2000-4000Hz), 60ms
+- Whisper: bandpass-filtered noise at 3000Hz + 6000Hz, slow envelope
+
+**Player damage** (distorted low thump):
+- Similar to gunshot but lower frequency, more body
+
+**Battery warning** (periodic low beep):
+- Short sine at 220Hz, repeating at ~1Hz when battery < 25%
+
+### Architecture: Pure Module `audio.js`
+
+`src/systems/audio.js` — defines sound configurations as plain data objects (frequencies, durations, gains, filter params). Pure functions for:
+- `SOUND_CONFIGS` — object mapping sound names to synthesis parameters
+- `getFootstepInterval(speed)` — returns ms between footstep sounds based on movement speed
+- `getAmbientSoundDelay()` — returns randomized delay for next ambient horror sound
+- No Phaser/Web Audio dependency — testable in Node
+
+### GameScene Audio Integration Points
+
+All identified handlers for audio hooks:
+- `fireBullet()` (line ~1217) — weapon fire sound (vary by weapon type)
+- `onBulletHitEnemy()` (line ~1264) — hit sound; death sound in `isEnemyDead` branch
+- `onEnemyContact()` (line ~1297) — player damage sound
+- `onEnemyBulletHitPlayer()` (line ~851) — player damage sound
+- `onPlayerDeath()` (line ~1307) — death sound
+- `onItemPickup()` (line ~520) — pickup chime (vary by item type)
+- `onLorePickup()` (line ~571) — paper rustling sound
+- `onToggleDoor()` (line ~338) — door creak (differentiate open/close)
+- `onToggleSwitch()` (line ~326) — switch click
+- `onEnterHiding()` (line ~352) — hide entry sound
+- `onExitHiding()` (line ~364) — hide exit sound
+- `onStairEnter()` (line ~1108) — stair transition sound
+- `onDayComplete()` (line ~1131) — exit/completion sound
+- `onUseBattery()` (line ~1621) — recharge sound
+- `update()` footstep timing — footstep sounds when moving
+- `updateDarkness()` — flicker buzz when battery low
+- `spawnDangerWave()` — danger alert sound
+
+### ShopScene Audio Integration Points
+
+- Purchase upgrade — purchase chime or "can't afford" buzz
+- Enter backrooms button — transition sound
+- Location cycling — click sound
+- Journal open/close — page sounds
+- Journal navigation — page turn sound
+
+### Anti-Click Technique
+
+Always use 5ms linear ramp at start/end of sounds:
+```javascript
+gain.gain.setValueAtTime(0, startTime);
+gain.gain.linearRampToValueAtTime(targetVolume, startTime + 0.005);
+```
+Use `0.001` (not `0`) as target for `exponentialRampToValueAtTime`.
+
+### Performance
+
+- Pre-rendered sounds: one-time OfflineAudioContext cost during `create()` (~50-100ms total for all sounds)
+- Playback: Phaser's sound manager handles pooling/recycling
+- Ambient drone: 4-5 live oscillator nodes — negligible CPU
+- No audio files = no loading/bandwidth cost
