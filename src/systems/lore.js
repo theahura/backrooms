@@ -26,6 +26,24 @@ export const LORE_ENTRIES = [
   { id: 19, text: "To whoever finds this: I'm sorry. I thought I could map it. Nobody can map it. It doesn't want to be mapped." },
 ];
 
+export function getJournalEntries(collectedLoreIds) {
+  const entries = LORE_ENTRIES.map(e => ({
+    id: e.id,
+    text: e.text,
+    collected: collectedLoreIds.has(e.id),
+  }));
+  const collectedCount = entries.filter(e => e.collected).length;
+  return { entries, collectedCount, totalCount: entries.length };
+}
+
+export function getJournalPage(entries, page, perPage) {
+  const totalPages = Math.ceil(entries.length / perPage);
+  const currentPage = Math.max(0, Math.min(page, totalPages - 1));
+  const start = currentPage * perPage;
+  const pageEntries = entries.slice(start, start + perPage);
+  return { pageEntries, currentPage, totalPages };
+}
+
 export function generateRoomLore(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, furnitureItems, roomId, collectedLoreIds) {
   if (roomId === 0) return [];
 

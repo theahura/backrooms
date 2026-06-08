@@ -10,6 +10,7 @@ import {
 } from '../systems/shop.js';
 import { saveGame } from '../systems/persistence.js';
 import { getLocation, LOCATIONS } from '../systems/locations.js';
+import { getJournalEntries, getJournalPage } from '../systems/lore.js';
 
 export class ShopScene extends Phaser.Scene {
   constructor() {
@@ -36,6 +37,9 @@ export class ShopScene extends Phaser.Scene {
     this.shopState = shopState;
     this.treasureEarned = treasureEarned;
     this.newLocation = newLocation;
+    this.collectedLore = new Set(this.registry.get('collectedLore') ?? []);
+    this.journalOverlay = null;
+    this.journalPage = 0;
   }
 
   create() {
@@ -127,6 +131,17 @@ export class ShopScene extends Phaser.Scene {
       saveGame(this.shopState, this.registry.get('runCount') ?? 0, this.registry.get('collectedLore') ?? [], this.unlockedLocations, this.activeLocation);
       this.scene.start('GameScene');
     });
+
+    const journalData = getJournalEntries(this.collectedLore);
+    const journalBtn = this.add.text(900, 90, `[ NOTES ${journalData.collectedCount}/${journalData.totalCount} ]`, {
+      fontSize: '14px',
+      color: '#88aaff',
+      fontFamily: 'monospace',
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+
+    journalBtn.on('pointerover', () => journalBtn.setColor('#bbddff'));
+    journalBtn.on('pointerout', () => journalBtn.setColor('#88aaff'));
+    journalBtn.on('pointerdown', () => this.showJournal());
 
     this.refreshDisplay();
   }
@@ -221,6 +236,149 @@ export class ShopScene extends Phaser.Scene {
         row.costText.setColor('#44cc44');
         row.buyBtn.setVisible(false);
       }
+    }
+  }
+
+  showJournal() {
+    if (this.journalOverlay) return;
+
+    const ENTRIES_PER_PAGE = 5;
+    const journalData = getJournalEntries(this.collectedLore);
+    this.journalEntries = journalData.entries;
+    this.journalPage = 0;
+
+    const objects = [];
+
+    const bg = this.add.graphics().setDepth(2000);
+    bg.fillStyle(0x111111, 1);
+    bg.fillRect(0, 0, 1024, 768);
+    objects.push(bg);
+
+    const title = this.add.text(512, 50, `COLLECTED NOTES  ${journalData.collectedCount}/${journalData.totalCount}`, {
+      fontSize: '24px',
+      color: '#cccccc',
+      fontFamily: 'monospace',
+    }).setOrigin(0.5).setDepth(2001);
+    objects.push(title);
+
+    const divider = this.add.graphics().setDepth(2001);
+    divider.lineStyle(1, 0x555555);
+    divider.lineBetween(100, 80, 924, 80);
+    objects.push(divider);
+
+    this.journalSlots = [];
+    for (let i = 0; i < ENTRIES_PER_PAGE; i++) {
+      const y = 100 + i * 110;
+
+      const label = this.add.text(100, y, '', {
+        fontSize: '14px',
+        color: '#ffffff',
+        fontFamily: 'monospace',
+      }).setDepth(2001);
+
+      const text = this.add.text(100, y + 22, '', {
+        fontSize: '13px',
+        color: '#cccccc',
+        fontFamily: 'monospace',
+        wordWrap: { width: 824 },
+      }).setDepth(2001);
+
+      const line = this.add.graphics().setDepth(2001);
+      line.lineStyle(1, 0x333333);
+      line.lineBetween(100, y + 95, 924, y + 95);
+
+      objects.push(label, text, line);
+      this.journalSlots.push({ label, text });
+    }
+
+    this.journalPrevBtn = this.add.text(400, 670, '< PREV', {
+      fontSize: '16px',
+      color: '#88aaff',
+      fontFamily: 'monospace',
+    }).setOrigin(0.5).setDepth(2001).setInteractive({ useHandCursor: true });
+    this.journalPrevBtn.on('pointerdown', () => {
+      this.journalPage--;
+      this.renderJournalPage();
+    });
+    objects.push(this.journalPrevBtn);
+
+    this.journalPageText = this.add.text(512, 670, '', {
+      fontSize: '16px',
+      color: '#888888',
+      fontFamily: 'monospace',
+    }).setOrigin(0.5).setDepth(2001);
+    objects.push(this.journalPageText);
+
+    this.journalNextBtn = this.add.text(624, 670, 'NEXT >', {
+      fontSize: '16px',
+      color: '#88aaff',
+      fontFamily: 'monospace',
+    }).setOrigin(0.5).setDepth(2001).setInteractive({ useHandCursor: true });
+    this.journalNextBtn.on('pointerdown', () => {
+      this.journalPage++;
+      this.renderJournalPage();
+    });
+    objects.push(this.journalNextBtn);
+
+    const closeBtn = this.add.text(512, 730, '[ CLOSE ]', {
+      fontSize: '18px',
+      color: '#44cc44',
+      fontFamily: 'monospace',
+    }).setOrigin(0.5).setDepth(2001).setInteractive({ useHandCursor: true });
+    closeBtn.on('pointerover', () => closeBtn.setColor('#88ff88'));
+    closeBtn.on('pointerout', () => closeBtn.setColor('#44cc44'));
+    closeBtn.on('pointerdown', () => this.hideJournal());
+    objects.push(closeBtn);
+
+    this.journalEscHandler = (event) => {
+      if (event.key === 'Escape') this.hideJournal();
+    };
+    this.input.keyboard.on('keydown-ESC', this.journalEscHandler);
+
+    this.journalOverlay = objects;
+    this.renderJournalPage();
+  }
+
+  renderJournalPage() {
+    const ENTRIES_PER_PAGE = 5;
+    const { pageEntries, currentPage, totalPages } = getJournalPage(this.journalEntries, this.journalPage, ENTRIES_PER_PAGE);
+    this.journalPage = currentPage;
+
+    for (let i = 0; i < this.journalSlots.length; i++) {
+      const slot = this.journalSlots[i];
+      if (i < pageEntries.length) {
+        const entry = pageEntries[i];
+        if (entry.collected) {
+          slot.label.setText(`Note #${entry.id + 1}`).setColor('#ffffff');
+          slot.text.setText(`"${entry.text}"`).setColor('#cccccc');
+        } else {
+          slot.label.setText(`Note #${entry.id + 1}`).setColor('#555555');
+          slot.text.setText('???').setColor('#555555');
+        }
+        slot.label.setVisible(true);
+        slot.text.setVisible(true);
+      } else {
+        slot.label.setVisible(false);
+        slot.text.setVisible(false);
+      }
+    }
+
+    this.journalPageText.setText(`${currentPage + 1} / ${totalPages}`);
+    this.journalPrevBtn.setVisible(currentPage > 0);
+    this.journalNextBtn.setVisible(currentPage < totalPages - 1);
+  }
+
+  hideJournal() {
+    if (!this.journalOverlay) return;
+    for (const obj of this.journalOverlay) {
+      obj.destroy();
+    }
+    this.journalOverlay = null;
+    this.journalSlots = null;
+    this.journalEntries = null;
+    if (this.journalEscHandler) {
+      this.input.keyboard.off('keydown-ESC', this.journalEscHandler);
+      this.journalEscHandler = null;
     }
   }
 }

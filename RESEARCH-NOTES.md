@@ -1747,3 +1747,72 @@ Based on Backrooms lore research — key quality is "liminal": spaces people pas
 ### Seed Offset
 
 - Alternate exits: +100000 (next available, well above existing +90000 for lore)
+
+## Lore Journal Research
+
+### Design Decision: Full-Screen Overlay from ShopScene
+
+The game already collects lore notes (20 entries, IDs 0-19) and persists them across runs. There's no way to review collected lore between runs. A Lore Journal overlay in ShopScene provides that missing meta-progression feedback.
+
+### UI Approach: Paginated Full-Screen Overlay
+
+Considered three approaches:
+1. **Masked scroll container** — Phaser 3 mask + scroll offset. Works but has container-mask edge cases per official docs.
+2. **Two-panel master-detail** — standard codex layout (list left, content right). Good for larger content sets.
+3. **Paginated text list** — simplest, matches existing ShopScene button patterns (`< >` arrows for location cycling).
+
+**Decision: Paginated full-screen overlay with prev/next buttons.** 20 entries at ~5 entries per page = 4 pages. Each entry shows its full text (collected) or "???" (uncollected). Matches existing codebase style, no new Phaser concepts, no mask complexity.
+
+### Layout (1024x768 canvas)
+
+```
++--------------------------------------------------+ y=0
+|                                                    |
+|           COLLECTED NOTES  [X/20]                  |  y=60
+|                                                    |
+|  ─────────────────────────────────────────────     |  y=100
+|                                                    |
+|  Note #1:                                          |  y=130
+|  "If the buzzing stops, run. It means..."          |
+|                                                    |
+|  ─────────────────────────────────────────────     |
+|  Note #2:                                          |
+|  "I've been walking for three days..."             |
+|                                                    |
+|  ... (5 entries per page)                          |
+|                                                    |
+|  ─────────────────────────────────────────────     |
+|                                                    |
+|           < Page 1/4 >                             |  y=680
+|                                                    |
+|              [ CLOSE ]                             |  y=730
+|                                                    |
++--------------------------------------------------+ y=768
+```
+
+### Collected vs Uncollected Visual Pattern
+
+- **Collected**: Full text in light gray (#cccccc), note number in white
+- **Uncollected**: "???" in dim gray (#555555), note number dimmed
+- Counter in title: "12/20" with collected count in green if all found
+
+### Architecture
+
+No new pure module needed — the journal UI logic belongs in ShopScene since it's purely display. ShopScene already imports `LORE_ENTRIES` indirectly via persistence. Direct import of `LORE_ENTRIES` from `lore.js`.
+
+**New functions in ShopScene:**
+- `createJournalButton()` — adds "[ LORE JOURNAL ]" button near shop title area
+- `showJournal()` — creates the overlay (background + entries + navigation)
+- `renderJournalPage()` — renders current page of entries
+- `hideJournal()` — destroys overlay objects, returns to shop view
+
+### ShopScene Integration Points
+
+- Place journal button at top-right of shop screen (x~850, y~40) — doesn't interfere with vertical layout
+- Journal overlay uses depth 2000 to sit above all shop elements
+- ESC key closes journal (keyboard input handler)
+- All shop elements remain alive underneath (just hidden by overlay background)
+
+### Existing Vertical Layout Issue
+
+The ShopScene enter button is already at y~770 (beyond 768 canvas). The journal button should NOT add to the vertical stack — placed horizontally next to the title or gold balance instead.

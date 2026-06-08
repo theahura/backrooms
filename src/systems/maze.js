@@ -23,6 +23,7 @@ export function generateMazeWalls(roomX, roomY, roomWidth, roomHeight, wallThick
   const innerY = roomY + wallThickness;
   const innerW = roomWidth - 2 * wallThickness;
   const innerH = roomHeight - 2 * wallThickness;
+  const doorZones = (doors || []).map(d => getDoorZone(roomX, roomY, roomWidth, roomHeight, wallThickness, d));
 
   if (type === 'columns') {
     const columns = generateColumns(roomX, roomY, roomWidth, roomHeight, wallThickness, seed);
@@ -42,8 +43,6 @@ export function generateMazeWalls(roomX, roomY, roomWidth, roomHeight, wallThick
     }
     return segments;
   }
-
-  const doorZones = (doors || []).map(d => getDoorZone(roomX, roomY, roomWidth, roomHeight, wallThickness, d));
 
   const segments = [];
   subdivide(
