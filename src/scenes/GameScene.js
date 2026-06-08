@@ -42,6 +42,7 @@ export class GameScene extends Phaser.Scene {
     };
     this.maxItems = getUpgradeValue('backpack', levels.backpack);
     const hasStartingPistol = (levels.startingPistol || 0) > 0;
+    this.hasMinimap = (levels.minimap || 0) > 0;
     this.weaponState = createWeaponState({ startingPistol: hasStartingPistol });
     this.updateWeaponStats();
 
@@ -712,9 +713,11 @@ export class GameScene extends Phaser.Scene {
     this.hudGraphics.setScrollFactor(0);
     this.hudGraphics.setDepth(1000);
 
-    this.minimapGraphics = this.add.graphics();
-    this.minimapGraphics.setScrollFactor(0);
-    this.minimapGraphics.setDepth(1000);
+    if (this.hasMinimap) {
+      this.minimapGraphics = this.add.graphics();
+      this.minimapGraphics.setScrollFactor(0);
+      this.minimapGraphics.setDepth(1000);
+    }
 
     this.batteryCountText = this.add.text(20, 66, '', {
       fontSize: '14px',
@@ -748,13 +751,15 @@ export class GameScene extends Phaser.Scene {
     this.weaponText.setScrollFactor(0);
     this.weaponText.setDepth(1000);
 
-    this.floorText = this.add.text(this.cameras.main.width - 180, 145, 'B1', {
-      fontSize: '12px',
-      color: '#aaaaaa',
-      fontFamily: 'monospace',
-    });
-    this.floorText.setScrollFactor(0);
-    this.floorText.setDepth(1000);
+    if (this.hasMinimap) {
+      this.floorText = this.add.text(this.cameras.main.width - 180, 145, 'B1', {
+        fontSize: '12px',
+        color: '#aaaaaa',
+        fontFamily: 'monospace',
+      });
+      this.floorText.setScrollFactor(0);
+      this.floorText.setDepth(1000);
+    }
   }
 
   createExitZone() {
@@ -1188,6 +1193,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   drawMinimap() {
+    if (!this.hasMinimap) return;
     const gfx = this.minimapGraphics;
     gfx.clear();
 

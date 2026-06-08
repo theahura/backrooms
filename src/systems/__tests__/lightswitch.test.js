@@ -181,6 +181,24 @@ describe('getLitRoomIds', () => {
   });
 });
 
+describe('switch frequency', () => {
+  it('places switches in approximately 15% of non-starting rooms', () => {
+    const rooms = [];
+    for (let i = 0; i < 101; i++) {
+      rooms.push(makeRoom(i, i * 1200, 0));
+    }
+    let totalSwitches = 0;
+    for (let seed = 1; seed <= 10; seed++) {
+      const states = createSwitchStates(rooms, seed, WALL_THICKNESS);
+      totalSwitches += states.length;
+    }
+    const totalEligibleRooms = 100 * 10;
+    const rate = totalSwitches / totalEligibleRooms;
+    expect(rate).toBeGreaterThan(0.05);
+    expect(rate).toBeLessThan(0.25);
+  });
+});
+
 describe('isPointInRoom', () => {
   const room = makeRoom(1, 100, 200);
 

@@ -80,6 +80,15 @@ export const UPGRADES = [
     base: 0,
     perLevel: 1,
   },
+  {
+    id: 'minimap',
+    name: 'Minimap',
+    description: 'Reveals explored rooms on a map',
+    maxLevel: 1,
+    costs: [1500],
+    base: 0,
+    perLevel: 1,
+  },
 ];
 
 export function createShopState() {

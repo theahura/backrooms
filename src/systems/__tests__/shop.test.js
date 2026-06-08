@@ -227,3 +227,34 @@ describe('starting pistol upgrade', () => {
   });
 });
 
+describe('minimap upgrade', () => {
+  it('is included in default shop state at level 0', () => {
+    const state = createShopState();
+    expect(state.upgrades.minimap).toBe(0);
+  });
+
+  it('cannot be purchased with insufficient gold', () => {
+    const state = addGold(createShopState(), 1499);
+    expect(canPurchase(state, 'minimap')).toBe(false);
+  });
+
+  it('can be purchased with exactly 1500 gold', () => {
+    let state = addGold(createShopState(), 1500);
+    expect(canPurchase(state, 'minimap')).toBe(true);
+    state = purchaseUpgrade(state, 'minimap');
+    expect(state.upgrades.minimap).toBe(1);
+    expect(state.gold).toBe(0);
+  });
+
+  it('cannot be purchased twice (single tier)', () => {
+    let state = addGold(createShopState(), 9999);
+    state = purchaseUpgrade(state, 'minimap');
+    expect(canPurchase(state, 'minimap')).toBe(false);
+  });
+
+  it('returns 0 at level 0 and 1 at level 1 via getUpgradeValue', () => {
+    expect(getUpgradeValue('minimap', 0)).toBe(0);
+    expect(getUpgradeValue('minimap', 1)).toBe(1);
+  });
+});
+

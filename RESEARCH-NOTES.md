@@ -1406,3 +1406,47 @@ The spec says "player shouldn't start with a gun" and "guns should have ammo." R
 - `inventory.js`: Handle ammo pickup (add to current weapon's ammo)
 - `shop.js`: Add `startingPistol` upgrade
 - `GameScene.js`: Guard `fireBullet()` with ammo check, decrement ammo on fire, display ammo in HUD, handle weaponless state (disable fire, update HUD)
+
+## Minimap as Shop Upgrade Research
+
+### Design Decision: Permanent Unlock (Single Tier, Expensive)
+
+The spec says "the map should not be available immediately (it should be very expensive)." Research across Enter the Gungeon (per-floor consumable), Binding of Isaac (run-length passive items), and Dead Cells (permanent rune) shows three models. Since this game has a persistent shop between runs, a **permanent unlock** (buy once, have minimap every run after) is the cleanest fit.
+
+### UX Pattern
+- No existing roguelike fully hides the minimap frame. Most show fog-of-war only.
+- For this game: when minimap is not purchased, the top-right area is simply empty (no minimap graphics created). The exploration state still tracks visited rooms internally (useful for future features like achievements).
+- Once purchased: minimap appears as it currently does (fog-of-war reveals visited rooms).
+
+### Pricing
+- Current income: copper (10), silver (50), gold (200), gem (1000). A typical successful run yields ~200-500 gold.
+- "Very expensive" per the spec. Current most expensive: Starting Pistol at 500 gold.
+- Decision: **1500 gold** — requires 3-5 successful runs of saving. Late-game quality-of-life investment.
+- This follows the Slay the Spire principle: expensive items cost 2-3x a single run's income.
+
+### Architecture: Follow `startingPistol` Pattern
+- Add `minimap` entry to UPGRADES in shop.js: `{ id: 'minimap', name: 'Minimap', description: 'Reveals explored rooms on a map', maxLevel: 1, costs: [1500], base: 0, perLevel: 1 }`
+- In GameScene.init(): `this.hasMinimap = (levels.minimap || 0) > 0`
+- Guard minimap creation in createHUD(): only create `minimapGraphics` and `floorText` if `this.hasMinimap`
+- Guard drawMinimap(): early-return if `!this.hasMinimap`
+- Keep updateExploration() running unconditionally (cheap, useful for future)
+
+### Integration Points
+- `shop.js` line 83: Add minimap to UPGRADES array
+- `GameScene.js` init() ~line 44: Read minimap upgrade level
+- `GameScene.js` createHUD() ~line 715-757: Conditionally create minimap graphics + floor text
+- `GameScene.js` drawMinimap() line 1190: Early-return guard
+- `ShopScene.js`: Auto-picks up new upgrade from UPGRADES array (no changes needed)
+
+## Reduced Light Switch Frequency Research
+
+### Rationale
+- Spec says "most rooms should NOT have light switches"
+- Current: SWITCH_CHANCE = 0.4 (40% of rooms have switches)
+- With 6 non-starting rooms, 40% means ~2.4 rooms lit per run — too many for horror atmosphere
+- Target: 15% chance → ~0.9 rooms per run (often zero, occasionally one)
+
+### Implementation
+- Single constant change in lightswitch.js line 4: `SWITCH_CHANCE = 0.4` → `SWITCH_CHANCE = 0.15`
+- No tests directly assert the distribution, so no test breakage expected
+- Add a statistical distribution test to validate the new rate

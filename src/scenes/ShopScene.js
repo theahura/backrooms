@@ -18,6 +18,8 @@ export class ShopScene extends Phaser.Scene {
   init(data) {
     const treasureEarned = data?.treasureEarned ?? 0;
     let shopState = this.registry.get('shopState') || createShopState();
+    const defaults = createShopState().upgrades;
+    shopState = { ...shopState, upgrades: { ...defaults, ...shopState.upgrades } };
     shopState = addGold(shopState, treasureEarned);
     this.registry.set('shopState', shopState);
     saveGame(shopState, this.registry.get('runCount') ?? 0);

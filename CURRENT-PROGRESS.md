@@ -1,6 +1,10 @@
 # Current Progress
 
-## Status: Weaponless Start + Ammo System
+## Status: Minimap Shop Upgrade + Reduced Light Switches
+
+Minimap is now a shop upgrade (not available by default). Players must purchase the "Minimap" upgrade for 1500 gold before explored rooms appear on the map. Key changes: (1) New `minimap` entry in UPGRADES array — single tier, 1500 gold, follows `startingPistol` binary-unlock pattern. (2) `GameScene.init()` reads `levels.minimap` to set `this.hasMinimap` flag. (3) Minimap Graphics and floor text only created in `createHUD()` when `this.hasMinimap` is true. (4) `drawMinimap()` early-returns when minimap not purchased. (5) Exploration state still tracked unconditionally (for future features). (6) Light switch frequency reduced from 40% to 15% — most rooms no longer have switches, creating darker/scarier runs.
+
+## Previous: Weaponless Start + Ammo System
 
 Player no longer starts with a gun — must find weapons in the backrooms. All weapons now have per-weapon ammo that depletes on firing. Key changes: (1) `createWeaponState()` starts with empty slots by default; `pickupWeapon()` fills the first empty slot. (2) Per-weapon ammo tracking via `ammo` array parallel to `slots` — pistol (max 50, start 15), shotgun (max 20, start 6), rifle (max 15, start 4). Shotgun consumes 1 ammo per trigger pull regardless of pellets. (3) New `ammo` item type spawns in rooms (weight 12, ~11% chance) and restores current weapon's ammo (pistol +10, shotgun +4, rifle +3). (4) "Starting Pistol" shop upgrade (single tier, 500 gold) gives the player a pistol at run start. (5) `generateLevelWeapons()` guarantees 1 weapon per floor (all weapon types including pistol can appear as floor drops). (6) HUD shows "UNARMED" when no weapon equipped, or "WEAPON [ammo/max] [Q]" when armed. Firing is disabled when unarmed or out of ammo. Ammo pickups are ignored when unarmed (item stays on ground).
 
@@ -253,7 +257,17 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
   - Firing disabled when unarmed or out of ammo
   - Ammo pickups ignored when unarmed (item stays on ground)
   - 26 new unit tests covering ammo consumption, ammo refill, weaponless state, multi-floor weapon spawns
-- 371 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, weapon upgrades, enemy types, stairs, weapons, inventory capacity, maze generation, room connections, weaponless start, and ammo system
+- Minimap as shop upgrade (gated behind purchase)
+  - New "Minimap" upgrade in shop: single tier, 1500 gold (late-game investment)
+  - `this.hasMinimap` flag read from upgrade level in `GameScene.init()`
+  - Minimap graphics and floor text conditionally created/drawn
+  - Exploration tracking remains active regardless (for potential future features)
+  - 5 new unit tests covering minimap upgrade purchase, pricing, and value
+- Reduced light switch frequency
+  - SWITCH_CHANCE reduced from 0.4 (40%) to 0.15 (15%)
+  - Most rooms no longer have switches — darker, scarier atmosphere
+  - 1 new statistical test validating ~15% distribution
+- 377 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, weapon upgrades, enemy types, stairs, weapons, inventory capacity, maze generation, room connections, weaponless start, ammo system, minimap upgrade, and switch frequency
 - Documentation (docs.md files for root, src, systems, scenes)
 - Bug fix: flashlight mouse tracking drift during WASD movement
   - Root cause: Phaser 3 `pointer.worldX`/`worldY` are cached properties only refreshed on mouse events, not camera scroll
@@ -310,9 +324,12 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
 - Furniture light-blocking: `FURNITURE_TYPES` has `blocksLight` field. GameScene checks `FURNITURE_TYPES[item.type].blocksLight` before pushing furniture segments to `wallSegments`. Low furniture (tables, desks) has physics collision but doesn't cast shadows. Items with unknown types (store furniture like 'counter', 'couch') fall through gracefully (no segments pushed — irrelevant since room 0 is always lit).
 - Extra doors: `addExtraDoors(rooms, grid, seed)` in `level.js` iterates all rooms post-placement, checks each of 4 directions for grid-adjacent rooms without existing connections, and adds doors with 50% probability. Uses `alreadyConnected` check to prevent duplicates. Doors are always bidirectional.
 - Multiple stairs: `createStairConnections` now uses a `usedFrom`/`usedTo` Set to pick distinct rooms for each stair pair. Falls back to fewer stairs if insufficient rooms are available.
+- Minimap gating: `this.hasMinimap` boolean in GameScene set from `levels.minimap` upgrade. When false, `minimapGraphics` and `floorText` are never created, `drawMinimap()` early-returns. Exploration tracking still runs (cheap, no Phaser dependency in the pure module).
+- Light switch frequency: `SWITCH_CHANCE = 0.15` in lightswitch.js (previously 0.4). With 6 eligible rooms per level, expect ~0.9 switches per run (often zero).
 
 ## Next Steps
+- Allow player to move around under table while hidden (spec requirement)
+- Fix starting location entry consistency and shop positioning (spec: entry shouldn't move, shop should be centered)
 - Add different exit locations (spec: discovering alternate exits leads to different locations)
 - Add lore items in rooms
 - Add more floors (extend FLOOR_ROOM_COUNTS array) for later runs
-- Add compass/map upgrades for minimap enhancement

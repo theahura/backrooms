@@ -1,7 +1,7 @@
 import { mulberry32 } from './random.js';
 
 export const SWITCH_INTERACT_RANGE = 80;
-const SWITCH_CHANCE = 0.4;
+const SWITCH_CHANCE = 0.15;
 
 function computeSwitchPosition(room, wall, wallThickness) {
   const inset = wallThickness + 4;

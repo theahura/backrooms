@@ -54,7 +54,7 @@ index.html
        -> src/systems/persistence.js  (loadGame on boot, saveGame on lifecycle events)
 
   game.registry (cross-scene in-memory state, backed by localStorage):
-    shopState  -> { gold, upgrades: { battery, flashlight, health, speed, weaponDamage, fireRate, bulletRange, backpack } }
+    shopState  -> { gold, upgrades: { battery, flashlight, health, speed, weaponDamage, fireRate, bulletRange, backpack, startingPistol, minimap } }
     runCount   -> incrementing integer used as level seed
 
   localStorage (cross-session persistence via persistence.js):
