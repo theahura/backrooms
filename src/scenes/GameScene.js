@@ -13,6 +13,7 @@ import { WEAPON_TYPES, createWeaponState, switchWeapon, pickupWeapon, getActiveW
 import { getEnemyHP, getEnemyCount, getEnemyChaseSpeed, getEnemyDamage } from '../systems/scaling.js';
 import { createBatteryState, updateBattery, getBatteryFraction, getFlashlightConeAngle, shouldFlicker, rechargeBattery, BATTERY_RECHARGE_AMOUNT } from '../systems/battery.js';
 import { generateRoomItems, ITEM_TYPES } from '../systems/items.js';
+import { computeRoomDistances } from '../systems/distance.js';
 import { createInventoryState, pickupItem, useBattery, canPickupItem } from '../systems/inventory.js';
 import { getUpgradeValue, createShopState } from '../systems/shop.js';
 import { createDoorStates, toggleDoor, getDoorCenter, findNearestDoor, DOOR_INTERACT_RANGE } from '../systems/doors.js';
@@ -590,11 +591,14 @@ export class GameScene extends Phaser.Scene {
   createItems() {
     this.itemGroup = this.physics.add.staticGroup();
 
+    const roomDistances = computeRoomDistances(this.level.rooms, this.level.stairs);
+
     for (const room of this.level.rooms) {
       const furniture = this.roomFurniture.get(room.id) || [];
       const items = generateRoomItems(
         room.x, room.y, room.width, room.height,
-        WALL_THICKNESS, room.seed, furniture, room.id
+        WALL_THICKNESS, room.seed, furniture, room.id,
+        roomDistances.get(room.id) ?? 0
       );
 
       for (const item of items) {
