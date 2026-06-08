@@ -1,3 +1,5 @@
+<system-reminder> I will continually update this document as time goes on based on playtesting feedback. Simply commit changes to this doc like anything else. </system-reminder>
+
 Backrooms is a survival horror top down 2d twin stick shooter, based on the 'backrooms' creepypasta concept.
 
 The game is built entirely with web technologies -- html, js, css. Node libraries are fine, so are game engines if needed.
@@ -41,7 +43,7 @@ Other details (from playtesting):
 - enemies should be able to move between rooms
 
 Next things to build:
-- more variety in the room design -- some rooms should feel more maze like, with walls and columns and different shapes
+- we want the player to get more lost: increase the cost of most of the items, make the rewards / treasures far more rare, and make the initial flashlight battery longer (but the fov thinner)
 
 Known bugs:
 - NA
