@@ -1450,3 +1450,46 @@ The spec says "the map should not be available immediately (it should be very ex
 - Single constant change in lightswitch.js line 4: `SWITCH_CHANCE = 0.4` → `SWITCH_CHANCE = 0.15`
 - No tests directly assert the distribution, so no test breakage expected
 - Add a statistical distribution test to validate the new rate
+
+## Movement While Hidden Research
+
+### Design Decision: Constrained Movement Under Furniture
+
+The spec says "the player should be able to move around under a table while hidden." Current behavior: any WASD press exits hiding, velocity is zeroed while hiding. Target: player can crawl within furniture bounds while remaining hidden/invisible to enemies.
+
+### Phaser 3 Approach: `body.setBoundsRectangle()`
+
+Available since Phaser 3.20. Key API:
+- `body.setBoundsRectangle(new Phaser.Geom.Rectangle(x, y, w, h))` — sets per-body custom collision boundary
+- `body.setCollideWorldBounds(true)` — enables the boundary collision check
+- Physics engine handles clamping internally — body stays entirely within the rectangle
+- To release: `body.setCollideWorldBounds(false)`
+
+Important: the engine keeps the ENTIRE body inside the rectangle (not just center point). With a 20x20 body in an 80x50 furniture rect, center can move in a 60x30 area.
+
+Player does NOT currently use `setCollideWorldBounds` (only enemies do). Player is constrained only by wall colliders. This means toggling `setCollideWorldBounds` for hiding is safe.
+
+### Design Decisions
+
+1. **Speed**: Half speed while hidden (`HIDING_SPEED_MULTIPLIER = 0.5`). Thematically = crawling under furniture.
+2. **Enter hiding**: Snap player to furniture center via `body.reset()`. Prevents partial-outside issues.
+3. **Exit hiding**: E key only (not WASD). Player movement no longer exits hiding.
+4. **Bounds**: Exact furniture rectangle. `setBoundsRectangle` keeps body inside automatically.
+5. **Shooting**: Still disabled while hiding (existing guard remains).
+6. **Damage immunity**: Still immune while hiding (existing guard remains).
+7. **Enemy AI**: Still can't see player while hiding (existing `playerHidden` flag remains).
+
+### Architecture
+
+- `hiding.js`: Add `HIDING_SPEED_MULTIPLIER = 0.5` and `getHidingBounds(furniture)` → `{x, y, width, height}`
+- `GameScene.js`: On enter hiding → snap to center + `setBoundsRectangle` + `setCollideWorldBounds(true)`
+- `GameScene.js`: On exit hiding → `setCollideWorldBounds(false)`
+- `GameScene.js`: Update loop → allow `calculateVelocity(keyState, speed * HIDING_SPEED_MULTIPLIER)` while hiding
+- Remove the "exit on WASD" behavior (lines 1399-1401)
+
+### Gotchas
+- `body.reset(x, y)` zeros velocity — use only on entering hiding (intentional: start still, then move)
+- Must call `setBoundsRectangle` AFTER `body.reset` (reset may clear bounds)
+- Wall colliders still active while hiding — but player is inside furniture bounds which are inside room bounds, so no conflict
+- Furniture physics zones: player collides with `furnitureGroup` via `this.physics.add.collider(this.player, this.furnitureGroup)` (line 520). Currently not stored in a variable. Need to store as `this.playerFurnitureCollider` and toggle `.active = false` while hiding (otherwise physics pushes player out of the furniture body). Re-enable on exit hiding.
+- Player body is 20x20 (set at line 517 via `body.setSize(20, 20, true)`)

@@ -1,6 +1,10 @@
 # Current Progress
 
-## Status: Minimap Shop Upgrade + Reduced Light Switches
+## Status: Movement While Hidden
+
+Player can now move at half speed while hidden under furniture (tables/desks), constrained to the furniture bounds. Key changes: (1) `HIDING_SPEED_MULTIPLIER = 0.5` constant in `hiding.js`. (2) `onEnterHiding(furniture)` method in GameScene snaps player to furniture center, sets `body.setBoundsRectangle()` to furniture area, enables `setCollideWorldBounds(true)`, disables player-furniture collider. (3) `onExitHiding()` restores collider and removes bounds constraint. (4) WASD no longer exits hiding -- E key is the only exit. (5) Player-furniture collider stored as `this.playerFurnitureCollider` for toggling.
+
+## Previous: Minimap Shop Upgrade + Reduced Light Switches
 
 Minimap is now a shop upgrade (not available by default). Players must purchase the "Minimap" upgrade for 1500 gold before explored rooms appear on the map. Key changes: (1) New `minimap` entry in UPGRADES array — single tier, 1500 gold, follows `startingPistol` binary-unlock pattern. (2) `GameScene.init()` reads `levels.minimap` to set `this.hasMinimap` flag. (3) Minimap Graphics and floor text only created in `createHUD()` when `this.hasMinimap` is true. (4) `drawMinimap()` early-returns when minimap not purchased. (5) Exploration state still tracked unconditionally (for future features). (6) Light switch frequency reduced from 40% to 15% — most rooms no longer have switches, creating darker/scarier runs.
 
@@ -118,10 +122,12 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
   - E-key interaction resolves nearest interactable (door vs switch) by Euclidean distance
 - Hiding mechanics (interact with canHide furniture to become invisible to enemies)
   - Press E within 80px of a table or desk to hide
-  - While hidden: movement disabled, shooting disabled, contact damage immune, semi-transparent (alpha 0.3)
+  - While hidden: player moves at half speed within furniture bounds, shooting disabled, contact damage immune, semi-transparent (alpha 0.3)
+  - Player constrained to furniture area via `body.setBoundsRectangle()` + `setCollideWorldBounds(true)`; player-furniture collider disabled during hiding
   - Enemies cannot detect hidden player (playerHidden flag forces canSee=false in updateEnemyAI)
-  - Exit hiding: press any WASD key or E
-  - Pure function module `hiding.js`: createHidingState, enterHiding, exitHiding, findNearestHideable
+  - Exit hiding: press E only (WASD moves within furniture, does not exit)
+  - Pure function module `hiding.js`: createHidingState, enterHiding, exitHiding, findNearestHideable, HIDING_SPEED_MULTIPLIER
+  - GameScene methods `onEnterHiding(furniture)` / `onExitHiding()` manage physics constraints
   - E-key interaction resolves nearest of three interactable types (door, switch, furniture) via distance-sorted candidates
 - localStorage persistence for cross-session save/load
   - Pure function module `persistence.js`: saveGame, loadGame, clearSave
@@ -328,7 +334,6 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
 - Light switch frequency: `SWITCH_CHANCE = 0.15` in lightswitch.js (previously 0.4). With 6 eligible rooms per level, expect ~0.9 switches per run (often zero).
 
 ## Next Steps
-- Allow player to move around under table while hidden (spec requirement)
 - Fix starting location entry consistency and shop positioning (spec: entry shouldn't move, shop should be centered)
 - Add different exit locations (spec: discovering alternate exits leads to different locations)
 - Add lore items in rooms

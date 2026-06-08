@@ -5,7 +5,9 @@ import {
   exitHiding,
   findNearestHideable,
   HIDE_INTERACT_RANGE,
+  HIDING_SPEED_MULTIPLIER,
 } from '../hiding.js';
+import { calculateVelocity } from '../movement.js';
 
 function makeFurnitureMap(entries) {
   const map = new Map();
@@ -144,5 +146,23 @@ describe('findNearestHideable', () => {
     expect(result.center.x).toBeLessThanOrEqual(table.x + table.width);
     expect(result.center.y).toBeGreaterThanOrEqual(table.y);
     expect(result.center.y).toBeLessThanOrEqual(table.y + table.height);
+  });
+});
+
+describe('movement while hiding', () => {
+  it('hiding speed multiplier produces slower movement than normal speed', () => {
+    const normalSpeed = 200;
+    const keys = { up: true, down: false, left: false, right: false };
+    const normalVel = calculateVelocity(keys, normalSpeed);
+    const hidingVel = calculateVelocity(keys, normalSpeed * HIDING_SPEED_MULTIPLIER);
+    expect(Math.abs(hidingVel.y)).toBeLessThan(Math.abs(normalVel.y));
+  });
+
+  it('hiding speed still allows non-zero movement', () => {
+    const normalSpeed = 200;
+    const keys = { up: false, down: true, left: true, right: false };
+    const hidingVel = calculateVelocity(keys, normalSpeed * HIDING_SPEED_MULTIPLIER);
+    expect(hidingVel.x).not.toBe(0);
+    expect(hidingVel.y).not.toBe(0);
   });
 });

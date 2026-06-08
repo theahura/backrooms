@@ -15,7 +15,7 @@ import { createInventoryState, pickupItem, useBattery, canPickupItem } from '../
 import { getUpgradeValue, createShopState } from '../systems/shop.js';
 import { createDoorStates, toggleDoor, getDoorCenter, findNearestDoor, DOOR_INTERACT_RANGE } from '../systems/doors.js';
 import { createSwitchStates, toggleSwitch, findNearestSwitch, getLitRoomIds, isPointInRoom, SWITCH_INTERACT_RANGE } from '../systems/lightswitch.js';
-import { createHidingState, enterHiding, exitHiding, findNearestHideable, HIDE_INTERACT_RANGE } from '../systems/hiding.js';
+import { createHidingState, enterHiding, exitHiding, findNearestHideable, HIDE_INTERACT_RANGE, HIDING_SPEED_MULTIPLIER } from '../systems/hiding.js';
 import { saveGame } from '../systems/persistence.js';
 import { createExplorationState, updateExploration, getMinimapData, MINIMAP_COLORS } from '../systems/exploration.js';
 import { generateStoreLayout, generateCrackPoints, getExitPosition, STORE_FLOOR_COLOR, STORE_WALL_COLOR } from '../systems/startroom.js';
@@ -351,6 +351,25 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  onEnterHiding(furniture) {
+    this.hidingState = enterHiding(this.hidingState, furniture);
+    const centerX = furniture.x + furniture.width / 2;
+    const centerY = furniture.y + furniture.height / 2;
+    this.player.body.reset(centerX, centerY);
+    this.player.body.setBoundsRectangle(
+      new Phaser.Geom.Rectangle(furniture.x, furniture.y, furniture.width, furniture.height)
+    );
+    this.player.body.setCollideWorldBounds(true);
+    this.playerFurnitureCollider.active = false;
+  }
+
+  onExitHiding() {
+    this.hidingState = exitHiding(this.hidingState);
+    this.player.body.setBoundsRectangle(null);
+    this.player.body.setCollideWorldBounds(false);
+    this.playerFurnitureCollider.active = true;
+  }
+
   drawDoors() {
     this.doorGraphics.clear();
     for (const door of this.doorStates) {
@@ -517,7 +536,7 @@ export class GameScene extends Phaser.Scene {
     this.player.body.setSize(20, 20, true);
 
     this.physics.add.collider(this.player, this.walls);
-    this.physics.add.collider(this.player, this.furnitureGroup);
+    this.playerFurnitureCollider = this.physics.add.collider(this.player, this.furnitureGroup);
     this.physics.add.collider(this.player, this.doorGroup);
   }
 
@@ -932,7 +951,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   onStairEnter(player, stairZone) {
-    if (this.isTeleporting || this.dayEnding) return;
+    if (this.isTeleporting || this.dayEnding || this.hidingState.isHiding) return;
     this.isTeleporting = true;
     player.body.stop();
     player.body.enable = false;
@@ -1394,14 +1413,10 @@ export class GameScene extends Phaser.Scene {
       left: this.keys.A.isDown,
       right: this.keys.D.isDown,
     };
-    const anyMovement = keyState.up || keyState.down || keyState.left || keyState.right;
-
-    if (this.hidingState.isHiding && anyMovement) {
-      this.hidingState = exitHiding(this.hidingState);
-    }
 
     if (this.hidingState.isHiding) {
-      this.player.setVelocity(0, 0);
+      const velocity = calculateVelocity(keyState, this.playerSpeed * HIDING_SPEED_MULTIPLIER);
+      this.player.setVelocity(velocity.x, velocity.y);
     } else {
       const velocity = calculateVelocity(keyState, this.playerSpeed);
       this.player.setVelocity(velocity.x, velocity.y);
@@ -1426,14 +1441,14 @@ export class GameScene extends Phaser.Scene {
 
     if (Phaser.Input.Keyboard.JustDown(this.keys.E)) {
       if (this.hidingState.isHiding) {
-        this.hidingState = exitHiding(this.hidingState);
+        this.onExitHiding();
       } else if (this.nearestInteractable) {
         if (this.nearestInteractable.type === 'door') {
           this.onToggleDoor(this.nearestInteractable.item.id);
         } else if (this.nearestInteractable.type === 'switch') {
           this.onToggleSwitch(this.nearestInteractable.item.id);
         } else if (this.nearestInteractable.type === 'furniture') {
-          this.hidingState = enterHiding(this.hidingState, this.nearestInteractable.item);
+          this.onEnterHiding(this.nearestInteractable.item);
         } else if (this.nearestInteractable.type === 'weapon') {
           this.onWeaponPickup(this.nearestInteractable.item);
         }

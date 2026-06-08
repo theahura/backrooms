@@ -1,4 +1,5 @@
 export const HIDE_INTERACT_RANGE = 80;
+export const HIDING_SPEED_MULTIPLIER = 0.5;
 
 export function createHidingState() {
   return { isHiding: false, furnitureRef: null };
