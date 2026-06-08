@@ -1,28 +1,31 @@
 import { mulberry32 } from './random.js';
 
 export const ITEM_TYPES = [
-  { type: 'battery', value: 0, weight: 25, color: 0xffff00, size: { w: 10, h: 14 } },
-  { type: 'ammo', value: 0, weight: 20, color: 0x88ff88, size: { w: 10, h: 10 } },
-  { type: 'copper_coin', value: 10, weight: 30, color: 0xcd7f32, size: { w: 8, h: 8 } },
-  { type: 'silver_coin', value: 50, weight: 15, color: 0xc0c0c0, size: { w: 8, h: 8 } },
-  { type: 'gold_coin', value: 200, weight: 8, color: 0xffd700, size: { w: 8, h: 8 } },
-  { type: 'gem', value: 1000, weight: 2, color: 0x00cccc, size: { w: 10, h: 10 } },
-  { type: 'medkit', value: 0, weight: 8, color: 0xff4444, size: { w: 10, h: 10 } },
+  { type: 'battery', value: 0, weight: { base: 25, perRoom: 0 }, color: 0xffff00, size: { w: 10, h: 14 } },
+  { type: 'ammo', value: 0, weight: { base: 20, perRoom: 0 }, color: 0x88ff88, size: { w: 10, h: 10 } },
+  { type: 'medkit', value: 0, weight: { base: 8, perRoom: 0 }, color: 0xff4444, size: { w: 10, h: 10 } },
+  { type: 'copper_coin', value: 10, weight: { base: 34, perRoom: -5 }, color: 0xcd7f32, size: { w: 8, h: 8 } },
+  { type: 'silver_coin', value: 50, weight: { base: 5, perRoom: 2.5 }, color: 0xc0c0c0, size: { w: 8, h: 8 } },
+  { type: 'gold_coin', value: 200, weight: { base: -7, perRoom: 2.5 }, color: 0xffd700, size: { w: 8, h: 8 } },
+  { type: 'gem', value: 1000, weight: { base: -11, perRoom: 2.4 }, color: 0x00cccc, size: { w: 10, h: 10 } },
 ];
 
-const TOTAL_WEIGHT = ITEM_TYPES.reduce((sum, t) => sum + t.weight, 0);
+function weightForDistance(itemType, distance) {
+  return Math.max(0, itemType.weight.base + itemType.weight.perRoom * distance);
+}
 
-function pickWeightedType(rand) {
-  const roll = rand() * TOTAL_WEIGHT;
+function pickWeightedType(rand, distance) {
+  const totalWeight = ITEM_TYPES.reduce((sum, t) => sum + weightForDistance(t, distance), 0);
+  const roll = rand() * totalWeight;
   let cumulative = 0;
   for (const itemType of ITEM_TYPES) {
-    cumulative += itemType.weight;
+    cumulative += weightForDistance(itemType, distance);
     if (roll < cumulative) return itemType;
   }
   return ITEM_TYPES[ITEM_TYPES.length - 1];
 }
 
-export function generateRoomItems(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, furnitureItems, roomId) {
+export function generateRoomItems(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, furnitureItems, roomId, distance = 0) {
   if (roomId === 0) return [];
 
   const rand = mulberry32(seed + 20000);
@@ -32,7 +35,9 @@ export function generateRoomItems(roomX, roomY, roomWidth, roomHeight, wallThick
   const maxX = roomX + roomWidth - wallThickness - margin;
   const maxY = roomY + roomHeight - wallThickness - margin;
 
-  const count = 1 + Math.floor(rand() * 3);
+  const r = rand();
+  const count = r < 0.55 ? 0 : r < 0.9 ? 1 : 2;
+  if (count === 0) return [];
   const placed = [];
   const itemRadius = 8;
 
@@ -54,7 +59,7 @@ export function generateRoomItems(roomX, roomY, roomWidth, roomHeight, wallThick
     }
 
     if (!overlaps) {
-      const itemType = pickWeightedType(rand);
+      const itemType = pickWeightedType(rand, distance);
       placed.push({
         x,
         y,
