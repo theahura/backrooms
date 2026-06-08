@@ -41,6 +41,8 @@ describe('saveGame and loadGame round-trip', () => {
       shopState: { gold: 450, upgrades: { battery: 2, flashlight: 1, health: 0, speed: 3 } },
       runCount: 7,
       collectedLore: [],
+      unlockedLocations: ['store'],
+      activeLocation: 'store',
     });
   });
 
@@ -157,6 +159,44 @@ describe('collectedLore persistence', () => {
     saveGame(loaded1.shopState, loaded1.runCount, [...loaded1.collectedLore, 15]);
     const loaded2 = loadGame();
     expect(loaded2.collectedLore).toEqual([3, 7, 15]);
+  });
+});
+
+describe('location persistence', () => {
+  it('round-trips unlockedLocations and activeLocation through save/load', () => {
+    const shopState = {
+      gold: 100,
+      upgrades: { battery: 0, flashlight: 0, health: 0, speed: 0 },
+    };
+    saveGame(shopState, 3, [], ['store', 'office'], 'office');
+    const loaded = loadGame();
+    expect(loaded.unlockedLocations).toEqual(['store', 'office']);
+    expect(loaded.activeLocation).toBe('office');
+  });
+
+  it('defaults location fields for v2 saves without them', () => {
+    const oldData = {
+      version: 2,
+      shopState: { gold: 200, upgrades: { battery: 1, flashlight: 0, health: 0, speed: 0 } },
+      runCount: 5,
+      collectedLore: [1, 2],
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(oldData));
+    const loaded = loadGame();
+    expect(loaded.unlockedLocations).toEqual(['store']);
+    expect(loaded.activeLocation).toBe('store');
+  });
+
+  it('defaults location fields for v1 saves', () => {
+    const oldData = {
+      version: 1,
+      shopState: { gold: 100, upgrades: { battery: 0, flashlight: 0, health: 0, speed: 0 } },
+      runCount: 2,
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(oldData));
+    const loaded = loadGame();
+    expect(loaded.unlockedLocations).toEqual(['store']);
+    expect(loaded.activeLocation).toBe('store');
   });
 });
 

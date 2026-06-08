@@ -26,13 +26,15 @@ if (saved) {
   game.registry.set('shopState', saved.shopState);
   game.registry.set('runCount', saved.runCount);
   game.registry.set('collectedLore', saved.collectedLore);
+  game.registry.set('unlockedLocations', saved.unlockedLocations);
+  game.registry.set('activeLocation', saved.activeLocation);
 }
 
 function saveCurrentState() {
   const shopState = game.registry.get('shopState');
   const runCount = game.registry.get('runCount') ?? 0;
   if (shopState) {
-    saveGame(shopState, runCount, game.registry.get('collectedLore') ?? []);
+    saveGame(shopState, runCount, game.registry.get('collectedLore') ?? [], game.registry.get('unlockedLocations') ?? ['store'], game.registry.get('activeLocation') ?? 'store');
   }
 }
 

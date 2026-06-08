@@ -1666,3 +1666,84 @@ Existing scheme: `floorSeed = seed + floor * 1000`. For floors 2 and 3:
 - Floor 2: `seed + 2000`
 - Floor 3: `seed + 3000`
 No collision with per-system offsets (+10000, +20000, etc.) since floor offsets are < 10000.
+
+## Alternate Exit Locations Research
+
+### Design Decision: Permanent Unlock via Rare Alternate Exits
+
+Based on research across Dead Cells (rune-unlocked alternate routes), Hades (hub evolution), and the Backrooms creepypasta lore:
+
+- **Dead Cells model**: Rare items found in specific zones permanently unlock alternate routes/exits. The unlock key itself is the discovery.
+- **No existing roguelike swaps the starting hub** based on exit choice — this is a novel mechanic.
+- **Alternate exits should be rare and meaningful**: ~15-20% chance of one spawning per level, only on floors 1+.
+- **Permanent unlocks**: Once found, the location is always available. Fits the meta-progression pattern of the shop system.
+- **Location selector in shop**: Player can cycle through unlocked locations before entering the backrooms.
+
+### Backrooms-Themed Alternate Locations
+
+Based on Backrooms lore research — key quality is "liminal": spaces people pass *through*, not spaces they *inhabit*. Transitional, utilitarian, slightly wrong.
+
+| Location ID | Name | Floor Color | Wall Color | Theme | Furniture |
+|---|---|---|---|---|---|
+| `store` | Furniture Store | `0x5c4a3a` | `0x7a6b5a` | Warm wood tones (existing) | Counter, shelves, couches, tables |
+| `office` | Office Building | `0x5a5548` | `0x6a6558` | Beige carpet, fluorescents | Cubicle walls, desks, water cooler, filing cabinet |
+| `garage` | Parking Garage | `0x4a4a4a` | `0x5a5a5a` | Concrete, fog, echoing | Concrete pillars, barrier rails, utility boxes |
+| `hotel` | Hotel Lobby | `0x4a2a2a` | `0x6a4a3a` | Maroon carpet, dark wood | Reception desk, potted plants, armchairs, luggage rack |
+| `laundromat` | Laundromat | `0x485058` | `0x586068` | Blue-white fluorescent | Washing machines, folding tables, plastic chairs, vending machine |
+
+### Architecture: New Pure Module `locations.js`
+
+- `src/systems/locations.js` — pure functions for location definitions and layouts
+- `LOCATIONS` array: `{ id, name, floorColor, wallColor, furniture: [...], description }`
+- `getLocation(locationId)` — returns location data by ID
+- `getLocationLayout(locationId, roomX, roomY, roomWidth, roomHeight, wallThickness)` — returns furniture for that location (same signature as `generateStoreLayout`)
+- `getLocationExitPosition(locationId, room, wallThickness)` — returns exit position for that location
+- Each location's furniture array follows the `startroom.js` pattern: relative positions (`relX`, `relY`), spawn zone avoidance, bounds checking
+
+### Alternate Exit Zone Design
+
+- **Spawn location**: One per level, on a non-zero floor, in a random non-stair room
+- **Spawn chance**: Seeded PRNG (seed offset +100000) — pick one eligible room, ~20% chance of spawning
+- **Zone visual**: Glowing portal effect (pulsing colored glow, distinct from stairs/exit)
+  - Blue-white color (0x88aaff) for otherworldly feel
+  - 60x60 zone with pulsing alpha
+- **On overlap**: Same pattern as onDayComplete — fade out, transition to ShopScene with `{ treasureEarned, usedAlternateExit: locationId }`
+- **Only spawns if there are locations still to unlock**
+- **Zone shows the location name** as a label (interaction prompt style)
+
+### Persistence Changes
+
+- Add `unlockedLocations` (array of location IDs, always includes `'store'`) to save data
+- Add `activeLocation` (location ID string) to save data
+- Bump SAVE_VERSION to 3 (backward compat: v2 saves default to `unlockedLocations: ['store']`, `activeLocation: 'store'`)
+- Save when alternate exit is used (location unlocked)
+
+### ShopScene Changes
+
+- Show current starting location name below title
+- If multiple locations unlocked, show left/right arrows to cycle (`<` and `>` buttons)
+- Active location stored in registry, read by GameScene in `init()`
+- Active location persisted in save data
+
+### GameScene Integration Points
+
+- `init()`: Read `activeLocation` from registry (default `'store'`)
+- `drawRoom()`: Use location's colors for room 0 instead of hardcoded STORE colors
+- `drawDoorways()`: Use location's floor color for room 0
+- `createRoomFurniture()`: Use `getLocationLayout(locationId, ...)` for room 0
+- `createExitZone()`: Use `getLocationExitPosition(locationId, ...)` for exit position
+- `createAlternateExits()`: New method — create alternate exit zones on deeper floors
+- `onAlternateExitComplete()`: New handler — unlock location, transition to shop
+- `onDayComplete()`: Pass `usedAlternateExit: null` (or the locationId if alternate exit used)
+
+### Edge Cases
+
+- **All locations unlocked**: No alternate exit spawns (nothing to discover)
+- **Player uses alternate exit on first run**: Next run starts from that location
+- **Player dies after finding alternate exit but before using it**: Location not unlocked (must use the exit)
+- **Multiple alternate exits per level**: Cap at 1 to keep it rare
+- **Save backward compatibility**: v2 saves load with default `['store']` for unlockedLocations
+
+### Seed Offset
+
+- Alternate exits: +100000 (next available, well above existing +90000 for lore)

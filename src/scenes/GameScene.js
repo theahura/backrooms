@@ -18,7 +18,8 @@ import { createSwitchStates, toggleSwitch, findNearestSwitch, getLitRoomIds, isP
 import { createHidingState, enterHiding, exitHiding, findNearestHideable, HIDE_INTERACT_RANGE, HIDING_SPEED_MULTIPLIER } from '../systems/hiding.js';
 import { saveGame } from '../systems/persistence.js';
 import { createExplorationState, updateExploration, getMinimapData, MINIMAP_COLORS } from '../systems/exploration.js';
-import { generateStoreLayout, generateCrackPoints, getExitPosition, STORE_FLOOR_COLOR, STORE_WALL_COLOR } from '../systems/startroom.js';
+import { generateCrackPoints } from '../systems/startroom.js';
+import { getLocation, getLocationLayout, getLocationExitPosition, generateAlternateExit } from '../systems/locations.js';
 import { generateRoomLore } from '../systems/lore.js';
 
 const WALL_THICKNESS = 16;
@@ -62,7 +63,10 @@ export class GameScene extends Phaser.Scene {
     this.scaledSpitterDamage = getEnemyDamage(SPITTER_CONTACT_DAMAGE, runCount);
     this.extraEnemyCount = getEnemyCount(runCount);
     this.collectedLore = new Set(this.registry.get('collectedLore') ?? []);
-    saveGame(shopState || createShopState(), runCount + 1, [...this.collectedLore]);
+    this.activeLocation = this.registry.get('activeLocation') ?? 'store';
+    this.activeLocationData = getLocation(this.activeLocation) || getLocation('store');
+    this.unlockedLocations = this.registry.get('unlockedLocations') ?? ['store'];
+    saveGame(shopState || createShopState(), runCount + 1, [...this.collectedLore], this.unlockedLocations, this.activeLocation);
   }
 
   updateWeaponStats() {
@@ -117,6 +121,7 @@ export class GameScene extends Phaser.Scene {
     this.createWeaponPickups();
     this.createExitZone();
     this.createStairs();
+    this.createAlternateExits();
     this.createCrackVisual();
     this.setupInput();
     this.setupCamera();
@@ -142,8 +147,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   drawRoom(gfx, room) {
-    const floorColor = room.id === 0 ? STORE_FLOOR_COLOR : 0x333333;
-    const wallColor = room.id === 0 ? STORE_WALL_COLOR : 0x555555;
+    const floorColor = room.id === 0 ? this.activeLocationData.floorColor : 0x333333;
+    const wallColor = room.id === 0 ? this.activeLocationData.wallColor : 0x555555;
 
     gfx.fillStyle(floorColor, 1);
     gfx.fillRect(room.x, room.y, room.width, room.height);
@@ -157,7 +162,7 @@ export class GameScene extends Phaser.Scene {
 
   drawDoorways(gfx) {
     for (const room of this.level.rooms) {
-      const floorColor = room.id === 0 ? STORE_FLOOR_COLOR : 0x333333;
+      const floorColor = room.id === 0 ? this.activeLocationData.floorColor : 0x333333;
       gfx.fillStyle(floorColor, 1);
       for (const door of room.doors) {
         if (door.wall === 'north') {
@@ -219,7 +224,7 @@ export class GameScene extends Phaser.Scene {
 
   createRoomFurniture(gfx, room) {
     const furniture = room.id === 0
-      ? generateStoreLayout(room.x, room.y, room.width, room.height, WALL_THICKNESS)
+      ? getLocationLayout(this.activeLocation, room.x, room.y, room.width, room.height, WALL_THICKNESS)
       : generateRoomFurniture(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed);
     this.roomFurniture.set(room.id, furniture);
 
@@ -885,7 +890,7 @@ export class GameScene extends Phaser.Scene {
 
   createExitZone() {
     const room = this.level.rooms[0];
-    const { x: exitX, y: exitY } = getExitPosition(room, WALL_THICKNESS);
+    const { x: exitX, y: exitY } = getLocationExitPosition(this.activeLocation, room, WALL_THICKNESS);
     const exitSize = 64;
     this.exitPosition = { x: exitX, y: exitY };
 
@@ -898,7 +903,7 @@ export class GameScene extends Phaser.Scene {
 
     this.exitZone = this.add.zone(exitX, exitY, exitSize, exitSize);
     this.physics.add.existing(this.exitZone, true);
-    this.physics.add.overlap(this.player, this.exitZone, this.onDayComplete, null, this);
+    this.physics.add.overlap(this.player, this.exitZone, () => this.onDayComplete(), null, this);
   }
 
   createCrackVisual() {
@@ -1076,15 +1081,80 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  onDayComplete() {
+  onDayComplete(newLocation) {
     if (this.dayEnding) return;
     this.dayEnding = true;
     this.player.body.stop();
     this.player.body.enable = false;
     this.cameras.main.fadeOut(1000, 0, 0, 0);
     this.cameras.main.once('camerafadeoutcomplete', () => {
-      this.scene.start('ShopScene', { treasureEarned: this.inventoryState.treasureValue });
+      this.scene.start('ShopScene', {
+        treasureEarned: this.inventoryState.treasureValue,
+        newLocation: newLocation || null,
+      });
     });
+  }
+
+  createAlternateExits() {
+    this.alternateExitZones = [];
+    const exitData = generateAlternateExit(
+      this.level.rooms,
+      this.level.stairs,
+      this.levelSeed,
+      this.unlockedLocations
+    );
+    if (!exitData) return;
+
+    this.alternateExitGlowGraphics = this.add.graphics();
+    this.alternateExitGlowGraphics.setDepth(1);
+
+    const exitGfx = this.add.graphics();
+    exitGfx.setDepth(2);
+    const size = 60;
+    const { x, y } = exitData.position;
+
+    exitGfx.lineStyle(2, 0x88aaff, 0.8);
+    exitGfx.strokeRect(x - size / 2, y - size / 2, size, size);
+
+    const zone = this.add.zone(x, y, size, size);
+    this.physics.add.existing(zone, true);
+    zone.setData('locationId', exitData.locationId);
+    zone.setData('posX', x);
+    zone.setData('posY', y);
+    zone.setData('size', size);
+    this.physics.add.overlap(this.player, zone, this.onAlternateExitComplete, null, this);
+    this.alternateExitZones.push(zone);
+
+    const locationData = getLocation(exitData.locationId);
+    const label = this.add.text(x, y - size / 2 - 12, locationData ? locationData.name : 'Exit', {
+      fontSize: '10px',
+      color: '#88aaff',
+      fontFamily: 'monospace',
+    }).setOrigin(0.5).setDepth(5);
+  }
+
+  updateAlternateExitGlow(time) {
+    if (!this.alternateExitGlowGraphics || this.alternateExitZones.length === 0) return;
+    this.alternateExitGlowGraphics.clear();
+    const alpha = 0.1 + 0.15 * Math.sin(time * 0.004);
+    this.alternateExitGlowGraphics.fillStyle(0x88aaff, alpha);
+    for (const zone of this.alternateExitZones) {
+      const x = zone.getData('posX');
+      const y = zone.getData('posY');
+      const size = zone.getData('size');
+      this.alternateExitGlowGraphics.fillRect(x - size / 2 - 4, y - size / 2 - 4, size + 8, size + 8);
+    }
+  }
+
+  onAlternateExitComplete(player, zone) {
+    if (this.dayEnding || this.isTeleporting || this.hidingState.isHiding) return;
+    const locationId = zone.getData('locationId');
+    if (!this.unlockedLocations.includes(locationId)) {
+      this.unlockedLocations = [...this.unlockedLocations, locationId];
+      this.registry.set('unlockedLocations', this.unlockedLocations);
+      this.registry.set('activeLocation', locationId);
+    }
+    this.onDayComplete(locationId);
   }
 
   fireBullet() {
@@ -1565,6 +1635,7 @@ export class GameScene extends Phaser.Scene {
     this.updateDarkness(time);
     this.updateCrackGlow(time);
     this.updateStairGlow(time);
+    this.updateAlternateExitGlow(time);
     this.drawDoors();
     this.drawSwitches();
     this.explorationState = updateExploration(this.explorationState, this.player.x, this.player.y, this.level.rooms);

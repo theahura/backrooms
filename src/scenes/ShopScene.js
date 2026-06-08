@@ -9,6 +9,7 @@ import {
   UPGRADES,
 } from '../systems/shop.js';
 import { saveGame } from '../systems/persistence.js';
+import { getLocation, LOCATIONS } from '../systems/locations.js';
 
 export class ShopScene extends Phaser.Scene {
   constructor() {
@@ -17,14 +18,24 @@ export class ShopScene extends Phaser.Scene {
 
   init(data) {
     const treasureEarned = data?.treasureEarned ?? 0;
+    const newLocation = data?.newLocation ?? null;
     let shopState = this.registry.get('shopState') || createShopState();
     const defaults = createShopState().upgrades;
     shopState = { ...shopState, upgrades: { ...defaults, ...shopState.upgrades } };
     shopState = addGold(shopState, treasureEarned);
     this.registry.set('shopState', shopState);
-    saveGame(shopState, this.registry.get('runCount') ?? 0, this.registry.get('collectedLore') ?? []);
+
+    this.unlockedLocations = this.registry.get('unlockedLocations') ?? ['store'];
+    if (newLocation && !this.unlockedLocations.includes(newLocation)) {
+      this.unlockedLocations = [...this.unlockedLocations, newLocation];
+      this.registry.set('unlockedLocations', this.unlockedLocations);
+    }
+    this.activeLocation = this.registry.get('activeLocation') ?? 'store';
+
+    saveGame(shopState, this.registry.get('runCount') ?? 0, this.registry.get('collectedLore') ?? [], this.unlockedLocations, this.activeLocation);
     this.shopState = shopState;
     this.treasureEarned = treasureEarned;
+    this.newLocation = newLocation;
   }
 
   create() {
@@ -60,7 +71,49 @@ export class ShopScene extends Phaser.Scene {
       this.upgradeRows.push(row);
     }
 
-    const enterBtn = this.add.text(512, startY + UPGRADES.length * rowHeight + 40, '[ ENTER BACKROOMS ]', {
+    const locationY = startY + UPGRADES.length * rowHeight + 20;
+    if (this.unlockedLocations.length > 1) {
+      this.locationText = this.add.text(512, locationY, '', {
+        fontSize: '16px',
+        color: '#88aaff',
+        fontFamily: 'monospace',
+      }).setOrigin(0.5);
+
+      const prevBtn = this.add.text(340, locationY, '<', {
+        fontSize: '20px',
+        color: '#88aaff',
+        fontFamily: 'monospace',
+      }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+      prevBtn.on('pointerdown', () => this.cycleLocation(-1));
+
+      const nextBtn = this.add.text(684, locationY, '>', {
+        fontSize: '20px',
+        color: '#88aaff',
+        fontFamily: 'monospace',
+      }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+      nextBtn.on('pointerdown', () => this.cycleLocation(1));
+
+      this.updateLocationDisplay();
+    } else {
+      const locData = getLocation(this.activeLocation);
+      this.add.text(512, locationY, `Starting from: ${locData ? locData.name : this.activeLocation}`, {
+        fontSize: '14px',
+        color: '#666666',
+        fontFamily: 'monospace',
+      }).setOrigin(0.5);
+    }
+
+    if (this.newLocation) {
+      const locData = getLocation(this.newLocation);
+      this.add.text(512, locationY - 25, `New location discovered: ${locData ? locData.name : this.newLocation}!`, {
+        fontSize: '14px',
+        color: '#ffdd44',
+        fontFamily: 'monospace',
+      }).setOrigin(0.5);
+    }
+
+    const enterBtnY = locationY + 40;
+    const enterBtn = this.add.text(512, enterBtnY, '[ ENTER BACKROOMS ]', {
       fontSize: '24px',
       color: '#44cc44',
       fontFamily: 'monospace',
@@ -70,7 +123,8 @@ export class ShopScene extends Phaser.Scene {
     enterBtn.on('pointerout', () => enterBtn.setColor('#44cc44'));
     enterBtn.on('pointerdown', () => {
       this.registry.set('shopState', this.shopState);
-      saveGame(this.shopState, this.registry.get('runCount') ?? 0, this.registry.get('collectedLore') ?? []);
+      this.registry.set('activeLocation', this.activeLocation);
+      saveGame(this.shopState, this.registry.get('runCount') ?? 0, this.registry.get('collectedLore') ?? [], this.unlockedLocations, this.activeLocation);
       this.scene.start('GameScene');
     });
 
@@ -118,12 +172,26 @@ export class ShopScene extends Phaser.Scene {
       if (canPurchase(this.shopState, upgrade.id)) {
         this.shopState = purchaseUpgrade(this.shopState, upgrade.id);
         this.registry.set('shopState', this.shopState);
-        saveGame(this.shopState, this.registry.get('runCount') ?? 0, this.registry.get('collectedLore') ?? []);
+        saveGame(this.shopState, this.registry.get('runCount') ?? 0, this.registry.get('collectedLore') ?? [], this.unlockedLocations, this.activeLocation);
         this.refreshDisplay();
       }
     });
 
     return { upgrade, nameText, descText, levelText, costText, buyBtn };
+  }
+
+  cycleLocation(direction) {
+    const idx = this.unlockedLocations.indexOf(this.activeLocation);
+    const newIdx = (idx + direction + this.unlockedLocations.length) % this.unlockedLocations.length;
+    this.activeLocation = this.unlockedLocations[newIdx];
+    this.registry.set('activeLocation', this.activeLocation);
+    this.updateLocationDisplay();
+  }
+
+  updateLocationDisplay() {
+    if (!this.locationText) return;
+    const locData = getLocation(this.activeLocation);
+    this.locationText.setText(`Start: ${locData ? locData.name : this.activeLocation}`);
   }
 
   refreshButton(upgrade, buyBtn) {
