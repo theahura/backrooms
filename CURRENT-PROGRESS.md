@@ -1,6 +1,10 @@
 # Current Progress
 
-## Status: Alternate Exit Locations
+## Status: Lore Journal Overlay
+
+Players can now review collected lore notes between runs via a paginated journal overlay in ShopScene. Key changes: (1) Two new pure functions in `lore.js`: `getJournalEntries(collectedLoreIds)` maps all 20 lore entries to `{id, text, collected}` objects with collected/total counts, and `getJournalPage(entries, page, perPage)` handles pagination with page clamping. (2) ShopScene gains a "[ NOTES X/20 ]" button at top-right (900, 90) that opens the journal. (3) `showJournal()` creates a full-screen overlay (depth 2000-2001) with 5 entries per page — collected notes show quoted text in white/gray, uncollected show "???" in dim gray. Prev/Next buttons navigate pages, Close button and ESC key dismiss. (4) `hideJournal()` destroys all overlay objects and removes ESC handler. (5) Fixed pre-existing TDZ bug in `maze.js` where `const doorZones` was declared after the `columns` branch that used it, causing a crash on column-type rooms. 9 new tests: 5 for `getJournalEntries` (uncollected, some collected, all collected, ID ordering, entry count) and 4 for `getJournalPage` (first page, last page partial, total page count, page clamping).
+
+## Previous: Alternate Exit Locations
 
 Players can now discover alternate exit portals on deeper floors that permanently unlock new starting locations. Key changes: (1) New pure function module `locations.js` defines 5 starting locations (furniture store, office building, parking garage, hotel lobby, laundromat), each with unique floor/wall colors and hand-crafted furniture layouts. (2) `generateAlternateExit(rooms, stairs, seed, unlockedIds)` spawns a rare (~20% chance) glowing blue-white exit zone on floors 1+, avoiding stair rooms and only spawning when unlockable locations remain. Uses seed offset +100000. (3) Room 0 rendering (colors, furniture, exit position) is now fully data-driven via `getLocation()`, `getLocationLayout()`, and `getLocationExitPosition()` instead of hardcoded STORE constants. (4) `GameScene.onAlternateExitComplete()` unlocks the new location, sets it as active, and transitions to ShopScene with `newLocation` data. (5) ShopScene gains a location selector — when multiple locations are unlocked, `<` and `>` arrows let the player cycle through them. A "New location discovered!" message appears when arriving via an alternate exit. (6) Persistence bumped from v2 to v3 with `unlockedLocations` (array, default `['store']`) and `activeLocation` (string, default `'store'`) fields — backward compatible with v1/v2 saves. (7) `main.js` loads location data into registry on boot; all `saveGame()` calls across GameScene, ShopScene, and main.js pass location data. 21 new tests: 18 for locations (data, layouts, exit spawning), 3 for persistence round-trip with location fields.
 
@@ -298,6 +302,14 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
   - Already-collected notes don't respawn
   - Separate `loreGroup` physics static group and 'lore_note' texture (off-white paper with line details)
   - 12 new tests: 9 lore spawning behavior, 3 persistence round-trip
+- Lore journal overlay (between-run lore review in ShopScene)
+  - Two pure functions in `lore.js`: `getJournalEntries()` and `getJournalPage()` — no new module needed
+  - ShopScene "[ NOTES X/20 ]" button opens full-screen overlay (depth 2000-2001)
+  - Paginated display: 5 entries per page, prev/next navigation, page clamping
+  - Collected notes show quoted text (white/gray), uncollected show "???" (dim gray)
+  - Close button + ESC key to dismiss, overlay destroys all objects on close
+  - 9 new tests covering journal entries and pagination logic
+- Fixed pre-existing TDZ bug in `maze.js` (doorZones used before declaration in columns branch)
 - Alternate exit locations (discoverable exits on deeper floors unlock new starting locations)
   - Pure function module `locations.js`: 5 locations (store, office, garage, hotel, laundromat) with unique colors and furniture
   - `generateAlternateExit()` spawns rare exit zones on floors 1+ (seed offset +100000, ~20% chance)
@@ -306,7 +318,7 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
   - Persistence v3: `unlockedLocations` and `activeLocation` fields (backward compatible)
   - Alternate exit zones: blue-white pulsing glow, 60x60 overlap zones with location labels
   - 21 new tests: 18 locations (data, layouts, exit spawning), 3 persistence
-- 438 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, weapon upgrades, enemy types, stairs, weapons, inventory capacity, maze generation, room connections, weaponless start, ammo system, minimap upgrade, switch frequency, lore spawning, lore persistence, floor scaling, multi-floor stair connections, alternate locations, and location persistence
+- 447 unit tests covering movement, raycasting, visibility, room generation, furniture, level generation, enemy spawning, LOS detection, AI state machine, combat, shooting, battery, items, inventory, shop, doors, light switches, hiding, persistence, exploration, starting room, scaling, weapon upgrades, enemy types, stairs, weapons, inventory capacity, maze generation, room connections, weaponless start, ammo system, minimap upgrade, switch frequency, lore spawning, lore persistence, lore journal, floor scaling, multi-floor stair connections, alternate locations, and location persistence
 - Documentation (docs.md files for root, src, systems, scenes)
 - Bug fix: flashlight mouse tracking drift during WASD movement
   - Root cause: Phaser 3 `pointer.worldX`/`worldY` are cached properties only refreshed on mouse events, not camera scroll
@@ -373,8 +385,9 @@ Added multi-floor level generation with bidirectional stairs connecting floors. 
 - Lore physics: `this.loreGroup` is a separate `physics.add.staticGroup()` from `this.itemGroup`. Lore sprites use a distinct 'lore_note' texture (12x10 off-white paper with line details). `onLorePickup()` skips inventory checks — lore never consumes backpack space.
 - Alternate locations: `locations.js` defines `LOCATIONS` array with 5 entries (store, office, garage, hotel, laundromat). Each has `id`, `name`, `floorColor`, `wallColor`, and `furniture` (relative-positioned layout data). `getLocationLayout()` converts relative positions to absolute coordinates (same algorithm as `generateStoreLayout()` in startroom.js). Room 0 rendering is now fully data-driven: GameScene reads `this.activeLocationData` (resolved from registry in `init()`) for colors and layout instead of hardcoded `STORE_FLOOR_COLOR`/`STORE_WALL_COLOR`. `startroom.js` is still imported for `generateCrackPoints()` only.
 - Alternate exit zones: `generateAlternateExit()` in `locations.js` filters rooms to floor 1+, excludes stair rooms, applies ~20% spawn chance via seeded PRNG (offset +100000), and picks a random unlockable location. Returns `{ roomId, locationId, position }` or null. GameScene creates a 60x60 overlap zone with pulsing blue-white glow (0x88aaff) and a location name label. `onAlternateExitComplete()` adds the location to `unlockedLocations`, sets it as `activeLocation`, and calls `onDayComplete(locationId)`.
+- Lore journal: `getJournalEntries(collectedLoreIds)` maps `LORE_ENTRIES` to `{id, text, collected}` with counts. `getJournalPage(entries, page, perPage)` paginates with page clamping. Both are pure functions in `lore.js` (no PRNG, no side effects). ShopScene overlay uses `this.journalOverlay` (array of Phaser objects) for lifecycle management — `showJournal()` creates all objects, `hideJournal()` destroys them. Depth 2000 (background) and 2001 (text/controls) ensure overlay sits above all shop content. ESC key handled via `input.keyboard.on('keydown-ESC')`.
 - ShopScene location cycling: When `unlockedLocations.length > 1`, ShopScene renders `< LocationName >` with clickable arrow buttons. `cycleLocation(direction)` wraps around the unlocked array. Active location is stored in registry and persisted. "New location discovered!" banner shown when arriving via alternate exit.
 
 ## Next Steps
 - All items from APPLICATION_SPEC.md "Next things to build" are now complete
-- Potential future features: more location variety, location-specific enemy types, achievements/lore journal, boss encounters
+- Potential future features: more location variety, location-specific enemy types, achievements, boss encounters
