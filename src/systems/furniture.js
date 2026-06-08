@@ -5,6 +5,10 @@ export const FURNITURE_TYPES = {
   shelf: { width: 100, height: 20, color: 0x6b4e2a, canHide: false, blocksLight: true },
   desk: { width: 60, height: 40, color: 0x3a3a3a, canHide: true, blocksLight: false },
   bookcase: { width: 30, height: 80, color: 0x4a2c17, canHide: false, blocksLight: true },
+  bed: { width: 90, height: 60, color: 0x4a3a3a, canHide: true, blocksLight: false },
+  armoire: { width: 40, height: 70, color: 0x5c3a21, canHide: true, blocksLight: true },
+  closet: { width: 50, height: 60, color: 0x3a3a3a, canHide: true, blocksLight: true },
+  vent: { width: 30, height: 30, color: 0x666666, canHide: true, blocksLight: false },
 };
 
 const TYPE_KEYS = Object.keys(FURNITURE_TYPES);

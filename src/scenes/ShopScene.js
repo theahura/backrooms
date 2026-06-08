@@ -11,6 +11,7 @@ import {
 import { saveGame } from '../systems/persistence.js';
 import { getLocation } from '../systems/locations.js';
 import { getJournalEntries, getJournalPage } from '../systems/lore.js';
+import { generateAllSounds } from '../systems/audioEngine.js';
 
 const JOURNAL_ENTRIES_PER_PAGE = 5;
 
@@ -90,14 +91,20 @@ export class ShopScene extends Phaser.Scene {
         color: '#88aaff',
         fontFamily: 'monospace',
       }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-      prevBtn.on('pointerdown', () => this.cycleLocation(-1));
+      prevBtn.on('pointerdown', () => {
+        this.playSound('shop_click');
+        this.cycleLocation(-1);
+      });
 
       const nextBtn = this.add.text(684, locationY, '>', {
         fontSize: '20px',
         color: '#88aaff',
         fontFamily: 'monospace',
       }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-      nextBtn.on('pointerdown', () => this.cycleLocation(1));
+      nextBtn.on('pointerdown', () => {
+        this.playSound('shop_click');
+        this.cycleLocation(1);
+      });
 
       this.updateLocationDisplay();
     } else {
@@ -128,6 +135,7 @@ export class ShopScene extends Phaser.Scene {
     enterBtn.on('pointerover', () => enterBtn.setColor('#88ff88'));
     enterBtn.on('pointerout', () => enterBtn.setColor('#44cc44'));
     enterBtn.on('pointerdown', () => {
+      this.playSound('shop_click');
       this.registry.set('shopState', this.shopState);
       this.registry.set('activeLocation', this.activeLocation);
       saveGame(this.shopState, this.registry.get('runCount') ?? 0, this.registry.get('collectedLore') ?? [], this.unlockedLocations, this.activeLocation);
@@ -143,9 +151,48 @@ export class ShopScene extends Phaser.Scene {
 
     journalBtn.on('pointerover', () => journalBtn.setColor('#bbddff'));
     journalBtn.on('pointerout', () => journalBtn.setColor('#88aaff'));
-    journalBtn.on('pointerdown', () => this.showJournal());
+    journalBtn.on('pointerdown', () => {
+      this.playSound('shop_click');
+      this.showJournal();
+    });
 
     this.refreshDisplay();
+    this.initAudio();
+  }
+
+  initAudio() {
+    this.audioReady = false;
+    if (!this.sound || !this.sound.context) return;
+
+    const ctx = this.sound.context;
+    const cache = this.cache.audio;
+
+    const startAudio = () => {
+      generateAllSounds(ctx, cache).then(() => {
+        this.audioReady = true;
+      }).catch(() => {});
+    };
+
+    if (this.sound.locked) {
+      this._audioUnlockHandler = startAudio;
+      this.sound.once('unlocked', this._audioUnlockHandler);
+    } else {
+      startAudio();
+    }
+
+    this.events.once('shutdown', () => {
+      if (this._audioUnlockHandler && this.sound) {
+        this.sound.off('unlocked', this._audioUnlockHandler);
+        this._audioUnlockHandler = null;
+      }
+    });
+  }
+
+  playSound(key) {
+    if (!this.audioReady) return;
+    try {
+      this.sound.play(key, { volume: 0.5 });
+    } catch (_) {}
   }
 
   createUpgradeRow(upgrade, y) {
@@ -191,6 +238,9 @@ export class ShopScene extends Phaser.Scene {
         this.registry.set('shopState', this.shopState);
         saveGame(this.shopState, this.registry.get('runCount') ?? 0, this.registry.get('collectedLore') ?? [], this.unlockedLocations, this.activeLocation);
         this.refreshDisplay();
+        this.playSound('shop_purchase');
+      } else {
+        this.playSound('shop_denied');
       }
     });
 
@@ -300,6 +350,7 @@ export class ShopScene extends Phaser.Scene {
       fontFamily: 'monospace',
     }).setOrigin(0.5).setDepth(2001).setInteractive({ useHandCursor: true });
     this.journalPrevBtn.on('pointerdown', () => {
+      this.playSound('shop_click');
       this.journalPage--;
       this.renderJournalPage();
     });
@@ -318,6 +369,7 @@ export class ShopScene extends Phaser.Scene {
       fontFamily: 'monospace',
     }).setOrigin(0.5).setDepth(2001).setInteractive({ useHandCursor: true });
     this.journalNextBtn.on('pointerdown', () => {
+      this.playSound('shop_click');
       this.journalPage++;
       this.renderJournalPage();
     });
@@ -330,7 +382,10 @@ export class ShopScene extends Phaser.Scene {
     }).setOrigin(0.5).setDepth(2001).setInteractive({ useHandCursor: true });
     closeBtn.on('pointerover', () => closeBtn.setColor('#88ff88'));
     closeBtn.on('pointerout', () => closeBtn.setColor('#44cc44'));
-    closeBtn.on('pointerdown', () => this.hideJournal());
+    closeBtn.on('pointerdown', () => {
+      this.playSound('shop_click');
+      this.hideJournal();
+    });
     objects.push(closeBtn);
 
     this.journalEscHandler = () => this.hideJournal();

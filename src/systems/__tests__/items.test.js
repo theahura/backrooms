@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateRoomItems } from '../items.js';
+import { generateRoomItems, ITEM_TYPES } from '../items.js';
 
 const ROOM_X = 0;
 const ROOM_Y = 0;
@@ -86,5 +86,9 @@ describe('generateRoomItems', () => {
       }
     }
     expect(typeCounts['ammo']).toBeGreaterThan(0);
+  });
+
+  it('includes medkit in item types', () => {
+    expect(ITEM_TYPES.some(t => t.type === 'medkit')).toBe(true);
   });
 });

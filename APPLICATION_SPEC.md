@@ -43,7 +43,10 @@ Other details (from playtesting):
 - enemies should be able to move between rooms
 
 Next things to build:
-- we want the player to get more lost: increase the cost of most of the items, make the rewards / treasures far more rare, and make the initial flashlight battery longer (but the fov thinner)
+- add more room types
+- add actual pixel art elements for things like tables, light switches, rewards, etc. instead of the current rectangle boxes
+  - use this opportunity to also give the backrooms each more flavor
+- add actual pixel art animations for the enemies and the main player character
 
 Known bugs:
 - NA

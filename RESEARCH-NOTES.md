@@ -1962,3 +1962,779 @@ MAX_ROOM_ENEMIES = 4             // density cap per room
 - No pathfinding around internal maze walls — enemies rely on physics sliding
 - Enemies cannot open doors (closing a door traps them)
 - Sound-based attraction (gunshots drawing enemies from adjacent rooms) is a future enhancement
+
+## New Hiding Furniture Types Research
+
+### Spec Gap Analysis
+The APPLICATION_SPEC says "rooms can have areas where players can hide, including under tables and beds, inside vents, armoirs, and closets." Currently only `table` and `desk` have `canHide: true`. Missing: bed, vent, armoire, closet.
+
+### New Furniture Type Definitions
+
+| Type | Width | Height | Color | canHide | blocksLight | Rationale |
+|------|-------|--------|-------|---------|-------------|-----------|
+| bed | 90 | 60 | 0x4a3a3a (dark gray-brown) | true | false | Low-profile, hide under. Large footprint = generous hiding area |
+| armoire | 40 | 70 | 0x5c3a21 (dark wood) | true | true | Tall enclosed wardrobe, hide inside. Blocks light AND hides player — new dynamic |
+| closet | 50 | 60 | 0x3a3a3a (dark gray) | true | true | Tall enclosed space, hide inside. Same dual role as armoire |
+| vent | 30 | 30 | 0x666666 (metallic gray) | true | false | Small floor vent/grate, crawl inside. Smallest hiding spot |
+
+### Design Impact
+- Adding 4 types to `FURNITURE_TYPES` changes `TYPE_KEYS` length from 4 to 8. Each type now appears ~12.5% of the time instead of 25%.
+- Armoire and closet introduce a new combination: furniture that is both a hiding spot AND blocks light/LOS. This creates interesting gameplay where the player can hide inside something that also blocks enemy line-of-sight through it.
+- Vent is the smallest hiding spot — player must be precise to interact with it, and the movement area while hidden is very constrained (30x30 minus 20x20 body = 10x10 movement area).
+- Bed is the largest hiding spot — generous movement area while hidden (90x60 minus body = large crawl space).
+
+### Architecture
+- Only change: add 4 entries to `FURNITURE_TYPES` object in `furniture.js`
+- `TYPE_KEYS` is `Object.keys(FURNITURE_TYPES)` so auto-includes new types
+- `generateRoomFurniture` randomly selects from `TYPE_KEYS` — no changes needed
+- GameScene's `blocksLight` check uses `FURNITURE_TYPES[item.type]` — works for new types
+- GameScene's hiding system uses `item.canHide` on placed items — works for new types
+- No test changes expected for existing tests (no assertions on specific type names/distributions)
+- New tests: verify new types exist in FURNITURE_TYPES with correct properties, verify blocksLight behavior for armoire/closet
+
+## Scroll Wheel Weapon Switching Research
+
+### Phaser 3 API
+- `this.input.on('wheel', (pointer, currentlyOver, deltaX, deltaY, deltaZ) => {...})`
+- `deltaY < 0` = scroll up, `deltaY > 0` = scroll down
+- Available since Phaser 3.18.0, stable in 3.90.x
+
+### Debouncing
+- Phaser has no built-in scroll debounce
+- Pattern: time-based cooldown using `this.time.now`
+- 200ms cooldown between allowed switches (matches fire rate granularity)
+- Trackpads produce many small scroll events — cooldown handles this
+
+### Integration
+- Add `this.input.on('wheel', ...)` in `setupInput()` alongside existing mouse handlers
+- Reuse `switchWeapon()` and `updateWeaponStats()` — same as Q key
+- Guard: skip if hiding, dead, or day ending (same guards as other input)
+- The 2-slot system means scroll direction doesn't matter (just toggle), but use direction for consistency with player expectation
+
+## Enemy Corpse Persistence + Lit Room Enemy Behavior Research
+
+### Problem Statement
+Two related spec items:
+1. "When an enemy dies, its body should remain" — currently dead enemies are fully hidden (`setVisible(false)`) and removed from `enemyStates`
+2. "Enemies shouldn't disappear in rooms with light automatically" — currently `onToggleSwitch` instantly despawns all enemies in the room when a light is turned on
+
+### Current Death Path (GameScene.js:1219-1236)
+`onBulletHitEnemy(bullet, enemySprite)`:
+- Finds `enemyState` by `es.sprite === enemySprite`
+- Applies damage via `applyEnemyDamage()` from combat.js
+- On death: `setActive(false)`, `setVisible(false)`, `body.stop()`, `body.enable = false`
+- Filters dead enemy from `this.enemyStates`
+- Sprite remains in `enemyGroup` but inactive and invisible
+
+### Current Lit Room Despawn (GameScene.js:323-342)
+`onToggleSwitch(switchId)`:
+- When switch turned ON: finds all enemies in room via `isPointInRoom`
+- Applies same death pattern: deactivate, hide, stop, disable body
+- Filters from `this.enemyStates`
+
+### Current Lit Room Freeze (GameScene.js:1305-1309)
+In `updateEnemies(delta)`:
+- Enemies in lit rooms have velocity zeroed and AI skipped (via `continue`)
+- This catches enemies that wander into lit rooms after switch toggled
+
+### Corpse Design Decision: Visual-Only Sprite Retention
+
+Based on Phaser 3 research:
+- `sprite.disableBody(true, false)` — deactivates game object (no updates) but keeps visible
+- Alternatively: manual `setActive(false)` + keep `setVisible(true)` + `body.enable = false`
+- Dead sprites with `active=false` are skipped by physics overlap checks — no false damage on player walking over corpses
+- Visual indicators: `setTint(0x666666)` (gray tint) + `setAlpha(0.6)` (faded) + `setAngle(90)` (toppled)
+- Performance: rendering inactive sprites is cheap (just draw calls, no physics computation)
+
+### Implementation Plan
+
+**1. Enemy Corpses (onBulletHitEnemy change):**
+- Keep `setActive(false)` — removes from physics/collision checks
+- REMOVE `setVisible(false)` — corpse stays visible
+- Keep `body.stop()` and `body.enable = false` — no physics interaction
+- Add corpse visual: `setTint(0x666666)`, `setAlpha(0.6)`, `setAngle(90)`
+- Still filter from `this.enemyStates` — no AI updates for dead enemies
+- Lower depth to below living enemies (depth 5 — same as items, below darkness at 100)
+
+**2. Lit Room Enemies (onToggleSwitch change):**
+- Remove the entire enemy despawn block from `onToggleSwitch`
+- Keep the existing freeze behavior in `updateEnemies` (velocity zeroed, AI skipped)
+- Enemies remain alive and visible in lit rooms — just frozen in place
+- Player can still shoot frozen enemies
+- If switch turned off, enemies resume AI
+
+### Constants
+- `CORPSE_TINT = 0x666666` — gray desaturation
+- `CORPSE_ALPHA = 0.6` — faded appearance
+- `CORPSE_ANGLE = 90` — toppled on side
+- `CORPSE_DEPTH = 5` — below living enemies (60), below darkness (100)
+
+### Edge Cases
+- Enemies killed in lit rooms: become corpses (visible because room is lit)
+- Enemies frozen in lit rooms then killed: same corpse treatment
+- Player walks over corpse: no damage (body disabled, active=false skips overlap)
+- onEnemyContact: already uses `this.enemyStates.find(es => es.sprite === enemySprite)` — dead enemies are filtered out of enemyStates, so contact returns early with no damage
+- Multiple enemies die in same spot: corpses stack visually (acceptable)
+
+### Test Strategy
+- Pure function tests: `isEnemyDead` and `applyEnemyDamage` in combat.js already tested — no changes needed
+- No pure function changes needed — all changes are in GameScene.js (scene-level wiring)
+- New tests should verify behavior properties that can be tested at the pure function level:
+  - The lit room freeze behavior is already testable via `updateEnemyAI` (passing `inLitRoom` context)
+  - Corpse visual properties can't be tested without Phaser mocks, but the removal of despawn from switch toggle is a behavioral change worth documenting in tests
+
+## Time-Based Enemy Difficulty Escalation Research
+
+### Problem Statement
+The spec says "make it so that more and more difficult enemies spawn as the player spends more time outside of the safe rooms." This creates a second pressure axis beyond the battery timer — camping, hiding, or slow exploration becomes increasingly dangerous.
+
+### Design Decisions (from game research)
+
+**Timing Model (Left 4 Dead Director + Vampire Survivors wave clock)**:
+- Track cumulative time spent in unsafe rooms (not room 0, not lit rooms)
+- Timer **pauses** in safe rooms (not reset) — prevents cycling exploit
+- Fixed 30-second intervals between waves
+- First wave at 30s of unsafe time (gives player time to establish themselves)
+- Cap at 8 waves (240s = 4 min of unsafe time to see all waves)
+
+**Spawn Location (Terraria spawn ring + room-based architecture)**:
+- Spawn in rooms adjacent to the player's current room (naturally off-screen)
+- Never spawn in the player's current room, room 0, or lit rooms
+- Must be on the same floor as the player
+- If no valid spawn room exists, skip the wave
+
+**Wave Composition (deterministic, no PRNG needed)**:
+- Count per wave: `1 + floor(waveCount / 3)`, capped at 4
+- Type distribution shifts toward harder types as waves progress:
+  - Waves 1-2: all basic zombies (gentle escalation)
+  - Waves 3-4: mix of basic and crawlers
+  - Waves 5-6: basic, crawlers, and spitters
+  - Waves 7-8: mostly crawlers and spitters (intense pressure)
+- This is independent of `runCount` — time pressure is orthogonal to per-run scaling
+
+**Horror Pacing Principles (from horror game design research)**:
+- Tension-and-release cycle: safe rooms serve as "fear meter refreshers"
+- Fewer, more dangerous enemies > constant weak ones
+- Variable encounter pacing prevents habituation
+- Sound cues for wave spawns add anticipation (future: audio system)
+
+### Architecture: New Pure Module `danger.js`
+
+- `src/systems/danger.js` — pure functions, no Phaser dependency
+- Constants:
+  - `DANGER_WAVE_INTERVAL = 30000` (30 seconds between waves)
+  - `MAX_DANGER_WAVES = 8` (cap total waves per run)
+- State: `{ unsafeTime: 0, waveCount: 0 }`
+- `createDangerState()` — returns initial state
+- `updateDangerTime(state, delta, isInSafeRoom)` — increments `unsafeTime` when not in safe room, returns unchanged state when in safe room
+- `shouldSpawnWave(state)` — returns true when `unsafeTime >= (waveCount + 1) * DANGER_WAVE_INTERVAL` and waveCount < MAX_DANGER_WAVES
+- `getWaveComposition(waveCount)` — returns array of enemy type strings for the wave
+- `advanceWave(state)` — increments waveCount, returns updated state
+
+### Spawn Position Strategy
+
+Reuse existing `generateRoomEnemies()` pattern for position selection (furniture overlap avoidance, wall margin). For dynamic spawns, use a seed offset of +110000 + waveCount * 100 to avoid correlation with pre-placed enemies.
+
+### GameScene Integration Points
+
+- `init()`: create `this.dangerState = createDangerState()`
+- `updateEnemies(delta)`: 
+  1. Determine if player is in a safe room (room 0 or lit room)
+  2. Call `updateDangerTime(state, delta, isInSafeRoom)`
+  3. If `shouldSpawnWave(state)`: select spawn room, generate positions, create enemy sprites+states
+  4. Call `advanceWave(state)` after spawning
+- Dynamic spawn method reuses existing `getEnemyStats(type)` for texture/HP/damage lookup
+- No new colliders needed — group colliders auto-cover new members (confirmed by Phaser 3 research)
+- Enemy textures already generated in `createEnemyTextures()` — same keys reused
+
+### Phaser 3 Dynamic Spawning Confirmation
+
+- `this.enemyGroup.create(x, y, textureKey)` works at any point during gameplay
+- Existing colliders (`this.physics.add.collider(enemyGroup, walls)`, etc.) automatically cover new group members because colliders reference the group object, not a snapshot
+- No maxSize on enemyGroup — no pool exhaustion concern
+- Performance: each active dynamic body adds to per-frame physics cost, but with 7-12 rooms and caps on spawning, total enemies stay well under concerning thresholds
+
+### HUD Integration
+
+- Show a danger indicator when waves are active: subtle pulsing red border or "DANGER" text
+- Optional: show wave count for player feedback (e.g., "THREAT: 3/8")
+- Keep it minimal — horror games benefit from ambiguity about how much danger the player is in
+
+### Constants Summary
+
+```javascript
+DANGER_WAVE_INTERVAL = 30000   // 30 seconds
+MAX_DANGER_WAVES = 8           // cap at 8 waves
+DANGER_SEED_OFFSET = 110000    // seed offset for spawn positions
+```
+
+### Edge Cases
+
+- Player enters safe room at exactly wave threshold: timer paused, wave doesn't fire until player returns to unsafe area
+- All adjacent rooms are safe/room 0: wave is skipped (no valid spawn location)
+- Player on floor with no adjacent non-safe rooms: wave skipped
+- Dynamic enemies follow same death/corpse behavior as pre-placed enemies
+- Dynamic enemies have same pathfinding capability as pre-placed enemies (navContext)
+- Run count scaling still applies to dynamically spawned enemies (they use scaledEnemyHP etc.)
+
+## Audio System Research
+
+### Design Decision: Procedural Audio via Web Audio API
+
+The game generates all visuals procedurally (no image files). Same approach for audio: all sounds synthesized at runtime using Web Audio API, no .mp3/.ogg files.
+
+### Phaser 3.90.0 Audio Integration
+
+**Direct cache injection** (confirmed by reading Phaser source):
+```javascript
+const ctx = this.sound.context; // Phaser's AudioContext
+const buffer = ctx.createBuffer(1, ctx.sampleRate * 0.3, ctx.sampleRate);
+// ... fill buffer with waveform data ...
+this.cache.audio.add('gunshot', buffer);
+this.sound.play('gunshot');
+```
+
+- `this.sound.context` — exposes the Web Audio `AudioContext`
+- `this.cache.audio.add(key, audioBuffer)` — injects an `AudioBuffer` into Phaser's cache (BaseCache.add is type-agnostic)
+- `this.sound.add(key).play()` — plays via Phaser's sound manager (volume, mute, rate control)
+- `this.sound.destination` — the master volume GainNode (for real-time ambient audio)
+- Autoplay policy: Phaser auto-resumes AudioContext on first user interaction; check `this.sound.locked` for safety
+
+**Two approaches for sound generation:**
+1. **Pre-rendered via OfflineAudioContext** — for one-shot effects (gunshots, footsteps, pickups, door sounds). Generated once in `create()`, cached, played via `this.sound.play(key)`.
+2. **Real-time via live AudioContext nodes** — for ambient drone/hum. Connected to `this.sound.destination` for Phaser volume integration.
+
+### Sound Categories and Synthesis Recipes
+
+**Gunshot/weapon fire** (noise burst + low freq thump):
+- White noise through bandpass filter (1000Hz, Q:0.7), fast exponential decay (0.1s)
+- Triangle oscillator sweep 150Hz→0.001Hz for body thump
+- Duration: ~0.2s
+
+**Footsteps** (filtered noise burst):
+- White noise through bandpass filter (800-2000Hz), very short duration (~40-60ms)
+- Randomize filter frequency ±10% between steps for variation
+- Play based on movement velocity (not every frame)
+
+**Item pickup chime** (ascending tones):
+- Two sine oscillators at 660Hz then 880Hz, 60ms each, 70ms gap
+- exponentialRamp gain decay
+
+**Door toggle** (FM synthesis creak + noise thud):
+- Carrier sine 300→500Hz, modulated by 8→12Hz sine with depth 400
+- Bandpass filter at 800Hz, envelope with attack and decay
+- Close: add short noise burst through lowpass 200Hz
+
+**Light switch** (short click):
+- Very brief noise burst (~20ms) through highpass filter
+
+**Enemy growl** (low sawtooth + distortion + AM tremolo):
+- Sawtooth 50→40Hz through WaveShaperNode distortion
+- LFO at 6Hz for amplitude modulation (tremolo)
+- Bandpass noise at 100Hz for texture
+- Duration: ~0.8s
+
+**Ambient drone/hum** (real-time, Backrooms fluorescent buzz):
+- Two detuned sawtooth oscillators at 120Hz and 120.5Hz (rectified mains buzz)
+- Sub-bass sine at 60Hz
+- LFO at 0.3Hz modulating master gain for breathing/flicker effect
+- Brown noise through lowpass 200Hz for deep rumble texture
+- All connected to `this.sound.destination` (live nodes, not pre-rendered)
+
+**Horror atmosphere** (random environmental sounds at 5-30s intervals):
+- Distant bang: lowpass-filtered noise burst, slow decay
+- Drip: high sine ping (2000-4000Hz), 60ms
+- Whisper: bandpass-filtered noise at 3000Hz + 6000Hz, slow envelope
+
+**Player damage** (distorted low thump):
+- Similar to gunshot but lower frequency, more body
+
+**Battery warning** (periodic low beep):
+- Short sine at 220Hz, repeating at ~1Hz when battery < 25%
+
+### Architecture: Pure Module `audio.js`
+
+`src/systems/audio.js` — defines sound configurations as plain data objects (frequencies, durations, gains, filter params). Pure functions for:
+- `SOUND_CONFIGS` — object mapping sound names to synthesis parameters
+- `getFootstepInterval(speed)` — returns ms between footstep sounds based on movement speed
+- `getAmbientSoundDelay()` — returns randomized delay for next ambient horror sound
+- No Phaser/Web Audio dependency — testable in Node
+
+### GameScene Audio Integration Points
+
+All identified handlers for audio hooks:
+- `fireBullet()` (line ~1217) — weapon fire sound (vary by weapon type)
+- `onBulletHitEnemy()` (line ~1264) — hit sound; death sound in `isEnemyDead` branch
+- `onEnemyContact()` (line ~1297) — player damage sound
+- `onEnemyBulletHitPlayer()` (line ~851) — player damage sound
+- `onPlayerDeath()` (line ~1307) — death sound
+- `onItemPickup()` (line ~520) — pickup chime (vary by item type)
+- `onLorePickup()` (line ~571) — paper rustling sound
+- `onToggleDoor()` (line ~338) — door creak (differentiate open/close)
+- `onToggleSwitch()` (line ~326) — switch click
+- `onEnterHiding()` (line ~352) — hide entry sound
+- `onExitHiding()` (line ~364) — hide exit sound
+- `onStairEnter()` (line ~1108) — stair transition sound
+- `onDayComplete()` (line ~1131) — exit/completion sound
+- `onUseBattery()` (line ~1621) — recharge sound
+- `update()` footstep timing — footstep sounds when moving
+- `updateDarkness()` — flicker buzz when battery low
+- `spawnDangerWave()` — danger alert sound
+
+### ShopScene Audio Integration Points
+
+- Purchase upgrade — purchase chime or "can't afford" buzz
+- Enter backrooms button — transition sound
+- Location cycling — click sound
+- Journal open/close — page sounds
+- Journal navigation — page turn sound
+
+### Anti-Click Technique
+
+Always use 5ms linear ramp at start/end of sounds:
+```javascript
+gain.gain.setValueAtTime(0, startTime);
+gain.gain.linearRampToValueAtTime(targetVolume, startTime + 0.005);
+```
+Use `0.001` (not `0`) as target for `exponentialRampToValueAtTime`.
+
+### Performance
+
+- Pre-rendered sounds: one-time OfflineAudioContext cost during `create()` (~50-100ms total for all sounds)
+- Playback: Phaser's sound manager handles pooling/recycling
+- Ambient drone: 4-5 live oscillator nodes — negligible CPU
+- No audio files = no loading/bandwidth cost
+
+## Crawler Door-Opening Research
+
+### Design Decision: Crawlers Open Doors
+
+From APPLICATION_SPEC.md: "make it so that one kind of enemy can open doors." The crawler is the natural choice — fast, aggressive, melee-only. This creates asymmetric threat: basic zombies and spitters are blocked by closed doors, but crawlers bypass this defense after a brief delay.
+
+### Game Design References
+
+- **Resident Evil 7 (Jack Baker)**: Only one enemy type opens doors, making that enemy uniquely terrifying. Exclusivity is key.
+- **Resident Evil 2 Remake (Mr. X)**: Door opening accompanied by loud audio telegraph (slam, footsteps). Player hears threat before seeing it.
+- **Amnesia: The Dark Descent**: Monster breaks through doors over several seconds. Delay is explicitly designed to give player time to find a hiding spot.
+- **Attack telegraphing research**: Player reaction time ~0.25s. Door-opening delay should be 1.0-1.5s — long enough to hear and react, short enough to feel threatening.
+
+### Implementation Design
+
+**New enemy state: `opening_door`**
+- When a crawler in `chase` state reaches a closed door on its path, it transitions to `opening_door`
+- Crawler stops moving, counts down `doorOpenTimer` (1000ms)
+- When timer expires, sets `wantsToOpenDoor: true` and `targetDoorId: <id>` on the return object (same pattern as spitter's `wantsToFire`)
+- Then transitions back to `chase` state
+
+**Pathfinding changes:**
+- `buildRoomGraph` currently excludes closed doors entirely. For crawlers, need a variant that includes closed-door edges.
+- New function `buildFullRoomGraph(rooms, doorStates)` includes all edges, marking closed-door edges with `closedDoorId`.
+- GameScene builds both graphs: standard (for basic/spitter) and full (for crawler BFS).
+- Alternative considered: single graph with cost annotation. Rejected — BFS is unweighted, and the existing graph is already rebuilt every door toggle. Two graphs is simpler and follows YAGNI.
+
+**NavContext changes:**
+- Add `closedDoorOnPath` field to navContext: `{ doorId, center: {x, y} }` or null
+- When a crawler is navigating toward a doorway that has a closed door, the scene pre-computes this and passes it in navContext
+- The AI function uses proximity to the closed door center to trigger the `opening_door` state transition
+
+**GameScene integration:**
+- After `updateEnemyAI()`, check `updated.wantsToOpenDoor` and call `this.onToggleDoor(updated.targetDoorId)` — identical pattern to `wantsToFire`
+- Build a second "full" room graph for crawler pathfinding (includes closed doors)
+- Run a separate BFS for crawlers (or reuse if all enemies on same path)
+
+### Key Constants
+- `DOOR_OPEN_TIME = 1000` — ms the crawler pauses before opening a door
+- `CRAWLER_DOOR_INTERACT_RANGE = 60` — how close the crawler must be to the door center to start opening it
+- Only crawlers can open doors (type check in AI function)
+
+### Risk: Multiple crawlers opening same door
+- If two crawlers both set `wantsToOpenDoor` for the same door in one frame, the second `onToggleDoor` call would re-close it (toggle behavior)
+- Fix: scene-side check — only call `onToggleDoor` if the door is still closed
+
+### Files to Modify
+1. `src/systems/enemy.js` — add `opening_door` state, `DOOR_OPEN_TIME`, `CRAWLER_DOOR_INTERACT_RANGE` constants, proximity check in chase state for crawlers
+2. `src/systems/pathfinding.js` — add `buildFullRoomGraph()` that includes closed-door edges with `closedDoorId` annotation
+3. `src/scenes/GameScene.js` — build full graph for crawlers, compute `closedDoorOnPath` in navContext, handle `wantsToOpenDoor` signal
+4. `src/systems/__tests__/enemy.test.js` — tests for opening_door state transitions, timer behavior, wantsToOpenDoor signal
+5. `src/systems/__tests__/pathfinding.test.js` — tests for buildFullRoomGraph including closed-door edges
+
+## Additional Room Types Research
+
+### Current Room Type System
+
+The existing `maze.js` handles three room types distributed as: open (40%), maze (30%), columns (30%). The architecture uses:
+- `getRoomType(seed)` to determine type via seeded PRNG (offset +70000)
+- `generateMazeWalls(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, doors)` as the dispatch entry point
+- `segmentCrossesDoorZone(seg, doorZones)` to filter segments that would block doors
+- Room dimensions: 1200x1000 with WALL_THICKNESS=16, inner area ~1168x968
+- `getDoorZone()` creates exclusion rectangles (80+wallThickness deep) extending into room from each door
+
+All generated segments are axis-aligned `{x1, y1, x2, y2}` objects pushed into the `wallSegments` array for raycasting and separately created as Phaser physics zones for collision.
+
+### New Room Type: Corridor
+
+**Concept**: Deeper recursive division creating winding passage layouts. Classic Backrooms Level 0 yellow hallway feel — long walls with narrow passages between them.
+
+**Algorithm**: Reuse existing `subdivide()` pattern but with:
+- Smaller `MIN_SUBDIVISION_SIZE` (120 vs 200) to create narrower corridors
+- Deeper recursion (`maxDepth` 4 vs 2) for more subdivisions
+- Narrower `GAP_WIDTH` (60 vs 80) for tighter passages
+- Same door zone avoidance via `segmentCrossesDoorZone()`
+- Produces 6-12 wall segments creating winding paths
+
+**Reference**: Recursive division naturally produces "long straight walls crossing the space" (Wikipedia maze generation algorithms). Deeper recursion creates the subdivided hallway feel.
+
+### New Room Type: Storage
+
+**Concept**: Scattered rectangular crates/pallets of varying sizes creating irregular cover and shadow patterns. Warehouse/industrial feel.
+
+**Algorithm**: Rejection-sampling rectangle placement:
+1. Pick random position and size within inner bounds
+2. Size classes: small (40x40), medium (60x40), large (80x60)
+3. Check AABB overlap against all placed crates (with 50px minimum gap for navigability)
+4. Check `segmentCrossesDoorZone()` for all 4 sides
+5. Place 6-10 crates per room (retry up to count*30 attempts)
+6. Convert each crate to 4 wall segments (identical to column segment pattern)
+
+**Gap size (50px)**: Chosen because player collision body is ~20px wide, and GAP_WIDTH for other types is 60-80px. 50px provides tight but navigable passages between crates.
+
+**No connectivity validation needed**: With 6-10 crates of 40-80px in a 1168x968 room with 50px gaps, pockets are geometrically impossible — crates are too sparse relative to room size. This matches the existing column pattern (no connectivity check there either).
+
+### New Room Type: Cubicles (Office)
+
+**Concept**: Grid of U-shaped partition walls creating corporate horror cubicle farm aesthetic. Regular grid with random open sides per cell.
+
+**Algorithm**: Grid-based template stamping:
+1. Divide inner room into cells (150x150 each, giving ~7x6 grid in standard room)
+2. For each cell, seeded-random choose: U-shape (3 walls), L-shape (2 walls), or open (skip)
+3. U-shape has one open side (randomly chosen: N/S/E/W) — the cubicle entrance
+4. L-shape has two open sides (corner piece)
+5. Each wall is shorter than cell size (120px instead of 150px) to leave aisle gaps
+6. Filter all segments against door zones
+7. Skip ~30% of cells randomly to ensure navigability
+
+**Template definitions** (relative to cell origin cx, cy with wall length 120):
+- U-north (open top): left wall + bottom wall + right wall
+- U-south (open bottom): left wall + top wall + right wall
+- U-east (open right): left wall + top wall + bottom wall
+- U-west (open left): right wall + top wall + bottom wall
+- L-shapes: only 2 adjacent walls
+
+### Type Distribution (Rebalanced)
+
+```
+open:     20% (was 40%)  — some rooms should still be empty for pacing/contrast
+maze:     15% (was 30%)  — BSP recursive division
+columns:  15% (was 30%)  — staggered pillar grid
+corridor: 20%            — deep recursive division (winding passages)
+storage:  15%            — scattered crates
+cubicles: 15%            — office partition grid
+```
+
+Total: 100%. Across a typical 6-room level (excluding room 0), expect ~1 of each type.
+
+### Integration Approach
+
+All changes confined to `maze.js`:
+1. Extend `getRoomType()` to return 6 types instead of 3
+2. Extend `generateMazeWalls()` dispatch to handle new types
+3. Add internal functions: `generateCorridorWalls()`, `generateStorageWalls()`, `generateCubicleWalls()`
+4. Export new type constants for testing
+5. No changes to GameScene, level.js, or any other file — the interface is unchanged
+
+### Performance
+
+- Corridor: ~6-12 segments (same order as current maze type)
+- Storage: 6-10 crates × 4 segments = 24-40 segments
+- Cubicles: ~15-25 cells × 2-3 segments = 30-75 segments
+- All well within raycasting budget (existing rooms with furniture already produce 50+ segments)
+- Generation is one-time cost in `create()` — no per-frame impact
+
+## Pixel Art Sprite System Research
+
+### Design Decision: Programmatic Pixel Art via `textures.generate()`
+
+Phaser 3 provides `textures.generate(key, config)` which creates textures from character-based data arrays. Each character maps to a color in a 16-color palette. This is purpose-built for pixel art and avoids external image asset dependencies (consistent with the procedural audio approach).
+
+### Phaser 3 API: `textures.generate()`
+
+```javascript
+this.textures.generate('sprite_key', {
+  data: ['..11..', '.1221.', '122221', '122221', '.1221.', '..11..'],
+  palette: { 0: '#000', 1: '#cc3333', 2: '#ff4444' },
+  pixelWidth: 2,  // each data character = 2x2 screen pixels
+  pixelHeight: 2,
+});
+```
+
+- `data`: array of strings, each character is a pixel (0-9, A-F, `.`/space = transparent)
+- `palette`: object mapping single characters to hex color strings. Default: Arne16 palette.
+- `pixelWidth`/`pixelHeight`: multiplier per cell (controls "chunkiness")
+- Characters `.` and ` ` are transparent
+
+### Game Config: `pixelArt: true`
+
+Critical for crisp rendering. Sets `antialias: false`, `antialiasGL: false`, `roundPixels: true`. Without this, scaled pixel art is blurred by bilinear filtering. Current game config in `main.js` does NOT set this.
+
+Potential concern: `pixelArt: true` may affect BitmapMask flashlight polygon edges. However, the mask is a Graphics-drawn polygon shape, not a texture — the antialias setting primarily affects texture filtering. The flashlight boundaries may be slightly crisper, which fits the pixel art aesthetic.
+
+### Per-Texture Alternative
+
+If global `pixelArt` causes issues, can set nearest-neighbor per texture:
+```javascript
+this.textures.get('key').setFilter(Phaser.Textures.FilterMode.NEAREST);
+```
+
+### Scaling Strategy
+
+Objects at different size scales need different pixel densities:
+- **Small objects (8-16px)**: items, bullets, switches, lore notes → native pixel resolution (pixelWidth=1), no scaling needed
+- **Medium objects (16-20px)**: weapon pickups, enemies → native or pixelWidth=2
+- **Large objects (30-100px)**: furniture → pixelWidth=5 (e.g., table 80x50 = 16x10 data at 5x)
+- **Very large objects (60-64px)**: stairs, exit zones → pixelWidth=4 or 5
+
+### Current Rendering Patterns to Change
+
+| Object | Current | Target |
+|--------|---------|--------|
+| Furniture | `fillRect` on shared Graphics | Individual sprites with pixel art textures |
+| Items | `generateTexture` colored shapes | `textures.generate` pixel art |
+| Weapons | `generateTexture` cross shapes | `textures.generate` gun silhouettes |
+| Bullets | `generateTexture` colored circles | `textures.generate` pixel art |
+| Lore notes | `generateTexture` rect with lines | `textures.generate` detailed paper |
+| Doors | Per-frame `fillRect` on Graphics | Sprites with visibility toggling |
+| Switches | Per-frame `fillRect` on Graphics | Sprites with frame/texture swapping |
+| Enemies | `generateTexture` colored circles | Unchanged (next commit: animations) |
+| Player | Per-frame Graphics drawing | Unchanged (next commit: animations) |
+| Stairs | Graphics `fillRect` + lines | Keep Graphics (complex visual) |
+| Exit zone | Graphics `fillRect` + stroke | Keep Graphics (simple glow effect) |
+
+### Furniture Conversion: Graphics → Sprites
+
+Current: all furniture drawn to a single `furnitureGfx` Graphics object with `fillRect` calls.
+Target: each furniture piece is a Phaser sprite with a pixel art texture.
+
+Steps:
+1. Generate textures for each furniture type in `createRooms()` or a new `createFurnitureTextures()` method
+2. In `createRoomFurniture()`: replace `gfx.fillRect(...)` with `this.add.sprite(...)` at depth 50
+3. Physics zones (furnitureGroup) remain unchanged — they're separate from visuals
+4. The shared `furnitureGfx` object can be removed (or kept for room floor/wall drawing only)
+
+Impact: ~35-56 furniture sprites across 7 rooms. Negligible performance impact.
+
+### Door Conversion: Per-Frame Graphics → Sprites
+
+Current: `drawDoors()` clears and redraws `doorGraphics` every frame.
+Target: each door is a sprite, visibility toggled on close/open.
+
+Steps:
+1. Generate a door texture (wood plank pattern)
+2. Create a sprite per closable door in `createDoors()`
+3. `toggleDoor`: set sprite visible/invisible instead of redrawing
+4. Remove `doorGraphics` and `drawDoors()` per-frame call
+
+### Switch Conversion: Per-Frame Graphics → Sprites
+
+Current: `drawSwitches()` clears and redraws `switchGraphics` every frame.
+Target: each switch has two textures (on/off), swapped on toggle.
+
+Steps:
+1. Generate `switch_on` and `switch_off` textures
+2. Create a sprite per switch in `createSwitches()`
+3. `toggleSwitch`: swap texture key instead of redrawing
+4. Remove `switchGraphics` and `drawSwitches()` per-frame call
+
+### Architecture: New Module `sprites.js`
+
+`src/systems/sprites.js` — pure data module defining pixel art arrays and palettes:
+- `SPRITE_DEFS` object mapping sprite keys to `{ data, palette, pixelWidth }` configs
+- Categories: furniture, items, weapons, bullets, doors, switches, lore
+- No Phaser dependency — testable data validation
+- GameScene calls `this.textures.generate(key, SPRITE_DEFS[key])` for each sprite
+- Palette limited to 16 colors per sprite — sufficient for the game's muted color scheme
+
+### Pixel Art Design Principles for Backrooms Theme
+
+- **Muted, desaturated colors** — yellowed whites, faded browns, institutional grays
+- **Minimal detail** — backrooms aesthetic is about mundane, featureless spaces
+- **Consistent lighting assumption** — sprites are drawn as if lit from above (top highlight, bottom shadow)
+- **No outlines on furniture** — furniture blends into environment, discovered by flashlight
+- **Distinct silhouettes for items** — must be recognizable at a glance in flashlight beam
+
+## Character & Enemy Pixel Art Animation Research
+
+### Design Decision: Programmatic Multi-Frame Animation via `textures.generate()` + `anims.create()`
+
+Phaser 3 supports creating animations from multiple separate texture keys (not just spritesheet frames). Each frame in the `frames` array can specify its own `key` property pointing to a different texture. This allows us to generate each animation frame as a separate texture via `textures.generate()` and then define animations using `anims.create()`.
+
+### Phaser 3 Animation API with Separate Texture Keys
+
+```javascript
+// Generate each frame as a separate texture
+this.textures.generate('player_walk_0', { data: walkFrame0, pixelWidth: 1, palette: playerPalette });
+this.textures.generate('player_walk_1', { data: walkFrame1, pixelWidth: 1, palette: playerPalette });
+
+// Create animation referencing separate texture keys
+this.anims.create({
+  key: 'player_walk',
+  frames: [{ key: 'player_walk_0' }, { key: 'player_walk_1' }],
+  frameRate: 6,
+  repeat: -1,
+});
+
+// Play with ignoreIfPlaying to avoid restart from frame 0 each update
+sprite.play('player_walk', true);
+```
+
+Key API details:
+- `sprite.play(key, ignoreIfPlaying)` — `true` prevents restarting if already playing
+- `sprite.stop()` — stops animation
+- `sprite.anims.getName()` — returns current animation key
+- `sprite.setRotation()` / `sprite.setAngle()` — independent of animation system, work freely
+- `sprite.setFlipX()` — mirrors sprite without separate directional art
+- `sprite.setTint()` / `sprite.setAlpha()` — work on animated sprites (corpse system compatible)
+
+### Player Character Design
+
+**Current**: Green circle (radius 10) + triangle "nose" direction indicator, drawn per-frame via Graphics object, rotated via `setRotation(playerAngle)`.
+
+**Target**: 20x20 pixel art sprite (pixelWidth=1) showing a top-down humanoid explorer. Sprite is oriented with "front" facing RIGHT (angle 0 in Phaser). Uses `setRotation(playerAngle)` to face the mouse — same mechanism as current Graphics rotation.
+
+**Animation frames (minimal for this scale)**:
+- `player_idle_0`, `player_idle_1` — 2-frame idle animation (subtle shift)
+- `player_walk_0`, `player_walk_1` — 2-frame walk cycle (leg movement)
+
+**Visual states**:
+- Normal: play idle or walk animation normally
+- Hiding: `setAlpha(0.3)` + `setTint(0x336633)` — same visual effect as current
+- Hurt/invulnerable: `setAlpha(0.5)` + `setTint(0xcc4444)` — same visual effect as current
+
+**Architecture change**: Replace invisible physics sprite + separate Graphics object with a single visible physics sprite. Remove `this.playerGraphics`. `drawPlayer()` becomes animation/state switching instead of Graphics redraw.
+
+### Enemy Character Designs
+
+**Basic zombie (20x20)**: Blocky/wide silhouette, red-brown/grey-green flesh tones. Shambling humanoid from above. 2-frame walk animation at slow playback (~4 fps). Maintains red color identity.
+
+**Crawler (14x14)**: Small, elongated insect-like shape. Purple/dark tones. 2-frame scuttle animation at faster playback (~8 fps). Maintains purple identity.
+
+**Spitter (20x20)**: Medium body with distinct bulging head/mouth area. Blue/teal tones. 2-frame walk animation (~4 fps). Maintains blue identity.
+
+**Enemy rotation**: Currently enemies have no rotation — they show the same texture regardless of movement direction. Add `setRotation(Math.atan2(vy, vx))` based on velocity each frame in `updateEnemies()`. This rotates the top-down sprite to face movement direction, same approach as the player.
+
+### Animation Configuration as Pure Data
+
+Export `ANIM_DEFS` from `sprites.js` alongside `SPRITE_DEFS`. Each animation definition is pure data:
+```javascript
+export const ANIM_DEFS = {
+  player_idle: { frames: ['player_idle_0', 'player_idle_1'], frameRate: 2, repeat: -1 },
+  player_walk: { frames: ['player_walk_0', 'player_walk_1'], frameRate: 6, repeat: -1 },
+  enemy_walk:  { frames: ['enemy_walk_0', 'enemy_walk_1'], frameRate: 4, repeat: -1 },
+  // etc.
+};
+```
+
+GameScene creates Phaser animations from this data alongside texture generation.
+
+### Backward Compatibility
+
+- `getEnemyStats()` texture keys change: `'enemy'` → `'enemy_idle_0'`, `'crawler'` → `'crawler_idle_0'`, `'spitter'` → `'spitter_idle_0'`. These are the initial textures; animations take over immediately.
+- Corpse system uses `setTint()`, `setAlpha()`, `setAngle()` — all work on animated sprites, no changes needed. `sprite.stop()` should be called to freeze the animation when the enemy dies.
+- Physics body sizes unchanged (20x20 for basic/spitter, 14x14 for crawler)
+- `spawnDangerWave()` uses `getEnemyStats()` for texture keys — automatically picks up new keys
+
+### Performance
+
+- ~16 new sprite definitions (4 player + 4 basic + 3 crawler + 5 spitter frames)
+- Separate texture keys per frame cause extra draw calls vs spritesheets, but with <20 animated entities this is negligible
+- DynamicTexture atlas optimization available if needed (not worth the complexity for this scale)
+
+## Room Visual Theming Research
+
+### Current State
+- All non-room-0 rooms use hardcoded `0x333333` (floor) and `0x555555` (walls) in `GameScene.drawRoom()`
+- Room 0 uses per-location colors from `locations.js` (e.g., store: floor `0x5c4a3a`, wall `0x7a6b5a`)
+- Internal maze walls in `createRoomMaze()` also use hardcoded `0x555555`
+- Room types (open, maze, columns, corridor, storage, cubicles) are computed from seed in `maze.js` but never used for visual differentiation
+- `getRoomType(seed)` is already exported from `maze.js` and available to call from GameScene
+
+### Backrooms Visual Aesthetics (from research)
+- **Level 0 (classic)**: Sickly yellow/beige wallpaper, stained carpet, fluorescent lighting. Community palettes: `#c9c49f`, `#d4cfa5`, `#8e8744`
+- **Industrial/maintenance**: Dark concrete, chalky walls, rusted pipes. Colors: `#4a4a4e`, `#5a5856`
+- **Office/cubicle**: Navy carpet, sterile white walls, grey partitions. Colors: `#3e4a6a`, `#d8dce0`
+- **Storage/warehouse**: Dusty concrete, beige drywall, wooden crates. Colors: `#555045`, `#6a6458`
+- **Corridor/hallway**: Dim olive-yellow carpet, faded wallpaper. Colors: `#8a7e60`, `#b8b683`
+- **Dark/cave**: Near-black void, cold stone. Colors: `#1a1a1e`, `#222226`
+
+### Color Adaptation for Flashlight System
+The raw researched colors are too bright — the game renders rooms in darkness with flashlight illumination. Colors must be in the same brightness range as existing location colors (~`0x3x-0x7x` range). Adapted palette:
+- **open** (classic backrooms): floor `0x4a4530`, wall `0x5a5540` — muted olive-yellow
+- **maze** (industrial): floor `0x303238`, wall `0x484a52` — cool grey-blue
+- **columns** (dark/eerie): floor `0x282830`, wall `0x404048` — dark blue-grey
+- **corridor** (hallway): floor `0x45403a`, wall `0x5a5548` — warm olive-brown
+- **storage** (warehouse): floor `0x3a3530`, wall `0x504a40` — warm dark brown
+- **cubicles** (office): floor `0x303540`, wall `0x505560` — cool blue-grey
+
+### Architecture Decision
+- New pure-data module `src/systems/roomThemes.js` with `ROOM_THEMES` constant and `getRoomTheme(roomType)` function
+- GameScene calls `getRoomType(room.seed)` (already exported) + `getRoomTheme(type)` in `drawRoom()`, `drawDoorways()`, and `createRoomMaze()`
+- Room 0 still uses `locations.js` colors (unchanged)
+- No changes to room objects or level generation — room type is derived from seed on the fly
+
+## Health Pickup Items (Medkits) Research
+
+### Design Decision: Instant-Heal Pickup (No Inventory Slot)
+
+Based on analysis of Enter the Gungeon (hearts auto-heal on contact), Nuclear Throne (adaptive medkit spawning below 50% HP), Binding of Isaac (red hearts auto-heal), and Motherload (hull repair as paid service). The APPLICATION_SPEC mentions "powerups" as room contents but no healing items exist — this fills that gap.
+
+**Approach: Auto-heal on pickup, no inventory slot consumed.**
+- Medkit heals immediately (25 HP) — like Enter the Gungeon hearts
+- At full HP, pickup is skipped (item stays on ground) — player can return later
+- Does NOT count against inventory capacity — healing is too important to gate behind backpack size
+- This mirrors how the existing ammo system works conceptually (functional on pickup) but without the inventory slot
+
+### Heal Amount Rationale
+- Base `PLAYER_MAX_HP = 100`, damage sources: contact 20, spitter projectile 15, scaled up to 40
+- 25 HP = 25% of base max HP, consistent with the 15-25% consensus from roguelike research
+- At max health upgrade (100 + 25*3 = 175 HP), 25 HP = ~14% — still meaningful but not overpowered
+- Heals slightly more than one hit of base contact damage (25 > 20) — rewards finding medkits
+
+### Item Spawn Design
+- Weight: 8 (same as gold_coin, ~7.4% of drops with new total weight 108)
+- Rarer than batteries (25) and ammo (20), comparable to gold coins (8)
+- Size: 10x10 (matches ammo)
+- Color: 0xff4444 (red — universal health indicator)
+- Value: 0 (no treasure value)
+
+### Sprite Design
+- 10x10 pixel art red cross on white background (universal medkit symbol)
+- New palette needed — items palette has no red or white tones
+- Create `PALETTES.medkit` with red, dark red, white, and light gray entries
+- Texture key: `item_medkit` (follows `item_${type}` convention)
+
+### Audio Design
+- New `medkit_pickup` sound: ascending chime C5→G5→C6 (523, 784, 1047 Hz)
+- Distinct from `item_pickup` (660, 880) — higher pitch and 3-note arpeggio conveys healing/restoration
+- Duration 0.2s, gain 0.25 (matches item_pickup volume)
+
+### Architecture: Minimal New Code
+- `combat.js`: Add `MEDKIT_HEAL_AMOUNT = 25` constant and `applyHeal(state, amount)` pure function
+- `items.js`: Add medkit entry to `ITEM_TYPES` array
+- `sprites.js`: Add `PALETTES.medkit` palette and `item_medkit` sprite definition
+- `audio.js`: Add `medkit_pickup` to `SOUND_CONFIGS`
+- `GameScene.js`: Add medkit branch in `onItemPickup()` — before inventory check, apply heal, play sound, destroy sprite
+- No changes to `inventory.js` — medkits bypass inventory entirely
+
+### GameScene Integration
+- `onItemPickup()` flow for medkit:
+  1. Check `!itemSprite.active` → return (existing)
+  2. Check `itemType === 'medkit'` → special handling (NEW)
+  3. Check `combatState.hp >= combatState.maxHp` → return (full HP skip)
+  4. `this.combatState = applyHeal(this.combatState, MEDKIT_HEAL_AMOUNT)`
+  5. Play `medkit_pickup` sound
+  6. Destroy sprite
+  7. Return (skip inventory logic)
+- Existing items unchanged — medkit branch runs before `canPickupItem` check
+
+### Visual Feedback
+- Camera flash: brief green tint (0, 255, 0) for 100ms — contrasts with red damage flash
+- No HUD changes needed — health bar already updates from `combatState.hp` each frame

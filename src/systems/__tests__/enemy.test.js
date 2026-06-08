@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hasLineOfSight, generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_WANDER, ENEMY_SPEED_CHASE, getEnemyType, CRAWLER_CHASE_SPEED, CRAWLER_WANDER_SPEED, SPITTER_CHASE_SPEED, SPITTER_ATTACK_RANGE, SPITTER_ATTACK_COOLDOWN } from '../enemy.js';
+import { hasLineOfSight, generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_WANDER, ENEMY_SPEED_CHASE, getEnemyType, CRAWLER_CHASE_SPEED, CRAWLER_WANDER_SPEED, SPITTER_CHASE_SPEED, SPITTER_ATTACK_RANGE, SPITTER_ATTACK_COOLDOWN, DOOR_OPEN_TIME, CRAWLER_DOOR_INTERACT_RANGE } from '../enemy.js';
 
 describe('hasLineOfSight', () => {
   it('returns true when no walls between enemy and player', () => {
@@ -631,5 +631,126 @@ describe('updateEnemyAI with navContext', () => {
     const updated = updateEnemyAI(enemy, player, [], 100, false, ENEMY_SPEED_CHASE, navContext);
 
     expect(updated.roomTransitionCooldown).toBe(4900);
+  });
+});
+
+describe('crawler door-opening behavior', () => {
+  function makeNavContextWithDoor(overrides = {}) {
+    return {
+      enemyRoomId: 1,
+      playerRoomId: 0,
+      spawnRoomId: 1,
+      roomTransitionCooldown: 0,
+      targetDoorway: null,
+      doorway: { x: 1200, y: 240 },
+      maxRoomDistance: 2,
+      roomEnemyCounts: new Map(),
+      closedDoorOnPath: { doorId: 5, center: { x: 1200, y: 240 } },
+      ...overrides,
+    };
+  }
+
+  it('crawler in chase transitions to opening_door when near a closed door on path', () => {
+    const enemy = createTypedEnemy({ type: 'crawler', state: 'chase', x: 1200 + CRAWLER_DOOR_INTERACT_RANGE - 10, y: 240 });
+    const player = { x: 600, y: 240 };
+    const wall = { x1: 1200, y1: 0, x2: 1200, y2: 200 };
+    const wall2 = { x1: 1200, y1: 280, x2: 1200, y2: 1000 };
+    const navContext = makeNavContextWithDoor();
+
+    const updated = updateEnemyAI(enemy, player, [wall, wall2], 16, false, ENEMY_SPEED_CHASE, navContext);
+
+    expect(updated.state).toBe('opening_door');
+  });
+
+  it('crawler in opening_door state has zero velocity', () => {
+    const enemy = createTypedEnemy({ type: 'crawler', state: 'opening_door', doorOpenTimer: 800, targetDoorId: 5, x: 1210, y: 240 });
+    const player = { x: 600, y: 240 };
+    const wall = { x1: 1200, y1: 0, x2: 1200, y2: 200 };
+    const wall2 = { x1: 1200, y1: 280, x2: 1200, y2: 1000 };
+
+    const updated = updateEnemyAI(enemy, player, [wall, wall2], 16);
+
+    expect(updated.velocityX).toBe(0);
+    expect(updated.velocityY).toBe(0);
+  });
+
+  it('crawler in opening_door does not signal wantsToOpenDoor while timer is active', () => {
+    const enemy = createTypedEnemy({ type: 'crawler', state: 'opening_door', doorOpenTimer: 800, targetDoorId: 5, x: 1210, y: 240 });
+    const player = { x: 600, y: 240 };
+    const wall = { x1: 1200, y1: 0, x2: 1200, y2: 200 };
+    const wall2 = { x1: 1200, y1: 280, x2: 1200, y2: 1000 };
+
+    const updated = updateEnemyAI(enemy, player, [wall, wall2], 16);
+
+    expect(updated.wantsToOpenDoor).toBeFalsy();
+  });
+
+  it('crawler in opening_door sets wantsToOpenDoor when timer expires', () => {
+    const enemy = createTypedEnemy({ type: 'crawler', state: 'opening_door', doorOpenTimer: 10, targetDoorId: 5, x: 1210, y: 240 });
+    const player = { x: 600, y: 240 };
+    const wall = { x1: 1200, y1: 0, x2: 1200, y2: 200 };
+    const wall2 = { x1: 1200, y1: 280, x2: 1200, y2: 1000 };
+
+    const updated = updateEnemyAI(enemy, player, [wall, wall2], 16);
+
+    expect(updated.wantsToOpenDoor).toBe(true);
+    expect(updated.targetDoorId).toBe(5);
+  });
+
+  it('crawler transitions from opening_door to chase after signaling', () => {
+    const enemy = createTypedEnemy({ type: 'crawler', state: 'opening_door', doorOpenTimer: 10, targetDoorId: 5, x: 1210, y: 240 });
+    const player = { x: 600, y: 240 };
+    const wall = { x1: 1200, y1: 0, x2: 1200, y2: 200 };
+    const wall2 = { x1: 1200, y1: 280, x2: 1200, y2: 1000 };
+
+    const updated = updateEnemyAI(enemy, player, [wall, wall2], 16);
+
+    expect(updated.state).toBe('chase');
+  });
+
+  it('basic enemy does NOT transition to opening_door', () => {
+    const enemy = createTypedEnemy({ type: 'basic', state: 'chase', x: 1200 + CRAWLER_DOOR_INTERACT_RANGE - 10, y: 240 });
+    const player = { x: 600, y: 240 };
+    const wall = { x1: 1200, y1: 0, x2: 1200, y2: 200 };
+    const wall2 = { x1: 1200, y1: 280, x2: 1200, y2: 1000 };
+    const navContext = makeNavContextWithDoor();
+
+    const updated = updateEnemyAI(enemy, player, [wall, wall2], 16, false, ENEMY_SPEED_CHASE, navContext);
+
+    expect(updated.state).not.toBe('opening_door');
+  });
+
+  it('spitter does NOT transition to opening_door', () => {
+    const enemy = createTypedEnemy({ type: 'spitter', state: 'chase', x: 1200 + CRAWLER_DOOR_INTERACT_RANGE - 10, y: 240 });
+    const player = { x: 600, y: 240 };
+    const wall = { x1: 1200, y1: 0, x2: 1200, y2: 200 };
+    const wall2 = { x1: 1200, y1: 280, x2: 1200, y2: 1000 };
+    const navContext = makeNavContextWithDoor();
+
+    const updated = updateEnemyAI(enemy, player, [wall, wall2], 16, false, ENEMY_SPEED_CHASE, navContext);
+
+    expect(updated.state).not.toBe('opening_door');
+  });
+
+  it('crawler not within interact range continues navigating toward door', () => {
+    const enemy = createTypedEnemy({ type: 'crawler', state: 'chase', x: 1500, y: 240 });
+    const player = { x: 600, y: 240 };
+    const wall = { x1: 1200, y1: 0, x2: 1200, y2: 200 };
+    const wall2 = { x1: 1200, y1: 280, x2: 1200, y2: 1000 };
+    const navContext = makeNavContextWithDoor();
+
+    const updated = updateEnemyAI(enemy, player, [wall, wall2], 16, false, ENEMY_SPEED_CHASE, navContext);
+
+    expect(updated.state).toBe('chase');
+    expect(updated.velocityX).toBeLessThan(0);
+  });
+
+  it('crawler in opening_door transitions to chase if player becomes visible', () => {
+    const enemy = createTypedEnemy({ type: 'crawler', state: 'opening_door', doorOpenTimer: 800, targetDoorId: 5, x: 200, y: 100 });
+    const player = { x: 250, y: 100 };
+
+    const updated = updateEnemyAI(enemy, player, [], 16);
+
+    expect(updated.state).toBe('chase');
   });
 });

@@ -7,6 +7,7 @@ export const ITEM_TYPES = [
   { type: 'silver_coin', value: 50, weight: 15, color: 0xc0c0c0, size: { w: 8, h: 8 } },
   { type: 'gold_coin', value: 200, weight: 8, color: 0xffd700, size: { w: 8, h: 8 } },
   { type: 'gem', value: 1000, weight: 2, color: 0x00cccc, size: { w: 10, h: 10 } },
+  { type: 'medkit', value: 0, weight: 8, color: 0xff4444, size: { w: 10, h: 10 } },
 ];
 
 const TOTAL_WEIGHT = ITEM_TYPES.reduce((sum, t) => sum + t.weight, 0);

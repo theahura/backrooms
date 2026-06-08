@@ -10,6 +10,13 @@ export const CRAWLER_CONTACT_DAMAGE = 15;
 export const SPITTER_CONTACT_DAMAGE = 10;
 export const SPITTER_PROJECTILE_DAMAGE = 15;
 
+export const MEDKIT_HEAL_AMOUNT = 25;
+
+export const CORPSE_TINT = 0x666666;
+export const CORPSE_ALPHA = 0.6;
+export const CORPSE_ANGLE = 90;
+export const CORPSE_DEPTH = 5;
+
 export function createCombatState(maxHp = PLAYER_MAX_HP) {
   return {
     hp: maxHp,
@@ -28,6 +35,12 @@ export function applyDamage(state, amount) {
     damageCooldown: DAMAGE_COOLDOWN_MS,
     isDead: newHp <= 0,
   };
+}
+
+export function applyHeal(state, amount) {
+  if (state.isDead) return state;
+  const newHp = Math.min(state.maxHp, state.hp + amount);
+  return { ...state, hp: newHp };
 }
 
 export function updateCombat(state, delta) {
