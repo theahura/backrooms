@@ -32,6 +32,7 @@ import { createRunStats, recordKill, updateTime, updateMaxFloor } from '../syste
 import { getEffectiveVolume, createDefaultSettings } from '../systems/settings.js';
 import { SPRITE_DEFS, getAllSpriteKeys, ANIM_DEFS, getAllAnimKeys, getEnemyTextureKey, getAnimKeyForState } from '../systems/sprites.js';
 import { getLightSpillZones } from '../systems/lightSpill.js';
+import { generateRoomTraps } from '../systems/traps.js';
 
 const WALL_THICKNESS = 16;
 
@@ -139,6 +140,7 @@ export class GameScene extends Phaser.Scene {
     this.createEnemies();
     this.createItems();
     this.createLoreItems();
+    this.createTraps();
     this.createBullets();
     this.createEnemyBullets();
     this.createWeaponPickups();
@@ -759,6 +761,84 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.lorePopup = { bg, text: loreText, timer };
+  }
+
+  createTraps() {
+    this.trapGroup = this.physics.add.staticGroup();
+    const roomDistances = computeRoomDistances(this.level.rooms, this.level.stairs);
+
+    for (const room of this.level.rooms) {
+      const furniture = this.roomFurniture.get(room.id) || [];
+      const traps = generateRoomTraps(
+        room.x, room.y, room.width, room.height,
+        WALL_THICKNESS, room.seed, furniture, room.id,
+        roomDistances.get(room.id) ?? 0
+      );
+
+      for (const trap of traps) {
+        const textureKey = `trap_${trap.type}`;
+        const sprite = this.trapGroup.create(trap.x, trap.y, textureKey);
+        sprite.setDepth(5);
+        sprite.setData('trapType', trap.type);
+        sprite.setData('trapDamage', trap.damage);
+        sprite.setData('trapCooldown', trap.cooldown);
+        sprite.setData('trapSingleUse', trap.singleUse);
+        sprite.setData('lastTriggeredAt', 0);
+        sprite.setData('roomId', room.id);
+      }
+    }
+
+    this.physics.add.overlap(this.player, this.trapGroup, this.onTrapOverlap, null, this);
+  }
+
+  onTrapOverlap(player, trapSprite) {
+    if (this.combatState.isDead) return;
+    if (this.dayEnding || this.isTeleporting) return;
+
+    const trapType = trapSprite.getData('trapType');
+
+    if (trapType === 'spike') {
+      const now = this.time.now;
+      const lastTriggered = trapSprite.getData('lastTriggeredAt') || 0;
+      const cooldown = trapSprite.getData('trapCooldown');
+
+      if (now - lastTriggered < cooldown) return;
+
+      trapSprite.setData('lastTriggeredAt', now);
+      const damage = trapSprite.getData('trapDamage');
+      const before = this.combatState;
+      this.combatState = applyDamage(before, damage);
+
+      if (this.combatState.hp < before.hp) {
+        this.playSound('spike_trap');
+        this.cameras.main.shake(100, 0.008);
+        this.cameras.main.flash(100, 255, 50, 0);
+
+        if (this.combatState.isDead) {
+          this.onPlayerDeath();
+        }
+      }
+    } else if (trapType === 'noise') {
+      if (!trapSprite.body.enable) return;
+
+      this.playSound('noise_trap_alarm');
+
+      const trapRoomId = trapSprite.getData('roomId');
+      if (this.roomGraph) {
+        for (const es of this.enemyStates) {
+          const roomDist = getRoomDistance(this.roomGraph, trapRoomId, es.currentRoomId);
+          if (roomDist !== null && roomDist <= 1) {
+            es.state = 'chase';
+            es.lastKnownX = this.player.x;
+            es.lastKnownY = this.player.y;
+          }
+        }
+      }
+
+      trapSprite.body.enable = false;
+      trapSprite.setAlpha(0.3);
+      trapSprite.setTint(0x666666);
+    }
   }
 
   createPlayer() {

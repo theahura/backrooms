@@ -3097,3 +3097,61 @@ Proposed: Game boot → TitleScene → ShopScene → GameScene → RunSummary �
 - Same text-interactive pattern as existing ShopScene buttons
 - In PauseScene: displayed below controls reference
 - In TitleScene: displayed as an overlay (same pattern as delete save confirmation)
+
+## Floor Traps & Environmental Hazards Research
+
+### Design Principles (from Cogmind, Unexplored 2, The Ground Gives Way)
+- Traps should never be instantly lethal — meaningful damage without one-hit-kill
+- Core fairness rule: "The trigger may be invisible or the hazard may be invisible, but they cannot be both" (Unexplored 2)
+- Visible traps transform from "gotcha" moments into tactical decisions — players can lure enemies into them or choose to risk triggering
+- Activation delay with audio feedback gives the player a moment to understand what happened
+- Traps that can also be useful to the player (e.g., luring enemies onto spike traps) make them feel like part of the environment
+
+### Trap Types
+1. **Spike Trap** (floor hazard): Direct damage, visible with flashlight as floor plate sprite, re-triggerable with cooldown
+   - 15 damage (comparable to crawler contact damage)
+   - 3s cooldown between triggers per trap
+   - Trap damage does NOT scale with run count (player's health upgrades are the natural counter)
+   - Respects existing damage cooldown from combat.js (i-frames)
+2. **Noise Trap** (alarm): Single-use tripwire, no direct damage, alerts all enemies in adjacent rooms by forcing chase state
+   - Destroyed after trigger (body.enable = false + visual change)
+   - All enemies in adjacent rooms forced to chase state with player's current position as lastKnownPos
+   - First instance of external enemy state mutation (new pattern)
+
+### Architecture: Pure Module `traps.js`
+- Follow `items.js`/`enemy.js` spawning pattern exactly
+- Seed offset: +110000 (after alternate exits +100000)
+- `TRAP_TYPES` array: `{ type: string, damage: number, cooldown: number, singleUse: boolean }`
+- `generateRoomTraps(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, furnitureItems, roomId, distance)` — same signature pattern as generateRoomItems
+- Returns `[]` for roomId === 0 (safe room)
+- 40px margin from walls, furniture overlap avoidance with retry loop
+- Spawn rate: ~20% of rooms get 1 spike trap, ~15% get 1 noise trap (mutually exclusive per room)
+- Distance gating: spike traps appear at distance >= 2, noise traps at distance >= 3
+
+### Physics Integration
+- `this.trapGroup = this.physics.add.staticGroup()` (same pattern as itemGroup)
+- `this.physics.add.overlap(this.player, this.trapGroup, this.onTrapOverlap, null, this)`
+- Per-trap cooldown via `sprite.setData('lastTriggeredAt', timestamp)` — independent of global damage cooldown
+- Single-use traps: `body.enable = false` + alpha reduction + gray tint after trigger
+
+### Sprite Definitions
+- New `PALETTES.trap` with metallic/danger colors
+- `trap_spikes`: Floor plate with spike pattern, ~16x16 at pixelWidth 1
+- `trap_noise`: Small device/wire, ~14x10 at pixelWidth 1
+
+### Sound Configs
+- `spike_trap_trigger`: Short metallic snap — noise_burst type, freq 3500, Q 4, fast decay
+- `noise_trap_alarm`: Rising alarm sweep — sweep_down type reversed (startFreq low, endFreq high), longer duration
+
+### Enemy Alert Mechanism (New Pattern)
+- No existing pattern for externally forcing enemy state changes
+- Implementation: iterate `this.enemyStates`, for enemies in adjacent rooms (by BFS distance ≤ 1), set state to 'chase' with player's current position as `lastKnownX`/`lastKnownY`
+- This is a scene-level operation, not a pure function mutation (similar to how spawnDangerWave creates enemies)
+
+### GameScene Integration
+- `createTraps()` method: follows `createItems()` pattern
+- Compute `roomDistances` (already computed for items) and pass to `generateRoomTraps()`
+- `onTrapOverlap(player, trapSprite)` callback: reads trap type, applies appropriate effect
+- Spike: `applyDamage()` + camera shake + sound + damage cooldown check
+- Noise: play alarm sound + alert nearby enemies + disable trap + visual change
+- Traps render at depth 5 (same as items — hidden in darkness, visible in flashlight)
