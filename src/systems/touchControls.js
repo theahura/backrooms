@@ -26,7 +26,8 @@ export function detectTouchPrimary({ maxTouchPoints, coarsePointer }) {
 export function computeTouchLayout({ width, height, stickRadius }) {
   const edge = 30;
   const fireRadius = 52;
-  const actionSpacing = 90;
+  const actionRadius = 34;
+  const actionHalfSpacing = 45;
   const actionBottomMargin = 72;
 
   const inset = stickRadius + edge;
@@ -44,11 +45,14 @@ export function computeTouchLayout({ width, height, stickRadius }) {
       y: midY,
       radius: fireRadius,
     },
+    useButton: {
+      x: aimStick.x,
+      y: Math.min(midY + stickRadius + actionRadius + 10, height - actionRadius - 8),
+    },
     actionRow: {
       y: height - actionBottomMargin,
-      useX: centerX - actionSpacing,
-      weaponX: centerX,
-      batteryX: centerX + actionSpacing,
+      weaponX: centerX - actionHalfSpacing,
+      batteryX: centerX + actionHalfSpacing,
     },
     fullscreenButton: { x: centerX, y: 40 },
   };

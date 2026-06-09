@@ -194,16 +194,27 @@ describe('computeTouchLayout', () => {
     expect(fb.x).toBeLessThan(layout.aimStick.x);
   });
 
-  it('lays the action row across the bottom-center, ordered and clear of the very bottom edge', () => {
+  it('lays the weapon/battery action row centered along the bottom, clear of the very bottom edge', () => {
     const layout = computeTouchLayout({ width: 844, height: 390, stickRadius: radius });
     const row = layout.actionRow;
-    expect(row.useX).toBeLessThan(row.weaponX);
     expect(row.weaponX).toBeLessThan(row.batteryX);
-    // centered horizontally
-    expect(row.weaponX).toBe(422);
+    // the two-button row straddles the horizontal center
+    expect((row.weaponX + row.batteryX) / 2).toBe(422);
     // below the centered sticks but not flush against the bottom edge
     expect(row.y).toBeGreaterThan(195);
     expect(row.y).toBeLessThan(390);
+  });
+
+  it('places the use button next to the right aim stick, within right-thumb reach', () => {
+    const layout = computeTouchLayout({ width: 844, height: 390, stickRadius: radius });
+    const use = layout.useButton;
+    // far closer to the right aim stick than to the left move stick
+    expect(Math.abs(use.x - layout.aimStick.x)).toBeLessThan(Math.abs(use.x - layout.moveStick.x));
+    // sits below the aim stick so the right thumb can drop straight to it
+    expect(use.y).toBeGreaterThan(layout.aimStick.y);
+    // fully on-screen (button radius ~34)
+    expect(use.x + 34).toBeLessThanOrEqual(844);
+    expect(use.y + 34).toBeLessThanOrEqual(390);
   });
 
   it('keeps the fullscreen button on-screen near the top', () => {

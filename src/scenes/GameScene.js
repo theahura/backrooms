@@ -1736,7 +1736,7 @@ export class GameScene extends Phaser.Scene {
     }).setOrigin(0.5).setScrollFactor(0).setDepth(TOUCH_UI_DEPTH + 1);
 
     const row = layout.actionRow;
-    this.useButton = this.makeTouchButton(row.useX, row.y, 'USE', () => this.triggerInteract());
+    this.useButton = this.makeTouchButton(layout.useButton.x, layout.useButton.y, 'USE', () => this.triggerInteract());
     this.weaponButton = this.makeTouchButton(row.weaponX, row.y, 'WPN', () => this.triggerWeaponSwitch());
     this.batteryButton = this.makeTouchButton(row.batteryX, row.y, 'BATT', () => {
       if (this.combatState.isDead || this.dayEnding || this.hidingState.isHiding) return;
@@ -1790,7 +1790,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     const row = layout.actionRow;
-    this.moveTouchButton(this.useButton, row.useX, row.y);
+    this.moveTouchButton(this.useButton, layout.useButton.x, layout.useButton.y);
     this.moveTouchButton(this.weaponButton, row.weaponX, row.y);
     this.moveTouchButton(this.batteryButton, row.batteryX, row.y);
     this.moveTouchButton(this.fullscreenButton, layout.fullscreenButton.x, layout.fullscreenButton.y);
