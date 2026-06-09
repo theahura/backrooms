@@ -151,6 +151,14 @@ export const SOUND_CONFIGS = {
     endFreq: 40,
     oscType: 'sawtooth',
   },
+  loot_drop: {
+    duration: 0.15,
+    gain: 0.25,
+    type: 'noise_burst',
+    freq: 2500,
+    Q: 1.0,
+    decay: 0.06,
+  },
   item_pickup: {
     duration: 0.15,
     gain: 0.25,

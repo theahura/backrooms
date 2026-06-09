@@ -3155,3 +3155,52 @@ Proposed: Game boot → TitleScene → ShopScene → GameScene → RunSummary �
 - Spike: `applyDamage()` + camera shake + sound + damage cooldown check
 - Noise: play alarm sound + alert nearby enemies + disable trap + visual change
 - Traps render at depth 5 (same as items — hidden in darkness, visible in flashlight)
+
+## Enemy Loot Drops Research
+
+### Design Rationale
+Currently, killing enemies provides no reward beyond survival. The spec's direct inspiration (Motherload) rewards combat with drops. Every major roguelike (Enter the Gungeon, Nuclear Throne, Binding of Isaac) rewards enemy kills with pickups. Adding enemy loot drops creates a risk-reward dynamic: fighting is dangerous (ammo cost, health risk) but now has tangible payoff.
+
+### Industry Patterns (from roguelike analysis)
+- **Drop rates**: Not every enemy drops loot. Standard is 30-60% chance per kill, varying by enemy difficulty. Enter the Gungeon uses ~50% for currency, much lower for consumables.
+- **Drop tables**: Per-enemy-type tables are standard for roguelikes. Simpler approach: single table with enemy type as a modifier (bonus to effective distance/quality).
+- **Visual feedback**: Item sprite spawns at death position on the ground. No need for arc/bounce physics — static drop is simpler and matches existing item pattern.
+- **Dynamic modifiers**: Nuclear Throne scales drop rates based on player ammo state. For simplicity, we use enemy type + room distance.
+
+### Architecture: Pure Module `lootDrops.js`
+- `src/systems/lootDrops.js` — pure functions for loot drop determination
+- Imports `ITEM_TYPES` from `items.js` and filters out medkits (medkits bypass inventory; dropping heals from enemies would reduce horror tension and make combat self-sustaining)
+- `DROP_CHANCES`: per-enemy-type drop probability — basic: 0.30, crawler: 0.45, spitter: 0.55
+- `ENEMY_DISTANCE_BONUS`: per-enemy-type bonus to effective room distance — basic: 0, crawler: 1, spitter: 2
+- `getDropChance(enemyType)` — returns 0-1 probability
+- `getDistanceBonus(enemyType)` — returns integer distance offset
+- `rollEnemyDrop(enemyType, distance, rand)` — rolls for drop, picks item type using distance-based weights (same formula as room items: `max(0, base + perRoom * effectiveDistance)`), returns `{type, value}` or null
+
+### Distance-Based Loot Quality
+Reuses the existing `ITEM_TYPES` weight system from `items.js`:
+- `effectiveDistance = roomDistance + getDistanceBonus(enemyType)`
+- At low distance: copper coins dominate (base 34, -5 per room)
+- At high distance: silver/gold become more common (positive perRoom)
+- Gems possible only at distance >= 5 (negative base)
+- Ammo/battery have flat weights (base 25/20, perRoom 0) — always available
+
+### Why Medkits Are Excluded From Drops
+1. Medkits bypass inventory capacity (consumed immediately on pickup)
+2. If enemies dropped heals, combat would become self-sustaining: kill enemy → heal → take more damage → kill more enemies → heal
+3. The horror genre depends on health being scarce; medkit drops would undermine tension
+4. Room-spawned medkits are sufficient as the sole heal source
+
+### GameScene Integration
+- Store `roomDistances` Map as `this.roomDistances` in `createItems()` (currently computed but only used locally)
+- In `onBulletHitEnemy()`, after enemy death processing:
+  1. Look up `roomDistances.get(enemyState.currentRoomId) ?? 0`
+  2. Call `rollEnemyDrop(enemyState.type, distance, Math.random)` — uses Math.random because drops are runtime events, not level generation
+  3. If drop returned: create sprite via `this.itemGroup.create(enemySprite.x, enemySprite.y, \`item_${drop.type}\`)`, set depth 5, set sprite data for `itemType` and `itemValue`
+  4. No new colliders needed — adding to existing `itemGroup` auto-registers for pickup overlap
+- New `loot_drop` sound config: brief metallic clink (noise_burst type, ~2500Hz, short decay) for audio feedback when an item drops
+
+### Edge Cases
+- Enemy dies inside wall → items use staticGroup (no wall collision), player can still overlap to pick up
+- Multiple enemies die at same position → separate sprites stack, player picks up individually
+- No save/load concern → drops are ephemeral like all room items
+- `roomDistances` might not have enemy's `currentRoomId` → fallback to 0 (basic loot)

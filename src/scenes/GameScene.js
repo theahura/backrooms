@@ -33,6 +33,7 @@ import { getEffectiveVolume, createDefaultSettings } from '../systems/settings.j
 import { SPRITE_DEFS, getAllSpriteKeys, ANIM_DEFS, getAllAnimKeys, getEnemyTextureKey, getAnimKeyForState } from '../systems/sprites.js';
 import { getLightSpillZones } from '../systems/lightSpill.js';
 import { generateRoomTraps } from '../systems/traps.js';
+import { rollEnemyDrop } from '../systems/lootDrops.js';
 
 const WALL_THICKNESS = 16;
 
@@ -135,6 +136,7 @@ export class GameScene extends Phaser.Scene {
     this.generateSpriteTextures();
     this.createRooms();
     this.createDoors();
+    this.roomDistances = computeRoomDistances(this.level.rooms, this.level.stairs);
     this.createSwitches();
     this.createPlayer();
     this.createEnemies();
@@ -624,14 +626,12 @@ export class GameScene extends Phaser.Scene {
   createItems() {
     this.itemGroup = this.physics.add.staticGroup();
 
-    const roomDistances = computeRoomDistances(this.level.rooms, this.level.stairs);
-
     for (const room of this.level.rooms) {
       const furniture = this.roomFurniture.get(room.id) || [];
       const items = generateRoomItems(
         room.x, room.y, room.width, room.height,
         WALL_THICKNESS, room.seed, furniture, room.id,
-        roomDistances.get(room.id) ?? 0
+        this.roomDistances.get(room.id) ?? 0
       );
 
       for (const item of items) {
@@ -765,14 +765,13 @@ export class GameScene extends Phaser.Scene {
 
   createTraps() {
     this.trapGroup = this.physics.add.staticGroup();
-    const roomDistances = computeRoomDistances(this.level.rooms, this.level.stairs);
 
     for (const room of this.level.rooms) {
       const furniture = this.roomFurniture.get(room.id) || [];
       const traps = generateRoomTraps(
         room.x, room.y, room.width, room.height,
         WALL_THICKNESS, room.seed, furniture, room.id,
-        roomDistances.get(room.id) ?? 0
+        this.roomDistances.get(room.id) ?? 0
       );
 
       for (const trap of traps) {
@@ -1470,6 +1469,17 @@ export class GameScene extends Phaser.Scene {
       enemySprite.setAlpha(CORPSE_ALPHA);
       enemySprite.setAngle(CORPSE_ANGLE);
       enemySprite.setDepth(CORPSE_DEPTH);
+
+      const roomDist = this.roomDistances.get(enemyState.currentRoomId) ?? 0;
+      const drop = rollEnemyDrop(enemyState.type, roomDist, Math.random);
+      if (drop) {
+        const dropSprite = this.itemGroup.create(enemySprite.x, enemySprite.y, `item_${drop.type}`);
+        dropSprite.setDepth(5);
+        dropSprite.setData('itemType', drop.type);
+        dropSprite.setData('itemValue', drop.value);
+        this.playSoundAtDistance('loot_drop', deathDist);
+      }
+
       this.enemyStates = this.enemyStates.filter(es => es !== enemyState);
     }
   }
