@@ -265,6 +265,75 @@ async function renderFilteredNoise(ctx, config) {
   return offCtx.startRendering();
 }
 
+async function renderSkitter(ctx, config) {
+  const sampleRate = ctx.sampleRate;
+  const length = Math.ceil(sampleRate * config.duration);
+  const offCtx = new OfflineAudioContext(1, length, sampleRate);
+
+  const noiseBuffer = offCtx.createBuffer(1, length, sampleRate);
+  fillNoise(noiseBuffer.getChannelData(0));
+  const noise = offCtx.createBufferSource();
+  noise.buffer = noiseBuffer;
+
+  const filter = offCtx.createBiquadFilter();
+  filter.type = 'highpass';
+  filter.frequency.value = config.freq;
+  filter.Q.value = config.Q;
+
+  const gain = offCtx.createGain();
+  gain.gain.setValueAtTime(0, 0);
+  for (let i = 0; i < config.clicks; i++) {
+    const start = i * (config.clickDuration + config.clickGap);
+    if (start >= config.duration) break;
+    gain.gain.setValueAtTime(config.gain, start);
+    gain.gain.setValueAtTime(0, start + config.clickDuration);
+  }
+
+  noise.connect(filter);
+  filter.connect(gain);
+  gain.connect(offCtx.destination);
+  noise.start(0);
+  return offCtx.startRendering();
+}
+
+async function renderGurgle(ctx, config) {
+  const sampleRate = ctx.sampleRate;
+  const length = Math.ceil(sampleRate * config.duration);
+  const offCtx = new OfflineAudioContext(1, length, sampleRate);
+
+  const noiseBuffer = offCtx.createBuffer(1, length, sampleRate);
+  fillNoise(noiseBuffer.getChannelData(0));
+  const noise = offCtx.createBufferSource();
+  noise.buffer = noiseBuffer;
+
+  const filter = offCtx.createBiquadFilter();
+  filter.type = 'bandpass';
+  filter.frequency.value = config.freq;
+  filter.Q.value = config.Q;
+
+  const lfo = offCtx.createOscillator();
+  lfo.type = 'sine';
+  lfo.frequency.value = config.lfoFreq;
+  const lfoGain = offCtx.createGain();
+  lfoGain.gain.value = config.lfoDepth;
+  lfo.connect(lfoGain);
+  lfoGain.connect(filter.frequency);
+
+  const masterGain = offCtx.createGain();
+  masterGain.gain.setValueAtTime(0, 0);
+  masterGain.gain.linearRampToValueAtTime(config.gain, config.attackTime);
+  masterGain.gain.setValueAtTime(config.gain, config.duration - config.releaseTime);
+  masterGain.gain.linearRampToValueAtTime(0.001, config.duration);
+
+  noise.connect(filter);
+  filter.connect(masterGain);
+  masterGain.connect(offCtx.destination);
+
+  noise.start(0);
+  lfo.start(0);
+  return offCtx.startRendering();
+}
+
 const RENDERERS = {
   gunshot: renderGunshot,
   noise_burst: renderNoiseBurst,
@@ -275,6 +344,8 @@ const RENDERERS = {
   door: renderDoor,
   door_thud: renderDoorThud,
   filtered_noise: renderFilteredNoise,
+  skitter: renderSkitter,
+  gurgle: renderGurgle,
 };
 
 export async function generateAllSounds(audioContext, cache) {
@@ -334,6 +405,7 @@ export function createAmbientDrone(audioContext, destination) {
   filter.connect(destination);
 
   const nodes = [osc1, osc2, osc3, lfo];
+  const baseGain = 0.06;
 
   return {
     start() {
@@ -344,13 +416,18 @@ export function createAmbientDrone(audioContext, destination) {
         try { node.stop(); } catch (_) {}
       }
     },
+    setVolume(value) {
+      masterGain.gain.value = baseGain * value;
+    },
   };
 }
 
-export function playAmbientSound(soundManager, time) {
+export function playAmbientSound(soundManager, time, volumeMultiplier = 1) {
   const index = Math.abs(((time * 2654435761) >>> 0) % AMBIENT_SOUND_TYPES.length);
   const type = AMBIENT_SOUND_TYPES[index];
+  const vol = 0.5 * volumeMultiplier;
+  if (vol <= 0) return;
   try {
-    soundManager.play(type.name, { volume: 0.5 });
+    soundManager.play(type.name, { volume: vol });
   } catch (_) {}
 }

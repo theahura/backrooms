@@ -26,9 +26,15 @@ import { getLocation, getLocationLayout, getLocationExitPosition, generateAltern
 import { generateRoomLore } from '../systems/lore.js';
 import { buildRoomGraph, buildFullRoomGraph, bfsFromRoom, getNextDoorway, getClosedDoorOnPath, getRoomDistance, getDoorwayCenter, DOORWAY_SEEK_CHANCE, ROOM_TRANSITION_COOLDOWN, MAX_ROOM_DISTANCE, MAX_ROOM_ENEMIES } from '../systems/pathfinding.js';
 import { createDangerState, updateDangerTime, shouldSpawnWave, advanceWave, getWaveComposition, getSpawnRoom } from '../systems/danger.js';
-import { getFootstepInterval, getAmbientSoundDelay } from '../systems/audio.js';
+import { SOUND_CONFIGS, getFootstepInterval, getAmbientSoundDelay, getEnemySoundEvent, getEnemyDeathSound, getEnemyFireSound, getDistanceVolume, ENEMY_SOUND_RANGE } from '../systems/audio.js';
 import { generateAllSounds, createAmbientDrone, playAmbientSound } from '../systems/audioEngine.js';
+import { getAlertedEnemies, GUNSHOT_ALERT_COOLDOWN } from '../systems/gunfireNoise.js';
+import { createRunStats, recordKill, updateTime, updateMaxFloor } from '../systems/runStats.js';
+import { getEffectiveVolume, createDefaultSettings } from '../systems/settings.js';
 import { SPRITE_DEFS, getAllSpriteKeys, ANIM_DEFS, getAllAnimKeys, getEnemyTextureKey, getAnimKeyForState } from '../systems/sprites.js';
+import { getLightSpillZones } from '../systems/lightSpill.js';
+import { generateRoomTraps } from '../systems/traps.js';
+import { rollEnemyDrop } from '../systems/lootDrops.js';
 
 const WALL_THICKNESS = 16;
 
@@ -56,8 +62,14 @@ export class GameScene extends Phaser.Scene {
     };
     this.maxItems = getUpgradeValue('backpack', levels.backpack);
     const hasStartingPistol = (levels.startingPistol || 0) > 0;
+    const hasStartingShotgun = (levels.startingShotgun || 0) > 0;
+    const hasStartingRifle = (levels.startingRifle || 0) > 0;
     this.hasMinimap = (levels.minimap || 0) > 0;
-    this.weaponState = createWeaponState({ startingPistol: hasStartingPistol });
+    this.weaponState = createWeaponState({
+      startingPistol: hasStartingPistol,
+      startingShotgun: hasStartingShotgun,
+      startingRifle: hasStartingRifle,
+    });
     this.updateWeaponStats();
 
     const runCount = this.registry.get('runCount') ?? 0;
@@ -79,6 +91,8 @@ export class GameScene extends Phaser.Scene {
     this.activeLocationData = getLocation(this.activeLocation) || getLocation('store');
     this.unlockedLocations = this.registry.get('unlockedLocations') ?? ['store'];
     this.dangerState = createDangerState();
+    this.runStats = createRunStats();
+    this.audioSettings = this.registry.get('audioSettings') || createDefaultSettings();
     saveGame(shopState || createShopState(), runCount + 1, [...this.collectedLore], this.unlockedLocations, this.activeLocation);
   }
 
@@ -125,15 +139,18 @@ export class GameScene extends Phaser.Scene {
     this.roomGraph = null;
     this.fullRoomGraph = null;
     this.roomGraphDirty = true;
+    this.gunshotAlertCooldown = 0;
 
     this.generateSpriteTextures();
     this.createRooms();
     this.createDoors();
+    this.roomDistances = computeRoomDistances(this.level.rooms, this.level.stairs);
     this.createSwitches();
     this.createPlayer();
     this.createEnemies();
     this.createItems();
     this.createLoreItems();
+    this.createTraps();
     this.createBullets();
     this.createEnemyBullets();
     this.createWeaponPickups();
@@ -188,6 +205,8 @@ export class GameScene extends Phaser.Scene {
     if (!this.sound || !this.sound.context) return;
 
     this.ambientDrone = createAmbientDrone(this.sound.context, this.sound.destination);
+    const ambientVol = getEffectiveVolume(this.audioSettings.masterVolume, this.audioSettings.ambientVolume);
+    this.ambientDrone.setVolume(ambientVol);
     this.ambientDrone.start();
 
     this.scheduleAmbientSound();
@@ -199,7 +218,8 @@ export class GameScene extends Phaser.Scene {
       delay,
       callback: () => {
         if (this.audioReady) {
-          playAmbientSound(this.sound, this.time.now);
+          const ambientVol = getEffectiveVolume(this.audioSettings.masterVolume, this.audioSettings.ambientVolume);
+          playAmbientSound(this.sound, this.time.now, ambientVol);
         }
         this.scheduleAmbientSound();
       },
@@ -208,9 +228,32 @@ export class GameScene extends Phaser.Scene {
 
   playSound(key) {
     if (!this.audioReady) return;
+    const vol = getEffectiveVolume(this.audioSettings.masterVolume, this.audioSettings.sfxVolume);
+    if (vol <= 0) return;
     try {
-      this.sound.play(key, { volume: 1 });
+      this.sound.play(key, { volume: vol });
     } catch (_) {}
+  }
+
+  playSoundAtDistance(key, distance) {
+    if (!this.audioReady) return;
+    const config = SOUND_CONFIGS[key];
+    const baseGain = config ? config.gain : 0.3;
+    const volume = getDistanceVolume(distance, ENEMY_SOUND_RANGE, baseGain);
+    if (volume <= 0) return;
+    const sfxVol = getEffectiveVolume(this.audioSettings.masterVolume, this.audioSettings.sfxVolume);
+    if (sfxVol <= 0) return;
+    try {
+      this.sound.play(key, { volume: volume * sfxVol });
+    } catch (_) {}
+  }
+
+  applyVolumeSettings() {
+    this.audioSettings = this.registry.get('audioSettings') || createDefaultSettings();
+    if (this.ambientDrone) {
+      const ambientVol = getEffectiveVolume(this.audioSettings.masterVolume, this.audioSettings.ambientVolume);
+      this.ambientDrone.setVolume(ambientVol);
+    }
   }
 
   stopAmbientAudio() {
@@ -591,14 +634,12 @@ export class GameScene extends Phaser.Scene {
   createItems() {
     this.itemGroup = this.physics.add.staticGroup();
 
-    const roomDistances = computeRoomDistances(this.level.rooms, this.level.stairs);
-
     for (const room of this.level.rooms) {
       const furniture = this.roomFurniture.get(room.id) || [];
       const items = generateRoomItems(
         room.x, room.y, room.width, room.height,
         WALL_THICKNESS, room.seed, furniture, room.id,
-        roomDistances.get(room.id) ?? 0
+        this.roomDistances.get(room.id) ?? 0
       );
 
       for (const item of items) {
@@ -730,6 +771,83 @@ export class GameScene extends Phaser.Scene {
     this.lorePopup = { bg, text: loreText, timer };
   }
 
+  createTraps() {
+    this.trapGroup = this.physics.add.staticGroup();
+
+    for (const room of this.level.rooms) {
+      const furniture = this.roomFurniture.get(room.id) || [];
+      const traps = generateRoomTraps(
+        room.x, room.y, room.width, room.height,
+        WALL_THICKNESS, room.seed, furniture, room.id,
+        this.roomDistances.get(room.id) ?? 0
+      );
+
+      for (const trap of traps) {
+        const textureKey = `trap_${trap.type}`;
+        const sprite = this.trapGroup.create(trap.x, trap.y, textureKey);
+        sprite.setDepth(5);
+        sprite.setData('trapType', trap.type);
+        sprite.setData('trapDamage', trap.damage);
+        sprite.setData('trapCooldown', trap.cooldown);
+        sprite.setData('trapSingleUse', trap.singleUse);
+        sprite.setData('lastTriggeredAt', 0);
+        sprite.setData('roomId', room.id);
+      }
+    }
+
+    this.physics.add.overlap(this.player, this.trapGroup, this.onTrapOverlap, null, this);
+  }
+
+  onTrapOverlap(player, trapSprite) {
+    if (this.combatState.isDead) return;
+    if (this.dayEnding || this.isTeleporting) return;
+
+    const trapType = trapSprite.getData('trapType');
+
+    if (trapType === 'spike') {
+      const now = this.time.now;
+      const lastTriggered = trapSprite.getData('lastTriggeredAt') || 0;
+      const cooldown = trapSprite.getData('trapCooldown');
+
+      if (now - lastTriggered < cooldown) return;
+
+      trapSprite.setData('lastTriggeredAt', now);
+      const damage = trapSprite.getData('trapDamage');
+      const before = this.combatState;
+      this.combatState = applyDamage(before, damage);
+
+      if (this.combatState.hp < before.hp) {
+        this.playSound('spike_trap');
+        this.cameras.main.shake(100, 0.008);
+        this.cameras.main.flash(100, 255, 50, 0);
+
+        if (this.combatState.isDead) {
+          this.onPlayerDeath();
+        }
+      }
+    } else if (trapType === 'noise') {
+      if (!trapSprite.body.enable) return;
+
+      this.playSound('noise_trap_alarm');
+
+      const trapRoomId = trapSprite.getData('roomId');
+      if (this.roomGraph) {
+        for (const es of this.enemyStates) {
+          const roomDist = getRoomDistance(this.roomGraph, trapRoomId, es.currentRoomId);
+          if (roomDist >= 0 && roomDist <= 1) {
+            es.state = 'chase';
+            es.lastKnownX = this.player.x;
+            es.lastKnownY = this.player.y;
+          }
+        }
+      }
+
+      trapSprite.body.enable = false;
+      trapSprite.setAlpha(0.3);
+      trapSprite.setTint(0x666666);
+    }
+  }
+
   createPlayer() {
     const spawnRoom = this.level.rooms[0];
     const playerX = spawnRoom.x + spawnRoom.width / 2;
@@ -795,6 +913,7 @@ export class GameScene extends Phaser.Scene {
         targetDoorway: null,
         doorOpenTimer: 0,
         targetDoorId: null,
+        soundCooldown: 1000 + Math.random() * 3000,
       });
     }
   }
@@ -839,6 +958,7 @@ export class GameScene extends Phaser.Scene {
           targetDoorway: null,
           doorOpenTimer: 0,
           targetDoorId: null,
+          soundCooldown: 1000 + Math.random() * 3000,
         });
       }
     }
@@ -1178,6 +1298,7 @@ export class GameScene extends Phaser.Scene {
       player.body.reset(destX, destY);
       player.body.enable = true;
       this.currentFloor = destFloor;
+      this.runStats = updateMaxFloor(this.runStats, destFloor);
 
       this.cameras.main.fadeIn(300, 0, 0, 0);
       this.cameras.main.once('camerafadeincomplete', () => {
@@ -1195,9 +1316,16 @@ export class GameScene extends Phaser.Scene {
     this.player.body.enable = false;
     this.cameras.main.fadeOut(1000, 0, 0, 0);
     this.cameras.main.once('camerafadeoutcomplete', () => {
-      this.scene.start('ShopScene', {
+      this.scene.start('RunSummaryScene', {
+        survived: true,
         treasureEarned: this.inventoryState.treasureValue,
+        runStats: this.runStats,
+        roomsExplored: this.explorationState.visitedRoomIds.size,
+        totalRooms: this.level.rooms.length,
+        hp: this.combatState.hp,
+        maxHp: this.combatState.maxHp,
         newLocation: newLocation || null,
+        touchMode: this.touchMode,
       });
     });
   }
@@ -1336,7 +1464,11 @@ export class GameScene extends Phaser.Scene {
     this.playSound('bullet_hit');
 
     if (isEnemyDead(enemyState.health)) {
-      this.playSound('enemy_death');
+      this.runStats = recordKill(this.runStats);
+      const dx = enemySprite.x - this.player.x;
+      const dy = enemySprite.y - this.player.y;
+      const deathDist = Math.sqrt(dx * dx + dy * dy);
+      this.playSoundAtDistance(getEnemyDeathSound(enemyState.type), deathDist);
       enemySprite.stop();
       enemySprite.setActive(false);
       enemySprite.body.stop();
@@ -1345,6 +1477,17 @@ export class GameScene extends Phaser.Scene {
       enemySprite.setAlpha(CORPSE_ALPHA);
       enemySprite.setAngle(CORPSE_ANGLE);
       enemySprite.setDepth(CORPSE_DEPTH);
+
+      const roomDist = this.roomDistances.get(enemyState.currentRoomId) ?? 0;
+      const drop = rollEnemyDrop(enemyState.type, roomDist, Math.random);
+      if (drop) {
+        const dropSprite = this.itemGroup.create(enemySprite.x, enemySprite.y, `item_${drop.type}`);
+        dropSprite.setDepth(5);
+        dropSprite.setData('itemType', drop.type);
+        dropSprite.setData('itemValue', drop.value);
+        this.playSoundAtDistance('loot_drop', deathDist);
+      }
+
       this.enemyStates = this.enemyStates.filter(es => es !== enemyState);
     }
   }
@@ -1378,6 +1521,13 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  pauseGame() {
+    if (this.combatState.isDead || this.dayEnding || this.isTeleporting) return;
+    if (this.scene.isPaused()) return;
+    this.scene.pause();
+    this.scene.launch('PauseScene', { touchMode: this.touchMode });
+  }
+
   onPlayerDeath() {
     this.playSound('player_death');
     this.stopAmbientAudio();
@@ -1385,7 +1535,17 @@ export class GameScene extends Phaser.Scene {
     this.player.body.enable = false;
     this.cameras.main.fadeOut(500, 0, 0, 0);
     this.cameras.main.once('camerafadeoutcomplete', () => {
-      this.scene.start('ShopScene', { treasureEarned: 0 });
+      this.scene.start('RunSummaryScene', {
+        survived: false,
+        treasureEarned: 0,
+        runStats: this.runStats,
+        roomsExplored: this.explorationState.visitedRoomIds.size,
+        totalRooms: this.level.rooms.length,
+        hp: 0,
+        maxHp: this.combatState.maxHp,
+        newLocation: null,
+        touchMode: this.touchMode,
+      });
     });
   }
 
@@ -1491,7 +1651,17 @@ export class GameScene extends Phaser.Scene {
       };
 
       const chaseSpeed = this.getScaledChaseSpeed(es.type);
+      const oldState = es.state;
       const updated = updateEnemyAI(es, playerPos, this.wallSegments, delta, this.hidingState.isHiding, chaseSpeed, navContext);
+
+      const soundResult = getEnemySoundEvent(oldState, updated.state, es.type, es.soundCooldown || 0, delta);
+      es.soundCooldown = soundResult.newCooldown;
+      if (soundResult.soundKey) {
+        const dx = es.x - playerPos.x;
+        const dy = es.y - playerPos.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        this.playSoundAtDistance(soundResult.soundKey, dist);
+      }
 
       es.state = updated.state;
       es.velocityX = updated.velocityX;
@@ -1517,6 +1687,12 @@ export class GameScene extends Phaser.Scene {
 
       if (updated.wantsToFire) {
         this.fireEnemyBullet(es.x, es.y, playerPos.x, playerPos.y);
+        const fireSound = getEnemyFireSound(es.type);
+        if (fireSound) {
+          const fdx = es.x - playerPos.x;
+          const fdy = es.y - playerPos.y;
+          this.playSoundAtDistance(fireSound, Math.sqrt(fdx * fdx + fdy * fdy));
+        }
         es.wantsToFire = false;
       }
 
@@ -1688,6 +1864,8 @@ export class GameScene extends Phaser.Scene {
         this.triggerWeaponSwitch();
       }
     });
+
+    this.input.keyboard.on('keydown-ESC', () => this.pauseGame());
   }
 
   createTouchControls() {
@@ -1753,6 +1931,8 @@ export class GameScene extends Phaser.Scene {
       });
     }
 
+    this.pauseButton = this.makeTouchButton(layout.pauseButton.x, layout.pauseButton.y, '| |', () => this.pauseGame());
+
     this.setButtonVisible(this.useButton, false);
     this.setButtonVisible(this.weaponButton, false);
 
@@ -1794,6 +1974,7 @@ export class GameScene extends Phaser.Scene {
     this.moveTouchButton(this.weaponButton, row.weaponX, row.y);
     this.moveTouchButton(this.batteryButton, row.batteryX, row.y);
     this.moveTouchButton(this.fullscreenButton, layout.fullscreenButton.x, layout.fullscreenButton.y);
+    this.moveTouchButton(this.pauseButton, layout.pauseButton.x, layout.pauseButton.y);
 
     if (this.floorText) {
       this.floorText.setPosition(this.scale.width - 180, 145);
@@ -1985,6 +2166,17 @@ export class GameScene extends Phaser.Scene {
       this.lightGraphics.fillRect(room.x, room.y, room.width, room.height);
     }
 
+    const spillZones = getLightSpillZones(this.level.rooms, litRoomIds, this.doorStates);
+    for (const zone of spillZones) {
+      this.maskGraphics.fillGradientStyle(0xffffff, 0xffffff, 0xffffff, 0xffffff,
+        zone.alphas.topLeft, zone.alphas.topRight, zone.alphas.bottomLeft, zone.alphas.bottomRight);
+      this.maskGraphics.fillRect(zone.x, zone.y, zone.width, zone.height);
+      this.lightGraphics.fillGradientStyle(0xffffcc, 0xffffcc, 0xffffcc, 0xffffcc,
+        zone.alphas.topLeft * 0.05, zone.alphas.topRight * 0.05,
+        zone.alphas.bottomLeft * 0.05, zone.alphas.bottomRight * 0.05);
+      this.lightGraphics.fillRect(zone.x, zone.y, zone.width, zone.height);
+    }
+
     const coneAngle = getFlashlightConeAngle(this.batteryState, this.flashlightAngle);
     if (coneAngle <= 0 || shouldFlicker(this.batteryState, time)) return;
 
@@ -2021,6 +2213,8 @@ export class GameScene extends Phaser.Scene {
 
   update(time, delta) {
     if (this.combatState.isDead || this.dayEnding || this.isTeleporting) return;
+
+    this.runStats = updateTime(this.runStats, delta);
 
     const pointer = this.input.activePointer;
     pointer.updateWorldPoint(this.cameras.main);
@@ -2082,10 +2276,27 @@ export class GameScene extends Phaser.Scene {
       fireButtonDown,
       leftButtonDown: pointer.leftButtonDown(),
     });
+    this.gunshotAlertCooldown = Math.max(0, this.gunshotAlertCooldown - delta);
     if (!this.hidingState.isHiding && wantFire && canFire(this.fireCooldown) && getActiveWeapon(this.weaponState) && hasAmmo(this.weaponState)) {
       this.fireBullet();
       this.weaponState = consumeAmmo(this.weaponState);
       this.fireCooldown = this.fireRate;
+
+      if (this.gunshotAlertCooldown <= 0 && this.roomGraph) {
+        const weapon = getActiveWeapon(this.weaponState);
+        const playerRoom = getCurrentRoom(this.player.x, this.player.y, this.level.rooms);
+        if (playerRoom && weapon) {
+          const alertedIndices = getAlertedEnemies(this.enemyStates, this.roomGraph, playerRoom.id, weapon.noiseRange);
+          for (const idx of alertedIndices) {
+            this.enemyStates[idx].state = 'chase';
+            this.enemyStates[idx].lastKnownX = this.player.x;
+            this.enemyStates[idx].lastKnownY = this.player.y;
+          }
+          if (alertedIndices.length > 0) {
+            this.gunshotAlertCooldown = GUNSHOT_ALERT_COOLDOWN;
+          }
+        }
+      }
     }
 
     this.updateInteractPrompt();

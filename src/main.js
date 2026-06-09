@@ -1,8 +1,12 @@
 import Phaser from 'phaser';
 import VirtualJoystickPlugin from 'phaser3-rex-plugins/plugins/virtualjoystick-plugin.js';
+import { TitleScene } from './scenes/TitleScene.js';
 import { GameScene } from './scenes/GameScene.js';
 import { ShopScene } from './scenes/ShopScene.js';
+import { PauseScene } from './scenes/PauseScene.js';
+import { RunSummaryScene } from './scenes/RunSummaryScene.js';
 import { loadGame, saveGame } from './systems/persistence.js';
+import { loadSettings } from './systems/settings.js';
 import { detectTouchPrimary } from './systems/touchControls.js';
 
 const coarsePointer = typeof window !== 'undefined' && window.matchMedia
@@ -48,7 +52,7 @@ const config = {
       },
     ],
   },
-  scene: [GameScene, ShopScene],
+  scene: [TitleScene, GameScene, ShopScene, PauseScene, RunSummaryScene],
 };
 
 const game = new Phaser.Game(config);
@@ -61,6 +65,8 @@ if (saved) {
   game.registry.set('unlockedLocations', saved.unlockedLocations);
   game.registry.set('activeLocation', saved.activeLocation);
 }
+
+game.registry.set('audioSettings', loadSettings());
 
 function saveCurrentState() {
   const shopState = game.registry.get('shopState');

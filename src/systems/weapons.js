@@ -14,6 +14,7 @@ export const WEAPON_TYPES = [
     pickupColor: 0xaaaa44,
     maxAmmo: 50,
     startAmmo: 15,
+    noiseRange: 1,
   },
   {
     id: 'shotgun',
@@ -28,6 +29,7 @@ export const WEAPON_TYPES = [
     pickupColor: 0xcc6633,
     maxAmmo: 20,
     startAmmo: 6,
+    noiseRange: 2,
   },
   {
     id: 'rifle',
@@ -42,6 +44,7 @@ export const WEAPON_TYPES = [
     pickupColor: 0x3399aa,
     maxAmmo: 15,
     startAmmo: 4,
+    noiseRange: 1,
   },
 ];
 
@@ -52,17 +55,19 @@ export const AMMO_PER_PICKUP = {
 };
 
 export function createWeaponState(options = {}) {
-  if (options.startingPistol) {
-    return {
-      slots: [WEAPON_TYPES[0], null],
-      activeSlot: 0,
-      ammo: [WEAPON_TYPES[0].startAmmo, 0],
-    };
-  }
+  const startingWeapons = [];
+  if (options.startingRifle) startingWeapons.push(WEAPON_TYPES.find(w => w.id === 'rifle'));
+  if (options.startingShotgun) startingWeapons.push(WEAPON_TYPES.find(w => w.id === 'shotgun'));
+  if (options.startingPistol) startingWeapons.push(WEAPON_TYPES.find(w => w.id === 'pistol'));
+
+  const slots = [startingWeapons[0] || null, startingWeapons[1] || null];
   return {
-    slots: [null, null],
+    slots,
     activeSlot: 0,
-    ammo: [0, 0],
+    ammo: [
+      slots[0] ? slots[0].startAmmo : 0,
+      slots[1] ? slots[1].startAmmo : 0,
+    ],
   };
 }
 

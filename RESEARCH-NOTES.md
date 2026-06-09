@@ -2738,3 +2738,587 @@ Based on analysis of Enter the Gungeon (hearts auto-heal on contact), Nuclear Th
 ### Visual Feedback
 - Camera flash: brief green tint (0, 255, 0) for 100ms — contrasts with red damage flash
 - No HUD changes needed — health bar already updates from `combatState.hp` each frame
+
+## Per-Enemy-Type Sound Effects Research
+
+### Design Goal
+Each of the 3 enemy types (basic zombie, crawler, spitter) should have unique identifying audio so the player can tell what's nearby from sound alone — the "you hear it before you see it" mechanic essential to horror games. Inspired by Left 4 Dead's per-infected audio cues.
+
+### Current Audio System
+- Procedural audio via Web Audio API's `OfflineAudioContext` — all sounds pre-rendered as `AudioBuffer`s, injected into Phaser cache
+- 9 renderer functions in `audioEngine.js`: gunshot, noise_burst, chime, tone, sweep_down, growl, door, door_thud, filtered_noise
+- Only 1 enemy-related sound exists: `enemy_death` (growl renderer, 60Hz→30Hz sawtooth, 8Hz LFO, 250Hz lowpass)
+- No per-type sounds, no proximity-based volume, no state transition sounds, no spitter fire sound
+
+### Sound Design Per Type
+
+**Basic Zombie (slow, threatening, low-frequency)**
+- Growl/moan: sawtooth carrier 55→40Hz, LFO at 5Hz on amplitude, lowpass 200Hz, Q=2, duration 1.0s
+- Uses existing `growl` renderer type with different parameters
+- Key frequency band: 40-120Hz (deep, rumbling)
+
+**Crawler (fast, insect-like, skittering)**
+- Rapid filtered clicks: sequence of short noise bursts (5ms each) through highpass 4000Hz, Q=3, spaced 30-50ms apart
+- Needs new `skitter` renderer — schedules 8-15 micro-bursts within 0.4s duration
+- Key frequency band: 2000-6000Hz (thin, chitinous, distinctly high-pitched)
+
+**Spitter (ranged, wet/organic)**
+- Gurgling: noise through resonant bandpass 500Hz, Q=10, with LFO on filter frequency at 6Hz (depth 300Hz)
+- Needs new `gurgle` renderer — filtered noise with sweeping resonance
+- Key frequency band: 300-1200Hz (mid-range, wet, bubbly)
+- Also needs `spit_launch` sound for when it fires projectiles
+
+### New Sound Configs Needed
+| Key | Type | Trigger | Description |
+|---|---|---|---|
+| `zombie_growl` | growl | Basic idle/chase proximity | Deep moan, 55→40Hz, 1.0s |
+| `zombie_alert` | growl | Basic idle→chase transition | Short aggressive growl, 80→50Hz, 0.4s |
+| `zombie_death` | growl | Basic dies | Current enemy_death params |
+| `crawler_skitter` | skitter (NEW) | Crawler idle/chase proximity | Rapid clicks, 0.4s |
+| `crawler_alert` | noise_burst | Crawler idle→chase transition | High-pitched shriek, 3000Hz, 0.15s |
+| `crawler_death` | noise_burst | Crawler dies | High crackling burst, 2000Hz, 0.2s |
+| `spitter_gurgle` | gurgle (NEW) | Spitter idle/chase proximity | Wet bubbling, 0.8s |
+| `spitter_alert` | sweep_down | Spitter idle→chase transition | Descending hiss, 800→200Hz, 0.3s |
+| `spitter_fire` | noise_burst | Spitter fires projectile | Wet burst, 600Hz, Q=3, 0.15s |
+| `spitter_death` | gurgle (NEW) | Spitter dies | Short gurgle cutoff, 0.3s |
+
+### New Renderers Needed
+
+**`renderSkitter`**: Creates rapid sequence of highpass-filtered noise micro-bursts
+- OfflineAudioContext with white noise buffer
+- Gain envelope creates 8-15 rapid on/off pulses (3-5ms on, 25-45ms off)
+- Highpass filter at configurable frequency (default 4000Hz)
+- Config: `{ clicks, clickDuration, clickGap, freq, Q, gain, duration }`
+
+**`renderGurgle`**: Creates resonant filtered noise with sweeping bandpass
+- OfflineAudioContext with white noise buffer
+- Bandpass filter with high Q (8-15) for resonance
+- LFO modulates filter frequency for bubbling effect
+- Config: `{ freq, Q, lfoFreq, lfoDepth, gain, duration, attackTime, releaseTime }`
+
+### GameScene Integration — Hook Points
+
+**State transition sounds** (detected in `updateEnemies()` between lines 1494-1496):
+- Compare `es.state` (old state) with `updated.state` (new state)
+- On idle→chase: play `${type}_alert` sound
+- On wantsToFire: play `spitter_fire` sound (already have hook at line 1518)
+
+**Proximity ambient sounds** (added to `updateEnemies()` loop):
+- Per-enemy sound cooldown timer (e.g., 3-8s between ambient sounds)
+- Only play if enemy is within audible range (~400px)
+- Volume scales with distance: `volume = Math.max(0.05, 1.0 - (dist / MAX_SOUND_RANGE))`
+- Play `${type}_growl`/`${type}_skitter`/`${type}_gurgle` based on type
+
+**Per-type death sounds** (replace single `enemy_death` at line 1339):
+- Replace `this.playSound('enemy_death')` with `this.playSound(\`${enemy.type}_death\`)`
+
+### Distance-Based Volume
+- New `playSoundAtDistance(key, distance, maxRange)` method on GameScene
+- `volume = gain * Math.max(0.05, 1.0 - (distance / maxRange))`
+- `maxRange = 400` (same as detection range + buffer)
+- Sounds beyond maxRange are not played at all (save performance)
+- Existing `playSound` unchanged for UI/pickup sounds that don't need distance scaling
+
+### Enemy Sound Cooldowns
+- New `soundCooldown` field on enemy state (per-enemy timer)
+- Ambient sounds: 4-8s cooldown (randomized per enemy to avoid sync)
+- Alert sounds: 0 cooldown (play immediately on state transition)
+- Prevents audio spam from multiple enemies of the same type
+
+### Pure Function: `getEnemySoundEvent(oldState, newState, type, soundCooldown, delta)`
+- Returns `{ soundKey: string|null, newCooldown: number }` 
+- Keeps sound logic testable without Phaser dependency
+- Lives in `audio.js` alongside other audio pure functions
+
+## Light Spill Through Doorways Research
+
+### BitmapMask Alpha Behavior
+- Confirmed from shader source (`BitmapMask.frag`): `mainColor *= (1.0 - maskColor.a)` — smooth per-pixel alpha multiplication, NOT binary
+- Partial alpha (e.g., 0.5) in maskGraphics produces 50% darkness transparency — gradients in the mask create gradient visibility
+- Only `maskColor.a` matters — color channels are ignored
+- `invertAlpha = true` (current setup): where mask alpha=1, darkness hidden; where mask alpha=0, darkness visible
+
+### Phaser 3 fillGradientStyle API
+- `fillGradientStyle(topLeft, topRight, bottomLeft, bottomRight, aTL, aTR, aBL, aBR)` — sets per-corner color+alpha for next fillRect/fillTriangle
+- WebGL-only — game already requires WebGL for BitmapMask, so no new constraint
+- Works correctly when rendering into BitmapMask framebuffer (goes through WebGL pipeline)
+- Does NOT work with `generateTexture()` (Canvas-based) — not needed here since we draw per-frame
+
+### Light Spill Geometry
+- For each lit room, iterate its `room.doors[]` array
+- For each open door connecting to a non-lit room, draw a gradient rectangle extending into the adjacent dark room
+- Door data shape: `{ wall: 'north'|'south'|'east'|'west', offset: number, width: 80, targetRoomId: number }`
+- SPILL_DEPTH constant: ~150px (rooms are 1200x1000, so modest spill without over-illuminating)
+
+### Gradient Direction Per Wall
+- North wall door: spill extends upward (into room above); bottom edge alpha=1 (doorway), top edge alpha=0 (far)
+- South wall door: spill extends downward; top edge alpha=1, bottom edge alpha=0
+- East wall door: spill extends rightward; left edge alpha=1, right edge alpha=0
+- West wall door: spill extends leftward; right edge alpha=1, left edge alpha=0
+
+### Door Open/Closed Check
+- Only ~50% of doors have a doorState (closable). Rest are permanently open passageways
+- A door is closed if: a doorState exists where `roomId/targetRoomId` matches (normalized: min/max) AND `isClosed === true`
+- If no matching doorState: door is permanently open → always spills light
+- If doorState exists with `isClosed: false`: door is open → spills light
+
+### Architecture: Pure Function Module
+- New `lightSpill.js` in `src/systems/` with `getLightSpillZones(rooms, litRoomIds, doorStates)` pure function
+- Returns array of `{ x, y, width, height, alphas: { topLeft, topRight, bottomLeft, bottomRight } }` descriptors
+- GameScene draws these in `updateDarkness()` after the lit room loop, using `fillGradientStyle` + `fillRect`
+- Also draws matching gradient into `lightGraphics` for warm tint effect
+
+### Performance
+- O(litRooms × doorsPerRoom) per frame — negligible with ~15% switch rate and 7-12 rooms
+- Each spill zone = 1 `fillGradientStyle` + 1 `fillRect` call — minimal overhead
+- Skip spill when both rooms are lit (both already fully revealed)
+
+## Pause System Research
+
+### Problem
+The game has no way to pause during gameplay. ESC key does nothing in GameScene. Mobile has no pause button. This is a fundamental UX gap — every game needs pause functionality.
+
+### Phaser 3 Pause Architecture
+- `scene.pause()` stops the scene's `update()` loop entirely. The scene continues to render but no update ticks fire. Physics, tweens, and timers all stop.
+- `scene.resume()` restores update ticks from where they left off.
+- **Keyboard events still fire on paused scenes** (by design). Pointer/gameobject events are blocked.
+- **Best approach: separate PauseScene** launched on top of the frozen GameScene. The separate scene has its own active input manager, so pointer events work for resume buttons.
+- Pattern: GameScene ESC → `this.scene.pause()` + `this.scene.launch('PauseScene')`. PauseScene ESC → `this.scene.resume('GameScene')` + `this.scene.stop()`.
+
+### ESC Key Handling
+- Event-based: `this.input.keyboard.on('keydown-ESC', callback)` — fires even on paused scenes
+- Key object: `this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC)` — polled in update
+- ShopScene already uses `keydown-ESC` pattern for journal overlay close (line 418-419)
+
+### Overlay
+- PauseScene creates fullscreen dark rectangle + text in its own `create()` method
+- Since it's a separate scene rendered after GameScene, it naturally appears on top
+- No depth management needed (each scene has its own rendering context)
+
+### Mobile Pause Button
+- Add a small touch button using the existing `makeTouchButton()` pattern in GameScene
+- Position: top-left area (HUD is at depth 1000, touch buttons at TOUCH_UI_DEPTH=1500)
+- Add `pauseButton` position to `computeTouchLayout()` return value
+- Button triggers same `pauseGame()` as ESC key
+- PauseScene supports tap-anywhere to resume on mobile
+
+### Controls Display
+- Pure data module `pause.js` with desktop and mobile control lists
+- `getControlsList(touchMode)` returns appropriate control array
+- Desktop: WASD, Mouse, Left Click, Right Click, E, Q/Scroll, ESC
+- Mobile: Left Stick, Right Stick, FIRE, USE, WPN, BATT
+
+### Integration Points
+- `main.js`: Add PauseScene to scene list
+- `touchControls.js`: Add `pauseButton` to `computeTouchLayout()` return
+- `GameScene.js`: ESC listener in `create()`, `pauseGame()` method, mobile pause button in `createTouchControls()`
+- New `PauseScene.js`: Dark overlay, controls text, ESC/tap to resume
+- New `pause.js`: Controls data, `getControlsList()` pure function
+
+## Run Summary / Death Screen Research
+
+### Design Rationale
+- Motherload (direct inspiration) shows score/depth/time on return to surface
+- Enter the Gungeon shows money collected, enemies killed, items obtained, run time
+- Binding of Isaac shows "Isaac's Last Will" diary-style with cause of death and items
+- Hades uses narrative death vignettes instead of stat screens (not applicable here)
+- Currently the game transitions directly from GameScene to ShopScene with no feedback on what happened in the run
+
+### Stats to Display
+Based on roguelike conventions and what's already tracked/trackable in GameScene:
+| Stat | Source in GameScene | Notes |
+|------|-------------------|-------|
+| Survived vs Died | `combatState.isDead` | Boolean, drives color theme |
+| Treasure collected | `inventoryState.treasureValue` | Already passed to ShopScene |
+| Rooms explored | `explorationState.visitedRoomIds.size` | Already tracked |
+| Total rooms | `level.rooms.length` | Available |
+| Enemies killed | NEW counter needed | Increment in `onBulletHitEnemy` when `isEnemyDead()` |
+| Deepest floor | `currentFloor` | Track max floor reached |
+| Time survived | NEW timer needed | Track elapsed time in update loop |
+| HP remaining | `combatState.hp` / `combatState.maxHp` | Only relevant on success |
+
+### Architecture: Pure Module `runStats.js`
+- `src/systems/runStats.js` — pure functions for run statistics
+- `createRunStats()` → `{ enemiesKilled: 0, timeElapsed: 0, maxFloor: 0 }`
+- `recordKill(stats)` → `{ ...stats, enemiesKilled: stats.enemiesKilled + 1 }`
+- `updateTime(stats, delta)` → `{ ...stats, timeElapsed: stats.timeElapsed + delta }`
+- `updateMaxFloor(stats, floor)` → `{ ...stats, maxFloor: Math.max(stats.maxFloor, floor) }`
+- `formatTime(ms)` → `"M:SS"` format string
+- `getSummaryData(stats, survived, treasureValue, roomsExplored, totalRooms, hp, maxHp)` → structured summary object for the scene
+
+### Scene Flow After Insertion
+```
+GameScene.onDayComplete() / onPlayerDeath()
+  → scene.start('RunSummaryScene', { survived, treasureEarned, stats, roomsExplored, totalRooms, hp, maxHp, newLocation, runNumber })
+RunSummaryScene (displays stats with animations, "Continue" button)
+  → scene.start('ShopScene', { treasureEarned, newLocation })
+```
+
+### Visual Design
+- **Death**: Dark background with red accent. "YOU DIED" title in red. Stats in muted gray. Somber.
+- **Success**: Dark background with gold accent. "ESCAPED" title in gold. Stats in warm tones.
+- Sequential stat reveal with staggered fade-in (300ms delay per stat line)
+- Number countup animation using `tweens.addCounter()` (Phaser 3.60+)
+- "Continue" button at bottom to proceed to ShopScene
+- Monospace font (consistent with PauseScene/ShopScene)
+
+### Phaser 3 Implementation Patterns
+- `this.tweens.addCounter({ from: 0, to: value, duration: 1000, onUpdate: tween => label.setText(Math.round(tween.getValue())) })`
+- `this.tweens.add({ targets: [line1, line2, ...], alpha: { from: 0, to: 1 }, delay: this.tweens.stagger(300) })` for sequential reveal
+- Scene registration: add to `scene: [GameScene, ShopScene, PauseScene, RunSummaryScene]` in main.js
+- Data passing via `scene.start('RunSummaryScene', data)`, received in `init(data)`
+
+### GameScene Modifications Needed
+1. Add `this.runStats = createRunStats()` in `init()`
+2. Add `this.runStats = updateTime(this.runStats, delta)` in `update()`
+3. Add `this.runStats = updateMaxFloor(this.runStats, this.currentFloor)` on stair transitions
+4. Add `this.runStats = recordKill(this.runStats)` in `onBulletHitEnemy()` when enemy dies
+5. Modify `onDayComplete()`: change `scene.start('ShopScene', ...)` to `scene.start('RunSummaryScene', { survived: true, ... })`
+6. Modify `onPlayerDeath()`: change `scene.start('ShopScene', ...)` to `scene.start('RunSummaryScene', { survived: false, ... })`
+
+### Sound Design
+- Death: use existing `player_death` sound (already plays before transition)
+- Success: use existing `day_complete` sound (already plays before transition)
+- Stat reveal: play existing `item_pickup` or `switch_click` sound for each stat line appearing
+- No new sounds needed
+
+## Title Screen / Main Menu Research
+
+### Design Decision: Title Screen as Boot Scene
+
+The game currently boots directly into GameScene — no title screen, no menu. Every game needs an entry point that:
+1. Sets the mood/atmosphere before gameplay
+2. Provides save management (Continue vs New Game)
+3. Gives context to new players
+
+### Scene Flow Change
+```
+Current:  Game boot → GameScene → RunSummary → ShopScene → GameScene
+Proposed: Game boot → TitleScene → ShopScene → GameScene → RunSummary → ShopScene → ...
+                                 ↘ GameScene (new game, first run)
+```
+- TitleScene becomes first in scene array (auto-started by Phaser)
+- "Continue" → ShopScene (player resumes from shop, same as after a run)
+- "New Game" → clears save via `clearSave()`, resets registry, starts GameScene fresh
+- ShopScene already has an "Enter Backrooms" button that starts GameScene
+
+### Horror Aesthetic (Backrooms-Specific)
+- **Color palette**: Sickly yellow (#D4C073) for title text, matching existing crack glow color
+- **Background**: Pure black (#000000), consistent with game's darkness theme
+- **Font**: monospace, consistent with all other scenes
+- **Effects**: Title text has slow pulsing alpha (simulating dying fluorescent light), subtitle has gentler pulse
+- **Minimal UI**: emptiness IS the Backrooms aesthetic — less on screen = more unsettling
+
+### Architecture: New Scene `TitleScene.js`
+- Follow ShopScene pattern: constructor with `super('TitleScene')`, `create()` builds all UI
+- Responsive layout via same `fitShopCamera()` pattern (zoom + centerOn for touch devices)
+- `loadGame()` called in `create()` to determine menu options
+- No `init()` needed — title scene reads directly from persistence, not registry
+- Touch-aware: detect via same `detectTouchPrimary` pattern used in main.js
+
+### UI Elements
+1. **Title**: "BACKROOMS" in large yellow-ish text, centered, with slow alpha pulse
+2. **Subtitle**: "Don't let the lights go out." in smaller dim gray text
+3. **Menu options** (centered, stacked vertically):
+   - "CONTINUE" (only if save exists) — green, interactive
+   - "NEW GAME" — green, interactive
+   - "DELETE SAVE" (only if save exists) — dim red, interactive, with confirmation
+4. **Version/credit text**: bottom corner, very dim
+
+### Phaser 3 Implementation
+- Text with `setInteractive({ useHandCursor: true })` + pointer events for hover/click
+- `this.tweens.add({ targets: title, alpha: { from: 1, to: 0.3 }, duration: 3000, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' })` for flicker
+- `this.cameras.main.fadeOut(500)` → `camerafadeoutcomplete` → `scene.start()` for transitions
+- Camera fade-in on create: `this.cameras.main.fadeIn(1000)`
+
+### Integration Points
+- `main.js`: Add TitleScene import, put first in scene array
+- `persistence.js`: Already has `loadGame()` and `clearSave()` — no changes needed
+- ShopScene/GameScene: No changes needed (data flow unchanged)
+- Title scene needs same `enlargeHitArea` pattern as ShopScene for touch targets
+
+### Sound
+- Reuse existing `createAmbientDrone()` from audioEngine.js for atmospheric background hum
+- No new sounds needed
+
+## Audio Settings / Volume Controls Research
+
+### Current Audio Architecture
+- `audioEngine.js` generates all sounds via `OfflineAudioContext` → `AudioBuffer` → Phaser cache
+- `createAmbientDrone(audioContext, destination)` creates live oscillators with a `masterGain` node (0.06) connected to `this.sound.destination`
+- The drone's `masterGain` node is trapped in closure scope — not exposed on the returned object
+- `playAmbientSound(soundManager, time)` hardcodes `{ volume: 0.5 }`
+- GameScene `playSound(key)` hardcodes `{ volume: 1 }`
+- GameScene `playSoundAtDistance(key, distance)` computes volume via `getDistanceVolume()`
+- ShopScene `playSound(key)` hardcodes `{ volume: 0.5 }`
+- TitleScene only runs the ambient drone (no SFX)
+- PauseScene has no audio code
+
+### Phaser 3 Sound Volume API
+- `this.sound.volume` (getter/setter) controls a master GainNode for all `this.sound.play()` calls
+- Each `sound.play(key, { volume })` sets per-sound volume — multiplied with the global volume
+- Phaser has no built-in sound categories (SFX vs music) — must be implemented manually
+- The ambient drone bypasses Phaser's sound pipeline (connects oscillators → `this.sound.destination`) so `this.sound.volume` does NOT affect it
+
+### Volume Level Design (Perceptual/Logarithmic)
+- Human hearing is logarithmic — linear volume steps sound uneven
+- Stepped levels: OFF=0.0, LOW=0.05, MED=0.15, HIGH=0.4, FULL=1.0
+- Store the label string in localStorage, map to float at runtime
+
+### Settings Persistence
+- Use separate localStorage key `backrooms_settings` (not the game save key `backrooms_save`)
+- Settings survive `clearSave()` — volume preference should persist even after deleting a game save
+- Simple JSON: `{ version: 1, masterVolume: 'FULL', sfxVolume: 'FULL', ambientVolume: 'FULL' }`
+
+### Architecture: New Pure Module `settings.js`
+- `VOLUME_LEVELS = ['OFF', 'LOW', 'MED', 'HIGH', 'FULL']`
+- `VOLUME_VALUES = { OFF: 0, LOW: 0.05, MED: 0.15, HIGH: 0.4, FULL: 1.0 }`
+- `createDefaultSettings()` → `{ masterVolume: 'FULL', sfxVolume: 'FULL', ambientVolume: 'FULL' }`
+- `cycleVolume(currentLevel)` → next level in cycle (wraps OFF→LOW→...→FULL→OFF)
+- `getVolumeValue(level)` → float
+- `getEffectiveVolume(masterLevel, categoryLevel)` → float (master × category)
+- `saveSettings(settings)` → localStorage
+- `loadSettings()` → settings or defaults
+
+### Integration Points
+1. `audioEngine.js`: Modify `createAmbientDrone()` to expose `masterGain` node and accept initial gain parameter
+2. `main.js`: Load settings at boot, store in `game.registry`
+3. `GameScene.createSounds()`: Apply master volume via `this.sound.volume`; apply ambient volume to drone gain node
+4. `GameScene.playSound()`: Multiply by SFX volume setting
+5. `GameScene.playSoundAtDistance()`: Multiply computed volume by SFX volume setting
+6. `ShopScene.playSound()`: Same SFX volume multiplier
+7. `TitleScene.initAudio()`: Apply ambient volume to drone
+8. `PauseScene`: Add volume controls UI (3 cycle buttons: Master, SFX, Ambient)
+9. `TitleScene`: Add "SETTINGS" menu option that opens volume controls
+
+### UI Design
+- Cycle-button pattern: `[Master: MED]` — click/tap cycles to next level
+- Three rows: Master Volume, SFX Volume, Ambient Volume
+- Same text-interactive pattern as existing ShopScene buttons
+- In PauseScene: displayed below controls reference
+- In TitleScene: displayed as an overlay (same pattern as delete save confirmation)
+
+## Floor Traps & Environmental Hazards Research
+
+### Design Principles (from Cogmind, Unexplored 2, The Ground Gives Way)
+- Traps should never be instantly lethal — meaningful damage without one-hit-kill
+- Core fairness rule: "The trigger may be invisible or the hazard may be invisible, but they cannot be both" (Unexplored 2)
+- Visible traps transform from "gotcha" moments into tactical decisions — players can lure enemies into them or choose to risk triggering
+- Activation delay with audio feedback gives the player a moment to understand what happened
+- Traps that can also be useful to the player (e.g., luring enemies onto spike traps) make them feel like part of the environment
+
+### Trap Types
+1. **Spike Trap** (floor hazard): Direct damage, visible with flashlight as floor plate sprite, re-triggerable with cooldown
+   - 15 damage (comparable to crawler contact damage)
+   - 3s cooldown between triggers per trap
+   - Trap damage does NOT scale with run count (player's health upgrades are the natural counter)
+   - Respects existing damage cooldown from combat.js (i-frames)
+2. **Noise Trap** (alarm): Single-use tripwire, no direct damage, alerts all enemies in adjacent rooms by forcing chase state
+   - Destroyed after trigger (body.enable = false + visual change)
+   - All enemies in adjacent rooms forced to chase state with player's current position as lastKnownPos
+   - First instance of external enemy state mutation (new pattern)
+
+### Architecture: Pure Module `traps.js`
+- Follow `items.js`/`enemy.js` spawning pattern exactly
+- Seed offset: +110000 (after alternate exits +100000)
+- `TRAP_TYPES` array: `{ type: string, damage: number, cooldown: number, singleUse: boolean }`
+- `generateRoomTraps(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, furnitureItems, roomId, distance)` — same signature pattern as generateRoomItems
+- Returns `[]` for roomId === 0 (safe room)
+- 40px margin from walls, furniture overlap avoidance with retry loop
+- Spawn rate: ~20% of rooms get 1 spike trap, ~15% get 1 noise trap (mutually exclusive per room)
+- Distance gating: spike traps appear at distance >= 2, noise traps at distance >= 3
+
+### Physics Integration
+- `this.trapGroup = this.physics.add.staticGroup()` (same pattern as itemGroup)
+- `this.physics.add.overlap(this.player, this.trapGroup, this.onTrapOverlap, null, this)`
+- Per-trap cooldown via `sprite.setData('lastTriggeredAt', timestamp)` — independent of global damage cooldown
+- Single-use traps: `body.enable = false` + alpha reduction + gray tint after trigger
+
+### Sprite Definitions
+- New `PALETTES.trap` with metallic/danger colors
+- `trap_spikes`: Floor plate with spike pattern, ~16x16 at pixelWidth 1
+- `trap_noise`: Small device/wire, ~14x10 at pixelWidth 1
+
+### Sound Configs
+- `spike_trap_trigger`: Short metallic snap — noise_burst type, freq 3500, Q 4, fast decay
+- `noise_trap_alarm`: Rising alarm sweep — sweep_down type reversed (startFreq low, endFreq high), longer duration
+
+### Enemy Alert Mechanism (New Pattern)
+- No existing pattern for externally forcing enemy state changes
+- Implementation: iterate `this.enemyStates`, for enemies in adjacent rooms (by BFS distance ≤ 1), set state to 'chase' with player's current position as `lastKnownX`/`lastKnownY`
+- This is a scene-level operation, not a pure function mutation (similar to how spawnDangerWave creates enemies)
+
+### GameScene Integration
+- `createTraps()` method: follows `createItems()` pattern
+- Compute `roomDistances` (already computed for items) and pass to `generateRoomTraps()`
+- `onTrapOverlap(player, trapSprite)` callback: reads trap type, applies appropriate effect
+- Spike: `applyDamage()` + camera shake + sound + damage cooldown check
+- Noise: play alarm sound + alert nearby enemies + disable trap + visual change
+- Traps render at depth 5 (same as items — hidden in darkness, visible in flashlight)
+
+## Enemy Loot Drops Research
+
+### Design Rationale
+Currently, killing enemies provides no reward beyond survival. The spec's direct inspiration (Motherload) rewards combat with drops. Every major roguelike (Enter the Gungeon, Nuclear Throne, Binding of Isaac) rewards enemy kills with pickups. Adding enemy loot drops creates a risk-reward dynamic: fighting is dangerous (ammo cost, health risk) but now has tangible payoff.
+
+### Industry Patterns (from roguelike analysis)
+- **Drop rates**: Not every enemy drops loot. Standard is 30-60% chance per kill, varying by enemy difficulty. Enter the Gungeon uses ~50% for currency, much lower for consumables.
+- **Drop tables**: Per-enemy-type tables are standard for roguelikes. Simpler approach: single table with enemy type as a modifier (bonus to effective distance/quality).
+- **Visual feedback**: Item sprite spawns at death position on the ground. No need for arc/bounce physics — static drop is simpler and matches existing item pattern.
+- **Dynamic modifiers**: Nuclear Throne scales drop rates based on player ammo state. For simplicity, we use enemy type + room distance.
+
+### Architecture: Pure Module `lootDrops.js`
+- `src/systems/lootDrops.js` — pure functions for loot drop determination
+- Imports `ITEM_TYPES` from `items.js` and filters out medkits (medkits bypass inventory; dropping heals from enemies would reduce horror tension and make combat self-sustaining)
+- `DROP_CHANCES`: per-enemy-type drop probability — basic: 0.30, crawler: 0.45, spitter: 0.55
+- `ENEMY_DISTANCE_BONUS`: per-enemy-type bonus to effective room distance — basic: 0, crawler: 1, spitter: 2
+- `getDropChance(enemyType)` — returns 0-1 probability
+- `getDistanceBonus(enemyType)` — returns integer distance offset
+- `rollEnemyDrop(enemyType, distance, rand)` — rolls for drop, picks item type using distance-based weights (same formula as room items: `max(0, base + perRoom * effectiveDistance)`), returns `{type, value}` or null
+
+### Distance-Based Loot Quality
+Reuses the existing `ITEM_TYPES` weight system from `items.js`:
+- `effectiveDistance = roomDistance + getDistanceBonus(enemyType)`
+- At low distance: copper coins dominate (base 34, -5 per room)
+- At high distance: silver/gold become more common (positive perRoom)
+- Gems possible only at distance >= 5 (negative base)
+- Ammo/battery have flat weights (base 25/20, perRoom 0) — always available
+
+### Why Medkits Are Excluded From Drops
+1. Medkits bypass inventory capacity (consumed immediately on pickup)
+2. If enemies dropped heals, combat would become self-sustaining: kill enemy → heal → take more damage → kill more enemies → heal
+3. The horror genre depends on health being scarce; medkit drops would undermine tension
+4. Room-spawned medkits are sufficient as the sole heal source
+
+### GameScene Integration
+- Store `roomDistances` Map as `this.roomDistances` in `createItems()` (currently computed but only used locally)
+- In `onBulletHitEnemy()`, after enemy death processing:
+  1. Look up `roomDistances.get(enemyState.currentRoomId) ?? 0`
+  2. Call `rollEnemyDrop(enemyState.type, distance, Math.random)` — uses Math.random because drops are runtime events, not level generation
+  3. If drop returned: create sprite via `this.itemGroup.create(enemySprite.x, enemySprite.y, \`item_${drop.type}\`)`, set depth 5, set sprite data for `itemType` and `itemValue`
+  4. No new colliders needed — adding to existing `itemGroup` auto-registers for pickup overlap
+- New `loot_drop` sound config: brief metallic clink (noise_burst type, ~2500Hz, short decay) for audio feedback when an item drops
+
+### Edge Cases
+- Enemy dies inside wall → items use staticGroup (no wall collision), player can still overlap to pick up
+- Multiple enemies die at same position → separate sprites stack, player picks up individually
+- No save/load concern → drops are ephemeral like all room items
+- `roomDistances` might not have enemy's `currentRoomId` → fallback to 0 (basic loot)
+
+## Starting Weapon Variety Research
+
+### Design Context
+The APPLICATION_SPEC says "starting weapons of various kinds" under shop upgrades, but currently only "Starting Pistol" exists as a binary unlock for 1000g. The game has 3 weapon types (pistol, shotgun, rifle) and 2 weapon slots. Adding "Starting Shotgun" and "Starting Rifle" as separate binary shop upgrades addresses this spec gap.
+
+### Roguelike Design Patterns
+- **Enter the Gungeon**: Each character has a fixed starting weapon with infinite ammo. No shop-based weapon selection.
+- **Hades**: 6 weapons unlocked via escalating currency costs (1, 3, 3, 4, 5, 8 keys). Player picks exactly one before each run.
+- **Nuclear Throne**: Players earn golden weapon variants; choose one per character on the select screen.
+- **Dead Cells**: Originally randomized from unlocked pool; later patched to add explicit selection because players wanted it.
+- **Consensus**: Choose-one-before-run is the standard. However, implementing a full weapon selection UI is complex.
+
+### Design Decision: Priority-Based Slot Filling
+With only 2 weapon slots, the simplest approach is to fill slots by priority order (most expensive first):
+1. All purchased starting weapons are sorted by priority: rifle > shotgun > pistol
+2. Top 2 fill slot 0 and slot 1
+3. If all 3 are owned, the cheapest (pistol) is dropped
+4. No weapon selection UI needed — follows existing pattern exactly
+
+This avoids adding a new selection screen while still giving meaningful progression.
+
+### Pricing
+- Starting Pistol: 1000g (existing)
+- Starting Shotgun: 1500g (50% premium — strong burst damage but short range)
+- Starting Rifle: 2000g (2x pistol — long range, high damage, slow fire rate)
+- Total for all 3: 4500g — significant investment requiring many successful runs
+
+### Shop Layout Impact
+- Current: 10 upgrades, rowHeight=55, startY=160. Enter button at y≈770 (already borderline for 768px canvas)
+- Adding 2 more: 12 upgrades pushes enter button to y≈880 (off-screen)
+- Fix: Reduce rowHeight to 45 and startY to 155. Last row at y=650, enter button at y≈755 (safe)
+
+### Architecture
+- `shop.js`: Add 2 entries to UPGRADES array (identical pattern to startingPistol)
+- `weapons.js`: Rewrite `createWeaponState(options)` to accept multiple starting weapon flags and fill slots by priority
+- `GameScene.js`: Read 2 new upgrade levels, pass all flags to `createWeaponState`
+- `ShopScene.js`: Reduce rowHeight/startY to fit 12 rows. No other changes — UI is data-driven from UPGRADES array
+- No changes to persistence (createShopState auto-registers new keys, `|| 0` fallback handles old saves)
+
+## Gunshot Noise Attracts Nearby Enemies Research
+
+### Design Decision: Room-Based Noise Propagation with Cooldown
+
+This was called out as a "future enhancement" in the Cross-Room Enemy Movement section. The noise trap system already implements "alert enemies in nearby rooms" — this extends that pattern to player weapon fire.
+
+### Game Design References
+- **Metal Gear Solid V**: Unsuppressed weapons alert at ~100m radius. State machine: Normal→Caution→Alert→Evasion. Timer-based decay back to normal.
+- **Resident Evil 2 Remake (Mr. X)**: Gunfire acts as continuous homing signal — noise accelerates enemy convergence, not binary alert. More noise = faster approach.
+- **Hotline Miami**: Most directly relevant (top-down 2D). Gunshots alert all enemies within earshot. Players use noise strategically to draw enemies toward them for efficient clearing. No death spiral because rooms are designed around it.
+- **Project Zomboid**: Explicit numeric noise system. Shotgun noise ~200, attenuated by walls/doors. Zombies migrate toward noise source over time (staggered arrival, not instant).
+- **Mark of the Ninja**: Gold standard for noise feedback — expanding translucent ring shows exact propagation radius. Added after playtesting revealed confusion about why enemies reacted.
+- **Enter the Gungeon / Nuclear Throne**: Do NOT have noise-attracts-enemies. Enemies are pre-placed per room. Not useful references.
+
+### Death Spiral Prevention (Critical)
+1. **Only alert idle/search enemies**: Already-chasing enemies are already coming. This prevents cascading alerts.
+2. **Cooldown between alerts**: 5-second cooldown after alerting. Sustained firefight = one alert event, not N.
+3. **Existing enemy caps**: Max ~4 enemies per room (density cap), danger wave cap of 8 total, leash distance of 2 rooms from spawn. These constrain total threat.
+4. **Enemy loot drops**: Killing attracted enemies yields items (existing mechanic), offsetting the cost of fighting.
+5. **Closed doors block**: Room graph excludes closed doors, so closing a door blocks noise propagation.
+
+### Noise Range Per Weapon
+| Weapon | Noise Range (BFS rooms) | Rationale |
+|--------|------------------------|-----------|
+| Pistol | 1 | Standard sidearm, moderate noise |
+| Shotgun | 2 | Very loud, alerts further |
+| Rifle | 1 | Similar to pistol (suppressed barrel) |
+
+### Existing Pattern: Noise Trap Alert (GameScene.js:826-841)
+```javascript
+const trapRoomId = trapSprite.getData('roomId');
+if (this.roomGraph) {
+  for (const es of this.enemyStates) {
+    const roomDist = getRoomDistance(this.roomGraph, trapRoomId, es.currentRoomId);
+    if (roomDist !== null && roomDist <= 1) {
+      es.state = 'chase';
+      es.lastKnownX = this.player.x;
+      es.lastKnownY = this.player.y;
+    }
+  }
+}
+```
+
+### Architecture
+
+**New pure module `gunfireNoise.js`**:
+- `GUNSHOT_ALERT_COOLDOWN = 5000` (5 seconds)
+- `canBeAlertedByNoise(enemyState)` — returns true only for `idle` or `search` state
+- `getAlertedEnemies(enemyStates, roomGraph, sourceRoomId, noiseRange)` — filters enemies by: state eligibility AND BFS distance within range. Uses `getRoomDistance` per enemy (7-12 node graph × ~20 enemies = negligible).
+
+**`weapons.js` changes**:
+- Add `noiseRange` field to each weapon type in `WEAPON_TYPES`
+
+**GameScene integration**:
+- New `this.gunshotAlertCooldown = 0` state field, decremented by delta each frame
+- After `fireBullet()` call (line ~2278): if cooldown is 0, get player's current room, call `getAlertedEnemies()`, set each to chase state with player position, reset cooldown
+- Reuses `this.roomGraph` which is already built/cached each frame
+
+### Bug in Existing Pattern
+The noise trap checks `roomDist !== null && roomDist <= 1` but `getRoomDistance` returns `-1` (not null) for unreachable rooms. The `!== null` check always passes. `-1 <= 1` is true, so unreachable enemies WOULD be alerted — except in practice all same-floor rooms are connected. New code should use `roomDist >= 0 && roomDist <= noiseRange` for correctness.
+
+### Constants
+```javascript
+GUNSHOT_ALERT_COOLDOWN = 5000  // 5 seconds between alert events
+WEAPON_NOISE_RANGES = { pistol: 1, shotgun: 2, rifle: 1 }
+```
+
+### Test Strategy
+- Pure function tests for `canBeAlertedByNoise` (idle=true, search=true, chase=false, attack=false, opening_door=false)
+- Pure function tests for `getAlertedEnemies` (filters by state, filters by distance, empty when no roomGraph)
+- Weapon noise range value tests (each weapon has expected range)
+- No visual/GameScene tests — integration is wiring only
+
+### Edge Cases
+- Player fires in room 0 (lit/safe): enemies in room 0 are frozen (velocity zeroed, AI skipped) — alerting them would be overridden next frame by the freeze check. Alert anyway; if they later leave the lit room (switch toggled off), they'll chase.
+- Player fires while no roomGraph exists (shouldn't happen in practice): guard with `if (!this.roomGraph) return`
+- Cooldown prevents double-alerting on rapid fire (shotgun fires once per 800ms, rifle 600ms, pistol 200ms — all within 5s cooldown)
+- Enemies in different floors: getRoomDistance returns -1 (unreachable via room graph, which only has same-floor connections)

@@ -31,6 +31,30 @@ describe('createWeaponState (weaponless start)', () => {
     expect(state.slots[0].id).toBe('pistol');
     expect(state.ammo[0]).toBe(WEAPON_TYPES[0].startAmmo);
   });
+
+  it('starts with shotgun ammo when startingShotgun option is true', () => {
+    const shotgun = WEAPON_TYPES.find(w => w.id === 'shotgun');
+    const state = createWeaponState({ startingShotgun: true });
+    expect(state.slots[0].id).toBe('shotgun');
+    expect(state.ammo[0]).toBe(shotgun.startAmmo);
+  });
+
+  it('starts with rifle ammo when startingRifle option is true', () => {
+    const rifle = WEAPON_TYPES.find(w => w.id === 'rifle');
+    const state = createWeaponState({ startingRifle: true });
+    expect(state.slots[0].id).toBe('rifle');
+    expect(state.ammo[0]).toBe(rifle.startAmmo);
+  });
+
+  it('both slots have correct starting ammo when two weapons are owned', () => {
+    const rifle = WEAPON_TYPES.find(w => w.id === 'rifle');
+    const pistol = WEAPON_TYPES.find(w => w.id === 'pistol');
+    const state = createWeaponState({ startingPistol: true, startingRifle: true });
+    expect(state.slots[0].id).toBe('rifle');
+    expect(state.ammo[0]).toBe(rifle.startAmmo);
+    expect(state.slots[1].id).toBe('pistol');
+    expect(state.ammo[1]).toBe(pistol.startAmmo);
+  });
 });
 
 describe('getActiveWeapon (unarmed)', () => {

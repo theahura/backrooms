@@ -1,3 +1,10 @@
+export const ENEMY_SOUND_RANGE = 400;
+export const ENEMY_SOUND_COOLDOWN_MIN = 4000;
+export const ENEMY_SOUND_COOLDOWN_MAX = 8000;
+
+const ENEMY_TYPE_PREFIX = { basic: 'zombie', crawler: 'crawler', spitter: 'spitter' };
+const AMBIENT_SOUND_SUFFIX = { basic: 'growl', crawler: 'skitter', spitter: 'gurgle' };
+
 export const SOUND_CONFIGS = {
   pistol_fire: {
     duration: 0.2,
@@ -37,7 +44,25 @@ export const SOUND_CONFIGS = {
     Q: 1.5,
     decay: 0.08,
   },
-  enemy_death: {
+  zombie_growl: {
+    duration: 1.0,
+    gain: 0.3,
+    type: 'growl',
+    carrierFreq: 55,
+    carrierEnd: 40,
+    lfoFreq: 5,
+    filterFreq: 200,
+  },
+  zombie_alert: {
+    duration: 0.4,
+    gain: 0.4,
+    type: 'growl',
+    carrierFreq: 80,
+    carrierEnd: 50,
+    lfoFreq: 10,
+    filterFreq: 300,
+  },
+  zombie_death: {
     duration: 0.5,
     gain: 0.35,
     type: 'growl',
@@ -45,6 +70,70 @@ export const SOUND_CONFIGS = {
     carrierEnd: 30,
     lfoFreq: 8,
     filterFreq: 250,
+  },
+  crawler_skitter: {
+    duration: 0.4,
+    gain: 0.3,
+    type: 'skitter',
+    clicks: 12,
+    clickDuration: 0.005,
+    clickGap: 0.03,
+    freq: 4000,
+    Q: 3,
+  },
+  crawler_alert: {
+    duration: 0.15,
+    gain: 0.35,
+    type: 'noise_burst',
+    freq: 3000,
+    Q: 5,
+    decay: 0.1,
+  },
+  crawler_death: {
+    duration: 0.2,
+    gain: 0.35,
+    type: 'noise_burst',
+    freq: 2000,
+    Q: 2,
+    decay: 0.15,
+  },
+  spitter_gurgle: {
+    duration: 0.8,
+    gain: 0.25,
+    type: 'gurgle',
+    freq: 500,
+    Q: 10,
+    lfoFreq: 6,
+    lfoDepth: 300,
+    attackTime: 0.1,
+    releaseTime: 0.2,
+  },
+  spitter_alert: {
+    duration: 0.3,
+    gain: 0.35,
+    type: 'sweep_down',
+    startFreq: 800,
+    endFreq: 200,
+    oscType: 'sawtooth',
+  },
+  spitter_fire: {
+    duration: 0.15,
+    gain: 0.3,
+    type: 'noise_burst',
+    freq: 600,
+    Q: 3,
+    decay: 0.12,
+  },
+  spitter_death: {
+    duration: 0.3,
+    gain: 0.35,
+    type: 'gurgle',
+    freq: 400,
+    Q: 8,
+    lfoFreq: 8,
+    lfoDepth: 200,
+    attackTime: 0.02,
+    releaseTime: 0.1,
   },
   player_damage: {
     duration: 0.2,
@@ -61,6 +150,14 @@ export const SOUND_CONFIGS = {
     startFreq: 300,
     endFreq: 40,
     oscType: 'sawtooth',
+  },
+  loot_drop: {
+    duration: 0.15,
+    gain: 0.25,
+    type: 'noise_burst',
+    freq: 2500,
+    Q: 1.0,
+    decay: 0.06,
   },
   item_pickup: {
     duration: 0.15,
@@ -197,6 +294,22 @@ export const SOUND_CONFIGS = {
     Q: 3,
     decay: 0.03,
   },
+  spike_trap: {
+    duration: 0.15,
+    gain: 0.45,
+    type: 'noise_burst',
+    freq: 3500,
+    Q: 4,
+    decay: 0.06,
+  },
+  noise_trap_alarm: {
+    duration: 0.6,
+    gain: 0.5,
+    type: 'sweep_down',
+    startFreq: 1200,
+    endFreq: 200,
+    oscType: 'sawtooth',
+  },
   footstep: {
     duration: 0.06,
     gain: 0.15,
@@ -251,4 +364,40 @@ export function getAmbientSoundDelay(time) {
 
 export function getSoundConfig(key) {
   return SOUND_CONFIGS[key] || null;
+}
+
+export function getEnemySoundEvent(oldState, newState, type, soundCooldown, delta) {
+  const prefix = ENEMY_TYPE_PREFIX[type] || 'zombie';
+
+  if ((oldState === 'idle' || oldState === 'search') && newState === 'chase') {
+    return { soundKey: `${prefix}_alert`, newCooldown: soundCooldown };
+  }
+
+  const remaining = soundCooldown - delta;
+  if (remaining <= 0) {
+    const suffix = AMBIENT_SOUND_SUFFIX[type] || 'growl';
+    const range = ENEMY_SOUND_COOLDOWN_MAX - ENEMY_SOUND_COOLDOWN_MIN;
+    let hash = 0;
+    for (let i = 0; i < type.length; i++) hash += type.charCodeAt(i);
+    const newCooldown = ENEMY_SOUND_COOLDOWN_MIN + (range * ((hash * 7 + 13) % 17) / 17);
+    return { soundKey: `${prefix}_${suffix}`, newCooldown };
+  }
+
+  return { soundKey: null, newCooldown: remaining };
+}
+
+export function getEnemyDeathSound(type) {
+  const prefix = ENEMY_TYPE_PREFIX[type] || 'zombie';
+  return `${prefix}_death`;
+}
+
+export function getEnemyFireSound(type) {
+  if (type === 'spitter') return 'spitter_fire';
+  return null;
+}
+
+export function getDistanceVolume(distance, maxRange, baseGain) {
+  if (distance <= 0) return baseGain;
+  if (distance >= maxRange) return 0;
+  return baseGain * (1 - distance / maxRange);
 }
