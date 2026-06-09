@@ -28,6 +28,7 @@ import { buildRoomGraph, buildFullRoomGraph, bfsFromRoom, getNextDoorway, getClo
 import { createDangerState, updateDangerTime, shouldSpawnWave, advanceWave, getWaveComposition, getSpawnRoom } from '../systems/danger.js';
 import { SOUND_CONFIGS, getFootstepInterval, getAmbientSoundDelay, getEnemySoundEvent, getEnemyDeathSound, getEnemyFireSound, getDistanceVolume, ENEMY_SOUND_RANGE } from '../systems/audio.js';
 import { generateAllSounds, createAmbientDrone, playAmbientSound } from '../systems/audioEngine.js';
+import { createRunStats, recordKill, updateTime, updateMaxFloor } from '../systems/runStats.js';
 import { SPRITE_DEFS, getAllSpriteKeys, ANIM_DEFS, getAllAnimKeys, getEnemyTextureKey, getAnimKeyForState } from '../systems/sprites.js';
 import { getLightSpillZones } from '../systems/lightSpill.js';
 
@@ -80,6 +81,7 @@ export class GameScene extends Phaser.Scene {
     this.activeLocationData = getLocation(this.activeLocation) || getLocation('store');
     this.unlockedLocations = this.registry.get('unlockedLocations') ?? ['store'];
     this.dangerState = createDangerState();
+    this.runStats = createRunStats();
     saveGame(shopState || createShopState(), runCount + 1, [...this.collectedLore], this.unlockedLocations, this.activeLocation);
   }
 
@@ -1192,6 +1194,7 @@ export class GameScene extends Phaser.Scene {
       player.body.reset(destX, destY);
       player.body.enable = true;
       this.currentFloor = destFloor;
+      this.runStats = updateMaxFloor(this.runStats, destFloor);
 
       this.cameras.main.fadeIn(300, 0, 0, 0);
       this.cameras.main.once('camerafadeincomplete', () => {
@@ -1209,9 +1212,16 @@ export class GameScene extends Phaser.Scene {
     this.player.body.enable = false;
     this.cameras.main.fadeOut(1000, 0, 0, 0);
     this.cameras.main.once('camerafadeoutcomplete', () => {
-      this.scene.start('ShopScene', {
+      this.scene.start('RunSummaryScene', {
+        survived: true,
         treasureEarned: this.inventoryState.treasureValue,
+        runStats: this.runStats,
+        roomsExplored: this.explorationState.visitedRoomIds.size,
+        totalRooms: this.level.rooms.length,
+        hp: this.combatState.hp,
+        maxHp: this.combatState.maxHp,
         newLocation: newLocation || null,
+        touchMode: this.touchMode,
       });
     });
   }
@@ -1350,6 +1360,7 @@ export class GameScene extends Phaser.Scene {
     this.playSound('bullet_hit');
 
     if (isEnemyDead(enemyState.health)) {
+      this.runStats = recordKill(this.runStats);
       const dx = enemySprite.x - this.player.x;
       const dy = enemySprite.y - this.player.y;
       const deathDist = Math.sqrt(dx * dx + dy * dy);
@@ -1409,7 +1420,17 @@ export class GameScene extends Phaser.Scene {
     this.player.body.enable = false;
     this.cameras.main.fadeOut(500, 0, 0, 0);
     this.cameras.main.once('camerafadeoutcomplete', () => {
-      this.scene.start('ShopScene', { treasureEarned: 0 });
+      this.scene.start('RunSummaryScene', {
+        survived: false,
+        treasureEarned: 0,
+        runStats: this.runStats,
+        roomsExplored: this.explorationState.visitedRoomIds.size,
+        totalRooms: this.level.rooms.length,
+        hp: 0,
+        maxHp: this.combatState.maxHp,
+        newLocation: null,
+        touchMode: this.touchMode,
+      });
     });
   }
 
@@ -2077,6 +2098,8 @@ export class GameScene extends Phaser.Scene {
 
   update(time, delta) {
     if (this.combatState.isDead || this.dayEnding || this.isTeleporting) return;
+
+    this.runStats = updateTime(this.runStats, delta);
 
     const pointer = this.input.activePointer;
     pointer.updateWorldPoint(this.cameras.main);

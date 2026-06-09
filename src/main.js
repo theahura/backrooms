@@ -3,6 +3,7 @@ import VirtualJoystickPlugin from 'phaser3-rex-plugins/plugins/virtualjoystick-p
 import { GameScene } from './scenes/GameScene.js';
 import { ShopScene } from './scenes/ShopScene.js';
 import { PauseScene } from './scenes/PauseScene.js';
+import { RunSummaryScene } from './scenes/RunSummaryScene.js';
 import { loadGame, saveGame } from './systems/persistence.js';
 import { detectTouchPrimary } from './systems/touchControls.js';
 
@@ -49,7 +50,7 @@ const config = {
       },
     ],
   },
-  scene: [GameScene, ShopScene, PauseScene],
+  scene: [GameScene, ShopScene, PauseScene, RunSummaryScene],
 };
 
 const game = new Phaser.Game(config);

@@ -2914,3 +2914,70 @@ The game has no way to pause during gameplay. ESC key does nothing in GameScene.
 - `GameScene.js`: ESC listener in `create()`, `pauseGame()` method, mobile pause button in `createTouchControls()`
 - New `PauseScene.js`: Dark overlay, controls text, ESC/tap to resume
 - New `pause.js`: Controls data, `getControlsList()` pure function
+
+## Run Summary / Death Screen Research
+
+### Design Rationale
+- Motherload (direct inspiration) shows score/depth/time on return to surface
+- Enter the Gungeon shows money collected, enemies killed, items obtained, run time
+- Binding of Isaac shows "Isaac's Last Will" diary-style with cause of death and items
+- Hades uses narrative death vignettes instead of stat screens (not applicable here)
+- Currently the game transitions directly from GameScene to ShopScene with no feedback on what happened in the run
+
+### Stats to Display
+Based on roguelike conventions and what's already tracked/trackable in GameScene:
+| Stat | Source in GameScene | Notes |
+|------|-------------------|-------|
+| Survived vs Died | `combatState.isDead` | Boolean, drives color theme |
+| Treasure collected | `inventoryState.treasureValue` | Already passed to ShopScene |
+| Rooms explored | `explorationState.visitedRoomIds.size` | Already tracked |
+| Total rooms | `level.rooms.length` | Available |
+| Enemies killed | NEW counter needed | Increment in `onBulletHitEnemy` when `isEnemyDead()` |
+| Deepest floor | `currentFloor` | Track max floor reached |
+| Time survived | NEW timer needed | Track elapsed time in update loop |
+| HP remaining | `combatState.hp` / `combatState.maxHp` | Only relevant on success |
+
+### Architecture: Pure Module `runStats.js`
+- `src/systems/runStats.js` — pure functions for run statistics
+- `createRunStats()` → `{ enemiesKilled: 0, timeElapsed: 0, maxFloor: 0 }`
+- `recordKill(stats)` → `{ ...stats, enemiesKilled: stats.enemiesKilled + 1 }`
+- `updateTime(stats, delta)` → `{ ...stats, timeElapsed: stats.timeElapsed + delta }`
+- `updateMaxFloor(stats, floor)` → `{ ...stats, maxFloor: Math.max(stats.maxFloor, floor) }`
+- `formatTime(ms)` → `"M:SS"` format string
+- `getSummaryData(stats, survived, treasureValue, roomsExplored, totalRooms, hp, maxHp)` → structured summary object for the scene
+
+### Scene Flow After Insertion
+```
+GameScene.onDayComplete() / onPlayerDeath()
+  → scene.start('RunSummaryScene', { survived, treasureEarned, stats, roomsExplored, totalRooms, hp, maxHp, newLocation, runNumber })
+RunSummaryScene (displays stats with animations, "Continue" button)
+  → scene.start('ShopScene', { treasureEarned, newLocation })
+```
+
+### Visual Design
+- **Death**: Dark background with red accent. "YOU DIED" title in red. Stats in muted gray. Somber.
+- **Success**: Dark background with gold accent. "ESCAPED" title in gold. Stats in warm tones.
+- Sequential stat reveal with staggered fade-in (300ms delay per stat line)
+- Number countup animation using `tweens.addCounter()` (Phaser 3.60+)
+- "Continue" button at bottom to proceed to ShopScene
+- Monospace font (consistent with PauseScene/ShopScene)
+
+### Phaser 3 Implementation Patterns
+- `this.tweens.addCounter({ from: 0, to: value, duration: 1000, onUpdate: tween => label.setText(Math.round(tween.getValue())) })`
+- `this.tweens.add({ targets: [line1, line2, ...], alpha: { from: 0, to: 1 }, delay: this.tweens.stagger(300) })` for sequential reveal
+- Scene registration: add to `scene: [GameScene, ShopScene, PauseScene, RunSummaryScene]` in main.js
+- Data passing via `scene.start('RunSummaryScene', data)`, received in `init(data)`
+
+### GameScene Modifications Needed
+1. Add `this.runStats = createRunStats()` in `init()`
+2. Add `this.runStats = updateTime(this.runStats, delta)` in `update()`
+3. Add `this.runStats = updateMaxFloor(this.runStats, this.currentFloor)` on stair transitions
+4. Add `this.runStats = recordKill(this.runStats)` in `onBulletHitEnemy()` when enemy dies
+5. Modify `onDayComplete()`: change `scene.start('ShopScene', ...)` to `scene.start('RunSummaryScene', { survived: true, ... })`
+6. Modify `onPlayerDeath()`: change `scene.start('ShopScene', ...)` to `scene.start('RunSummaryScene', { survived: false, ... })`
+
+### Sound Design
+- Death: use existing `player_death` sound (already plays before transition)
+- Success: use existing `day_complete` sound (already plays before transition)
+- Stat reveal: play existing `item_pickup` or `switch_click` sound for each stat line appearing
+- No new sounds needed
