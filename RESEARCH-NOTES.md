@@ -2829,3 +2829,46 @@ Each of the 3 enemy types (basic zombie, crawler, spitter) should have unique id
 - Returns `{ soundKey: string|null, newCooldown: number }` 
 - Keeps sound logic testable without Phaser dependency
 - Lives in `audio.js` alongside other audio pure functions
+
+## Light Spill Through Doorways Research
+
+### BitmapMask Alpha Behavior
+- Confirmed from shader source (`BitmapMask.frag`): `mainColor *= (1.0 - maskColor.a)` — smooth per-pixel alpha multiplication, NOT binary
+- Partial alpha (e.g., 0.5) in maskGraphics produces 50% darkness transparency — gradients in the mask create gradient visibility
+- Only `maskColor.a` matters — color channels are ignored
+- `invertAlpha = true` (current setup): where mask alpha=1, darkness hidden; where mask alpha=0, darkness visible
+
+### Phaser 3 fillGradientStyle API
+- `fillGradientStyle(topLeft, topRight, bottomLeft, bottomRight, aTL, aTR, aBL, aBR)` — sets per-corner color+alpha for next fillRect/fillTriangle
+- WebGL-only — game already requires WebGL for BitmapMask, so no new constraint
+- Works correctly when rendering into BitmapMask framebuffer (goes through WebGL pipeline)
+- Does NOT work with `generateTexture()` (Canvas-based) — not needed here since we draw per-frame
+
+### Light Spill Geometry
+- For each lit room, iterate its `room.doors[]` array
+- For each open door connecting to a non-lit room, draw a gradient rectangle extending into the adjacent dark room
+- Door data shape: `{ wall: 'north'|'south'|'east'|'west', offset: number, width: 80, targetRoomId: number }`
+- SPILL_DEPTH constant: ~150px (rooms are 1200x1000, so modest spill without over-illuminating)
+
+### Gradient Direction Per Wall
+- North wall door: spill extends upward (into room above); bottom edge alpha=1 (doorway), top edge alpha=0 (far)
+- South wall door: spill extends downward; top edge alpha=1, bottom edge alpha=0
+- East wall door: spill extends rightward; left edge alpha=1, right edge alpha=0
+- West wall door: spill extends leftward; right edge alpha=1, left edge alpha=0
+
+### Door Open/Closed Check
+- Only ~50% of doors have a doorState (closable). Rest are permanently open passageways
+- A door is closed if: a doorState exists where `roomId/targetRoomId` matches (normalized: min/max) AND `isClosed === true`
+- If no matching doorState: door is permanently open → always spills light
+- If doorState exists with `isClosed: false`: door is open → spills light
+
+### Architecture: Pure Function Module
+- New `lightSpill.js` in `src/systems/` with `getLightSpillZones(rooms, litRoomIds, doorStates)` pure function
+- Returns array of `{ x, y, width, height, alphas: { topLeft, topRight, bottomLeft, bottomRight } }` descriptors
+- GameScene draws these in `updateDarkness()` after the lit room loop, using `fillGradientStyle` + `fillRect`
+- Also draws matching gradient into `lightGraphics` for warm tint effect
+
+### Performance
+- O(litRooms × doorsPerRoom) per frame — negligible with ~15% switch rate and 7-12 rooms
+- Each spill zone = 1 `fillGradientStyle` + 1 `fillRect` call — minimal overhead
+- Skip spill when both rooms are lit (both already fully revealed)

@@ -29,6 +29,7 @@ import { createDangerState, updateDangerTime, shouldSpawnWave, advanceWave, getW
 import { SOUND_CONFIGS, getFootstepInterval, getAmbientSoundDelay, getEnemySoundEvent, getEnemyDeathSound, getEnemyFireSound, getDistanceVolume, ENEMY_SOUND_RANGE } from '../systems/audio.js';
 import { generateAllSounds, createAmbientDrone, playAmbientSound } from '../systems/audioEngine.js';
 import { SPRITE_DEFS, getAllSpriteKeys, ANIM_DEFS, getAllAnimKeys, getEnemyTextureKey, getAnimKeyForState } from '../systems/sprites.js';
+import { getLightSpillZones } from '../systems/lightSpill.js';
 
 const WALL_THICKNESS = 16;
 
@@ -2015,6 +2016,17 @@ export class GameScene extends Phaser.Scene {
       this.maskGraphics.fillRect(room.x, room.y, room.width, room.height);
       this.lightGraphics.fillStyle(0xffffcc, 0.05);
       this.lightGraphics.fillRect(room.x, room.y, room.width, room.height);
+    }
+
+    const spillZones = getLightSpillZones(this.level.rooms, litRoomIds, this.doorStates);
+    for (const zone of spillZones) {
+      this.maskGraphics.fillGradientStyle(0xffffff, 0xffffff, 0xffffff, 0xffffff,
+        zone.alphas.topLeft, zone.alphas.topRight, zone.alphas.bottomLeft, zone.alphas.bottomRight);
+      this.maskGraphics.fillRect(zone.x, zone.y, zone.width, zone.height);
+      this.lightGraphics.fillGradientStyle(0xffffcc, 0xffffcc, 0xffffcc, 0xffffcc,
+        zone.alphas.topLeft * 0.05, zone.alphas.topRight * 0.05,
+        zone.alphas.bottomLeft * 0.05, zone.alphas.bottomRight * 0.05);
+      this.lightGraphics.fillRect(zone.x, zone.y, zone.width, zone.height);
     }
 
     const coneAngle = getFlashlightConeAngle(this.batteryState, this.flashlightAngle);
