@@ -44,11 +44,11 @@ Other details (from playtesting):
 - most rooms should NOT have light switches -- these should be extremely rare
 - enemies should be able to move between rooms
 
-Next things to build:
-- add more room types
-- add actual pixel art elements for things like tables, light switches, rewards, etc. instead of the current rectangle boxes
-  - use this opportunity to also give the backrooms each more flavor
-- add actual pixel art animations for the enemies and the main player character
+Feedback from me (DO NOT CHANGE):
+- improve the pixel art representations of everything by using an AI generation tool, e.g. nano banana (API key in environment variable)
+- the shop should show a 2d pixel art of the shop, and show pixel art representations of the things being bought
+- the rooms should be generated dynamically, as the player explores. A given set of rooms should be generated 2 rooms out. The best way to do this is with procedural generation
+  - these rooms should then remain static once they are generated, so the player really feels like there is consistency to the rooms they are exploring but also that the rooms themselves are changing from person to person
 
 Known bugs:
 - NA
