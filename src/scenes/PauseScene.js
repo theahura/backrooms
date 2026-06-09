@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { getControlsList } from '../systems/pause.js';
-import { cycleVolume, saveSettings, getEffectiveVolume, createDefaultSettings } from '../systems/settings.js';
+import { cycleVolume, saveSettings, createDefaultSettings } from '../systems/settings.js';
 
 export class PauseScene extends Phaser.Scene {
   constructor() {
@@ -42,7 +42,7 @@ export class PauseScene extends Phaser.Scene {
       }).setOrigin(0, 0);
     }
 
-    const settings = this.game.registry.get('audioSettings') || createDefaultSettings();
+    const settings = this.registry.get('audioSettings') || createDefaultSettings();
     const volumeKeys = [
       { key: 'masterVolume', label: 'Master' },
       { key: 'sfxVolume', label: 'SFX' },
@@ -69,7 +69,7 @@ export class PauseScene extends Phaser.Scene {
       btn.on('pointerdown', () => {
         settings[entry.key] = cycleVolume(settings[entry.key]);
         btn.setText(`[ ${settings[entry.key]} ]`);
-        this.game.registry.set('audioSettings', { ...settings });
+        this.registry.set('audioSettings', { ...settings });
         saveSettings(settings);
         const gameScene = this.scene.get('GameScene');
         if (gameScene && gameScene.applyVolumeSettings) {
@@ -89,7 +89,11 @@ export class PauseScene extends Phaser.Scene {
 
     if (this.touchMode) {
       this.time.delayedCall(150, () => {
-        this.input.on('pointerdown', () => this.resumeGame());
+        this.input.on('pointerdown', (pointer) => {
+          const hitObjects = this.input.hitTestPointer(pointer);
+          const hitInteractive = hitObjects.some(obj => obj !== bg);
+          if (!hitInteractive) this.resumeGame();
+        });
       });
     }
 

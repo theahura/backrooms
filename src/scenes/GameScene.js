@@ -29,7 +29,7 @@ import { createDangerState, updateDangerTime, shouldSpawnWave, advanceWave, getW
 import { SOUND_CONFIGS, getFootstepInterval, getAmbientSoundDelay, getEnemySoundEvent, getEnemyDeathSound, getEnemyFireSound, getDistanceVolume, ENEMY_SOUND_RANGE } from '../systems/audio.js';
 import { generateAllSounds, createAmbientDrone, playAmbientSound } from '../systems/audioEngine.js';
 import { createRunStats, recordKill, updateTime, updateMaxFloor } from '../systems/runStats.js';
-import { getEffectiveVolume, getVolumeValue, createDefaultSettings } from '../systems/settings.js';
+import { getEffectiveVolume, createDefaultSettings } from '../systems/settings.js';
 import { SPRITE_DEFS, getAllSpriteKeys, ANIM_DEFS, getAllAnimKeys, getEnemyTextureKey, getAnimKeyForState } from '../systems/sprites.js';
 import { getLightSpillZones } from '../systems/lightSpill.js';
 

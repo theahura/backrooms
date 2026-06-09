@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { loadGame, clearSave } from '../systems/persistence.js';
 import { getMenuOptions, getTitleText } from '../systems/titleMenu.js';
 import { generateAllSounds, createAmbientDrone } from '../systems/audioEngine.js';
-import { getEffectiveVolume, getVolumeValue, cycleVolume, saveSettings, createDefaultSettings, VOLUME_LEVELS } from '../systems/settings.js';
+import { getEffectiveVolume, cycleVolume, saveSettings, createDefaultSettings } from '../systems/settings.js';
 
 export class TitleScene extends Phaser.Scene {
   constructor() {
