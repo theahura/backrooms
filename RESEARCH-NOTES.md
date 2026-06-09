@@ -2738,3 +2738,94 @@ Based on analysis of Enter the Gungeon (hearts auto-heal on contact), Nuclear Th
 ### Visual Feedback
 - Camera flash: brief green tint (0, 255, 0) for 100ms — contrasts with red damage flash
 - No HUD changes needed — health bar already updates from `combatState.hp` each frame
+
+## Per-Enemy-Type Sound Effects Research
+
+### Design Goal
+Each of the 3 enemy types (basic zombie, crawler, spitter) should have unique identifying audio so the player can tell what's nearby from sound alone — the "you hear it before you see it" mechanic essential to horror games. Inspired by Left 4 Dead's per-infected audio cues.
+
+### Current Audio System
+- Procedural audio via Web Audio API's `OfflineAudioContext` — all sounds pre-rendered as `AudioBuffer`s, injected into Phaser cache
+- 9 renderer functions in `audioEngine.js`: gunshot, noise_burst, chime, tone, sweep_down, growl, door, door_thud, filtered_noise
+- Only 1 enemy-related sound exists: `enemy_death` (growl renderer, 60Hz→30Hz sawtooth, 8Hz LFO, 250Hz lowpass)
+- No per-type sounds, no proximity-based volume, no state transition sounds, no spitter fire sound
+
+### Sound Design Per Type
+
+**Basic Zombie (slow, threatening, low-frequency)**
+- Growl/moan: sawtooth carrier 55→40Hz, LFO at 5Hz on amplitude, lowpass 200Hz, Q=2, duration 1.0s
+- Uses existing `growl` renderer type with different parameters
+- Key frequency band: 40-120Hz (deep, rumbling)
+
+**Crawler (fast, insect-like, skittering)**
+- Rapid filtered clicks: sequence of short noise bursts (5ms each) through highpass 4000Hz, Q=3, spaced 30-50ms apart
+- Needs new `skitter` renderer — schedules 8-15 micro-bursts within 0.4s duration
+- Key frequency band: 2000-6000Hz (thin, chitinous, distinctly high-pitched)
+
+**Spitter (ranged, wet/organic)**
+- Gurgling: noise through resonant bandpass 500Hz, Q=10, with LFO on filter frequency at 6Hz (depth 300Hz)
+- Needs new `gurgle` renderer — filtered noise with sweeping resonance
+- Key frequency band: 300-1200Hz (mid-range, wet, bubbly)
+- Also needs `spit_launch` sound for when it fires projectiles
+
+### New Sound Configs Needed
+| Key | Type | Trigger | Description |
+|---|---|---|---|
+| `zombie_growl` | growl | Basic idle/chase proximity | Deep moan, 55→40Hz, 1.0s |
+| `zombie_alert` | growl | Basic idle→chase transition | Short aggressive growl, 80→50Hz, 0.4s |
+| `zombie_death` | growl | Basic dies | Current enemy_death params |
+| `crawler_skitter` | skitter (NEW) | Crawler idle/chase proximity | Rapid clicks, 0.4s |
+| `crawler_alert` | noise_burst | Crawler idle→chase transition | High-pitched shriek, 3000Hz, 0.15s |
+| `crawler_death` | noise_burst | Crawler dies | High crackling burst, 2000Hz, 0.2s |
+| `spitter_gurgle` | gurgle (NEW) | Spitter idle/chase proximity | Wet bubbling, 0.8s |
+| `spitter_alert` | sweep_down | Spitter idle→chase transition | Descending hiss, 800→200Hz, 0.3s |
+| `spitter_fire` | noise_burst | Spitter fires projectile | Wet burst, 600Hz, Q=3, 0.15s |
+| `spitter_death` | gurgle (NEW) | Spitter dies | Short gurgle cutoff, 0.3s |
+
+### New Renderers Needed
+
+**`renderSkitter`**: Creates rapid sequence of highpass-filtered noise micro-bursts
+- OfflineAudioContext with white noise buffer
+- Gain envelope creates 8-15 rapid on/off pulses (3-5ms on, 25-45ms off)
+- Highpass filter at configurable frequency (default 4000Hz)
+- Config: `{ clicks, clickDuration, clickGap, freq, Q, gain, duration }`
+
+**`renderGurgle`**: Creates resonant filtered noise with sweeping bandpass
+- OfflineAudioContext with white noise buffer
+- Bandpass filter with high Q (8-15) for resonance
+- LFO modulates filter frequency for bubbling effect
+- Config: `{ freq, Q, lfoFreq, lfoDepth, gain, duration, attackTime, releaseTime }`
+
+### GameScene Integration — Hook Points
+
+**State transition sounds** (detected in `updateEnemies()` between lines 1494-1496):
+- Compare `es.state` (old state) with `updated.state` (new state)
+- On idle→chase: play `${type}_alert` sound
+- On wantsToFire: play `spitter_fire` sound (already have hook at line 1518)
+
+**Proximity ambient sounds** (added to `updateEnemies()` loop):
+- Per-enemy sound cooldown timer (e.g., 3-8s between ambient sounds)
+- Only play if enemy is within audible range (~400px)
+- Volume scales with distance: `volume = Math.max(0.05, 1.0 - (dist / MAX_SOUND_RANGE))`
+- Play `${type}_growl`/`${type}_skitter`/`${type}_gurgle` based on type
+
+**Per-type death sounds** (replace single `enemy_death` at line 1339):
+- Replace `this.playSound('enemy_death')` with `this.playSound(\`${enemy.type}_death\`)`
+
+### Distance-Based Volume
+- New `playSoundAtDistance(key, distance, maxRange)` method on GameScene
+- `volume = gain * Math.max(0.05, 1.0 - (distance / maxRange))`
+- `maxRange = 400` (same as detection range + buffer)
+- Sounds beyond maxRange are not played at all (save performance)
+- Existing `playSound` unchanged for UI/pickup sounds that don't need distance scaling
+
+### Enemy Sound Cooldowns
+- New `soundCooldown` field on enemy state (per-enemy timer)
+- Ambient sounds: 4-8s cooldown (randomized per enemy to avoid sync)
+- Alert sounds: 0 cooldown (play immediately on state transition)
+- Prevents audio spam from multiple enemies of the same type
+
+### Pure Function: `getEnemySoundEvent(oldState, newState, type, soundCooldown, delta)`
+- Returns `{ soundKey: string|null, newCooldown: number }` 
+- Keeps sound logic testable without Phaser dependency
+- Lives in `audio.js` alongside other audio pure functions

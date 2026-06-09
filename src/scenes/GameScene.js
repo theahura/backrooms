@@ -26,7 +26,7 @@ import { getLocation, getLocationLayout, getLocationExitPosition, generateAltern
 import { generateRoomLore } from '../systems/lore.js';
 import { buildRoomGraph, buildFullRoomGraph, bfsFromRoom, getNextDoorway, getClosedDoorOnPath, getRoomDistance, getDoorwayCenter, DOORWAY_SEEK_CHANCE, ROOM_TRANSITION_COOLDOWN, MAX_ROOM_DISTANCE, MAX_ROOM_ENEMIES } from '../systems/pathfinding.js';
 import { createDangerState, updateDangerTime, shouldSpawnWave, advanceWave, getWaveComposition, getSpawnRoom } from '../systems/danger.js';
-import { getFootstepInterval, getAmbientSoundDelay } from '../systems/audio.js';
+import { SOUND_CONFIGS, getFootstepInterval, getAmbientSoundDelay, getEnemySoundEvent, getEnemyDeathSound, getEnemyFireSound, getDistanceVolume, ENEMY_SOUND_RANGE } from '../systems/audio.js';
 import { generateAllSounds, createAmbientDrone, playAmbientSound } from '../systems/audioEngine.js';
 import { SPRITE_DEFS, getAllSpriteKeys, ANIM_DEFS, getAllAnimKeys, getEnemyTextureKey, getAnimKeyForState } from '../systems/sprites.js';
 
@@ -210,6 +210,17 @@ export class GameScene extends Phaser.Scene {
     if (!this.audioReady) return;
     try {
       this.sound.play(key, { volume: 1 });
+    } catch (_) {}
+  }
+
+  playSoundAtDistance(key, distance) {
+    if (!this.audioReady) return;
+    const config = SOUND_CONFIGS[key];
+    const baseGain = config ? config.gain : 0.3;
+    const volume = getDistanceVolume(distance, ENEMY_SOUND_RANGE, baseGain);
+    if (volume <= 0) return;
+    try {
+      this.sound.play(key, { volume });
     } catch (_) {}
   }
 
@@ -795,6 +806,7 @@ export class GameScene extends Phaser.Scene {
         targetDoorway: null,
         doorOpenTimer: 0,
         targetDoorId: null,
+        soundCooldown: 1000 + Math.random() * 3000,
       });
     }
   }
@@ -839,6 +851,7 @@ export class GameScene extends Phaser.Scene {
           targetDoorway: null,
           doorOpenTimer: 0,
           targetDoorId: null,
+          soundCooldown: 1000 + Math.random() * 3000,
         });
       }
     }
@@ -1336,7 +1349,10 @@ export class GameScene extends Phaser.Scene {
     this.playSound('bullet_hit');
 
     if (isEnemyDead(enemyState.health)) {
-      this.playSound('enemy_death');
+      const dx = enemySprite.x - this.player.x;
+      const dy = enemySprite.y - this.player.y;
+      const deathDist = Math.sqrt(dx * dx + dy * dy);
+      this.playSoundAtDistance(getEnemyDeathSound(enemyState.type), deathDist);
       enemySprite.stop();
       enemySprite.setActive(false);
       enemySprite.body.stop();
@@ -1491,7 +1507,17 @@ export class GameScene extends Phaser.Scene {
       };
 
       const chaseSpeed = this.getScaledChaseSpeed(es.type);
+      const oldState = es.state;
       const updated = updateEnemyAI(es, playerPos, this.wallSegments, delta, this.hidingState.isHiding, chaseSpeed, navContext);
+
+      const soundResult = getEnemySoundEvent(oldState, updated.state, es.type, es.soundCooldown || 0, delta);
+      es.soundCooldown = soundResult.newCooldown;
+      if (soundResult.soundKey) {
+        const dx = es.x - playerPos.x;
+        const dy = es.y - playerPos.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        this.playSoundAtDistance(soundResult.soundKey, dist);
+      }
 
       es.state = updated.state;
       es.velocityX = updated.velocityX;
@@ -1517,6 +1543,12 @@ export class GameScene extends Phaser.Scene {
 
       if (updated.wantsToFire) {
         this.fireEnemyBullet(es.x, es.y, playerPos.x, playerPos.y);
+        const fireSound = getEnemyFireSound(es.type);
+        if (fireSound) {
+          const fdx = es.x - playerPos.x;
+          const fdy = es.y - playerPos.y;
+          this.playSoundAtDistance(fireSound, Math.sqrt(fdx * fdx + fdy * fdy));
+        }
         es.wantsToFire = false;
       }
 
