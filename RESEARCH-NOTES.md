@@ -3243,3 +3243,82 @@ This avoids adding a new selection screen while still giving meaningful progress
 - `GameScene.js`: Read 2 new upgrade levels, pass all flags to `createWeaponState`
 - `ShopScene.js`: Reduce rowHeight/startY to fit 12 rows. No other changes — UI is data-driven from UPGRADES array
 - No changes to persistence (createShopState auto-registers new keys, `|| 0` fallback handles old saves)
+
+## Gunshot Noise Attracts Nearby Enemies Research
+
+### Design Decision: Room-Based Noise Propagation with Cooldown
+
+This was called out as a "future enhancement" in the Cross-Room Enemy Movement section. The noise trap system already implements "alert enemies in nearby rooms" — this extends that pattern to player weapon fire.
+
+### Game Design References
+- **Metal Gear Solid V**: Unsuppressed weapons alert at ~100m radius. State machine: Normal→Caution→Alert→Evasion. Timer-based decay back to normal.
+- **Resident Evil 2 Remake (Mr. X)**: Gunfire acts as continuous homing signal — noise accelerates enemy convergence, not binary alert. More noise = faster approach.
+- **Hotline Miami**: Most directly relevant (top-down 2D). Gunshots alert all enemies within earshot. Players use noise strategically to draw enemies toward them for efficient clearing. No death spiral because rooms are designed around it.
+- **Project Zomboid**: Explicit numeric noise system. Shotgun noise ~200, attenuated by walls/doors. Zombies migrate toward noise source over time (staggered arrival, not instant).
+- **Mark of the Ninja**: Gold standard for noise feedback — expanding translucent ring shows exact propagation radius. Added after playtesting revealed confusion about why enemies reacted.
+- **Enter the Gungeon / Nuclear Throne**: Do NOT have noise-attracts-enemies. Enemies are pre-placed per room. Not useful references.
+
+### Death Spiral Prevention (Critical)
+1. **Only alert idle/search enemies**: Already-chasing enemies are already coming. This prevents cascading alerts.
+2. **Cooldown between alerts**: 5-second cooldown after alerting. Sustained firefight = one alert event, not N.
+3. **Existing enemy caps**: Max ~4 enemies per room (density cap), danger wave cap of 8 total, leash distance of 2 rooms from spawn. These constrain total threat.
+4. **Enemy loot drops**: Killing attracted enemies yields items (existing mechanic), offsetting the cost of fighting.
+5. **Closed doors block**: Room graph excludes closed doors, so closing a door blocks noise propagation.
+
+### Noise Range Per Weapon
+| Weapon | Noise Range (BFS rooms) | Rationale |
+|--------|------------------------|-----------|
+| Pistol | 1 | Standard sidearm, moderate noise |
+| Shotgun | 2 | Very loud, alerts further |
+| Rifle | 1 | Similar to pistol (suppressed barrel) |
+
+### Existing Pattern: Noise Trap Alert (GameScene.js:826-841)
+```javascript
+const trapRoomId = trapSprite.getData('roomId');
+if (this.roomGraph) {
+  for (const es of this.enemyStates) {
+    const roomDist = getRoomDistance(this.roomGraph, trapRoomId, es.currentRoomId);
+    if (roomDist !== null && roomDist <= 1) {
+      es.state = 'chase';
+      es.lastKnownX = this.player.x;
+      es.lastKnownY = this.player.y;
+    }
+  }
+}
+```
+
+### Architecture
+
+**New pure module `gunfireNoise.js`**:
+- `GUNSHOT_ALERT_COOLDOWN = 5000` (5 seconds)
+- `canBeAlertedByNoise(enemyState)` — returns true only for `idle` or `search` state
+- `getAlertedEnemies(enemyStates, roomGraph, sourceRoomId, noiseRange)` — filters enemies by: state eligibility AND BFS distance within range. Uses `getRoomDistance` per enemy (7-12 node graph × ~20 enemies = negligible).
+
+**`weapons.js` changes**:
+- Add `noiseRange` field to each weapon type in `WEAPON_TYPES`
+
+**GameScene integration**:
+- New `this.gunshotAlertCooldown = 0` state field, decremented by delta each frame
+- After `fireBullet()` call (line ~2278): if cooldown is 0, get player's current room, call `getAlertedEnemies()`, set each to chase state with player position, reset cooldown
+- Reuses `this.roomGraph` which is already built/cached each frame
+
+### Bug in Existing Pattern
+The noise trap checks `roomDist !== null && roomDist <= 1` but `getRoomDistance` returns `-1` (not null) for unreachable rooms. The `!== null` check always passes. `-1 <= 1` is true, so unreachable enemies WOULD be alerted — except in practice all same-floor rooms are connected. New code should use `roomDist >= 0 && roomDist <= noiseRange` for correctness.
+
+### Constants
+```javascript
+GUNSHOT_ALERT_COOLDOWN = 5000  // 5 seconds between alert events
+WEAPON_NOISE_RANGES = { pistol: 1, shotgun: 2, rifle: 1 }
+```
+
+### Test Strategy
+- Pure function tests for `canBeAlertedByNoise` (idle=true, search=true, chase=false, attack=false, opening_door=false)
+- Pure function tests for `getAlertedEnemies` (filters by state, filters by distance, empty when no roomGraph)
+- Weapon noise range value tests (each weapon has expected range)
+- No visual/GameScene tests — integration is wiring only
+
+### Edge Cases
+- Player fires in room 0 (lit/safe): enemies in room 0 are frozen (velocity zeroed, AI skipped) — alerting them would be overridden next frame by the freeze check. Alert anyway; if they later leave the lit room (switch toggled off), they'll chase.
+- Player fires while no roomGraph exists (shouldn't happen in practice): guard with `if (!this.roomGraph) return`
+- Cooldown prevents double-alerting on rapid fire (shotgun fires once per 800ms, rifle 600ms, pistol 200ms — all within 5s cooldown)
+- Enemies in different floors: getRoomDistance returns -1 (unreachable via room graph, which only has same-floor connections)

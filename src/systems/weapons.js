@@ -14,6 +14,7 @@ export const WEAPON_TYPES = [
     pickupColor: 0xaaaa44,
     maxAmmo: 50,
     startAmmo: 15,
+    noiseRange: 1,
   },
   {
     id: 'shotgun',
@@ -28,6 +29,7 @@ export const WEAPON_TYPES = [
     pickupColor: 0xcc6633,
     maxAmmo: 20,
     startAmmo: 6,
+    noiseRange: 2,
   },
   {
     id: 'rifle',
@@ -42,6 +44,7 @@ export const WEAPON_TYPES = [
     pickupColor: 0x3399aa,
     maxAmmo: 15,
     startAmmo: 4,
+    noiseRange: 1,
   },
 ];
 

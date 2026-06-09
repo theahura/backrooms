@@ -28,6 +28,7 @@ import { buildRoomGraph, buildFullRoomGraph, bfsFromRoom, getNextDoorway, getClo
 import { createDangerState, updateDangerTime, shouldSpawnWave, advanceWave, getWaveComposition, getSpawnRoom } from '../systems/danger.js';
 import { SOUND_CONFIGS, getFootstepInterval, getAmbientSoundDelay, getEnemySoundEvent, getEnemyDeathSound, getEnemyFireSound, getDistanceVolume, ENEMY_SOUND_RANGE } from '../systems/audio.js';
 import { generateAllSounds, createAmbientDrone, playAmbientSound } from '../systems/audioEngine.js';
+import { getAlertedEnemies, GUNSHOT_ALERT_COOLDOWN } from '../systems/gunfireNoise.js';
 import { createRunStats, recordKill, updateTime, updateMaxFloor } from '../systems/runStats.js';
 import { getEffectiveVolume, createDefaultSettings } from '../systems/settings.js';
 import { SPRITE_DEFS, getAllSpriteKeys, ANIM_DEFS, getAllAnimKeys, getEnemyTextureKey, getAnimKeyForState } from '../systems/sprites.js';
@@ -138,6 +139,7 @@ export class GameScene extends Phaser.Scene {
     this.roomGraph = null;
     this.fullRoomGraph = null;
     this.roomGraphDirty = true;
+    this.gunshotAlertCooldown = 0;
 
     this.generateSpriteTextures();
     this.createRooms();
@@ -832,7 +834,7 @@ export class GameScene extends Phaser.Scene {
       if (this.roomGraph) {
         for (const es of this.enemyStates) {
           const roomDist = getRoomDistance(this.roomGraph, trapRoomId, es.currentRoomId);
-          if (roomDist !== null && roomDist <= 1) {
+          if (roomDist >= 0 && roomDist <= 1) {
             es.state = 'chase';
             es.lastKnownX = this.player.x;
             es.lastKnownY = this.player.y;
@@ -2274,10 +2276,27 @@ export class GameScene extends Phaser.Scene {
       fireButtonDown,
       leftButtonDown: pointer.leftButtonDown(),
     });
+    this.gunshotAlertCooldown = Math.max(0, this.gunshotAlertCooldown - delta);
     if (!this.hidingState.isHiding && wantFire && canFire(this.fireCooldown) && getActiveWeapon(this.weaponState) && hasAmmo(this.weaponState)) {
       this.fireBullet();
       this.weaponState = consumeAmmo(this.weaponState);
       this.fireCooldown = this.fireRate;
+
+      if (this.gunshotAlertCooldown <= 0 && this.roomGraph) {
+        const weapon = getActiveWeapon(this.weaponState);
+        const playerRoom = getCurrentRoom(this.player.x, this.player.y, this.level.rooms);
+        if (playerRoom && weapon) {
+          const alertedIndices = getAlertedEnemies(this.enemyStates, this.roomGraph, playerRoom.id, weapon.noiseRange);
+          for (const idx of alertedIndices) {
+            this.enemyStates[idx].state = 'chase';
+            this.enemyStates[idx].lastKnownX = this.player.x;
+            this.enemyStates[idx].lastKnownY = this.player.y;
+          }
+          if (alertedIndices.length > 0) {
+            this.gunshotAlertCooldown = GUNSHOT_ALERT_COOLDOWN;
+          }
+        }
+      }
     }
 
     this.updateInteractPrompt();
