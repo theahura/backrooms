@@ -47,6 +47,9 @@ export class ShopScene extends Phaser.Scene {
 
   create() {
     this.cameras.main.setBackgroundColor('#111111');
+    this.fitShopCamera();
+    const onResize = () => this.fitShopCamera();
+    this.scale.on('resize', onResize);
 
     this.add.text(512, 40, 'THE SHOP', {
       fontSize: '36px',
@@ -90,7 +93,8 @@ export class ShopScene extends Phaser.Scene {
         fontSize: '20px',
         color: '#88aaff',
         fontFamily: 'monospace',
-      }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+      }).setOrigin(0.5);
+      this.enlargeHitArea(prevBtn, 32, 24);
       prevBtn.on('pointerdown', () => {
         this.playSound('shop_click');
         this.cycleLocation(-1);
@@ -100,7 +104,8 @@ export class ShopScene extends Phaser.Scene {
         fontSize: '20px',
         color: '#88aaff',
         fontFamily: 'monospace',
-      }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+      }).setOrigin(0.5);
+      this.enlargeHitArea(nextBtn, 32, 24);
       nextBtn.on('pointerdown', () => {
         this.playSound('shop_click');
         this.cycleLocation(1);
@@ -130,7 +135,8 @@ export class ShopScene extends Phaser.Scene {
       fontSize: '24px',
       color: '#44cc44',
       fontFamily: 'monospace',
-    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    }).setOrigin(0.5);
+    this.enlargeHitArea(enterBtn);
 
     enterBtn.on('pointerover', () => enterBtn.setColor('#88ff88'));
     enterBtn.on('pointerout', () => enterBtn.setColor('#44cc44'));
@@ -147,7 +153,8 @@ export class ShopScene extends Phaser.Scene {
       fontSize: '14px',
       color: '#88aaff',
       fontFamily: 'monospace',
-    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    }).setOrigin(0.5);
+    this.enlargeHitArea(journalBtn);
 
     journalBtn.on('pointerover', () => journalBtn.setColor('#bbddff'));
     journalBtn.on('pointerout', () => journalBtn.setColor('#88aaff'));
@@ -181,6 +188,7 @@ export class ShopScene extends Phaser.Scene {
     }
 
     this.events.once('shutdown', () => {
+      this.scale.off('resize', onResize);
       if (this._audioUnlockHandler && this.sound) {
         this.sound.off('unlocked', this._audioUnlockHandler);
         this._audioUnlockHandler = null;
@@ -188,11 +196,26 @@ export class ShopScene extends Phaser.Scene {
     });
   }
 
+  fitShopCamera() {
+    const cam = this.cameras.main;
+    const zoom = Math.min(this.scale.width / 1024, this.scale.height / 768);
+    cam.setZoom(zoom);
+    cam.centerOn(512, 384);
+  }
+
   playSound(key) {
     if (!this.audioReady) return;
     try {
       this.sound.play(key, { volume: 0.5 });
     } catch (_) {}
+  }
+
+  enlargeHitArea(obj, padX = 24, padY = 18) {
+    obj.setInteractive(
+      new Phaser.Geom.Rectangle(-padX, -padY, obj.width + padX * 2, obj.height + padY * 2),
+      Phaser.Geom.Rectangle.Contains
+    );
+    if (obj.input) obj.input.cursor = 'pointer';
   }
 
   createUpgradeRow(upgrade, y) {
@@ -224,7 +247,8 @@ export class ShopScene extends Phaser.Scene {
       fontSize: '16px',
       color: '#44cc44',
       fontFamily: 'monospace',
-    }).setInteractive({ useHandCursor: true });
+    });
+    this.enlargeHitArea(buyBtn, 20, 16);
 
     buyBtn.on('pointerover', () => {
       if (canPurchase(this.shopState, upgrade.id)) {
@@ -348,7 +372,8 @@ export class ShopScene extends Phaser.Scene {
       fontSize: '16px',
       color: '#88aaff',
       fontFamily: 'monospace',
-    }).setOrigin(0.5).setDepth(2001).setInteractive({ useHandCursor: true });
+    }).setOrigin(0.5).setDepth(2001);
+    this.enlargeHitArea(this.journalPrevBtn);
     this.journalPrevBtn.on('pointerdown', () => {
       this.playSound('shop_click');
       this.journalPage--;
@@ -367,7 +392,8 @@ export class ShopScene extends Phaser.Scene {
       fontSize: '16px',
       color: '#88aaff',
       fontFamily: 'monospace',
-    }).setOrigin(0.5).setDepth(2001).setInteractive({ useHandCursor: true });
+    }).setOrigin(0.5).setDepth(2001);
+    this.enlargeHitArea(this.journalNextBtn);
     this.journalNextBtn.on('pointerdown', () => {
       this.playSound('shop_click');
       this.journalPage++;
@@ -379,7 +405,8 @@ export class ShopScene extends Phaser.Scene {
       fontSize: '18px',
       color: '#44cc44',
       fontFamily: 'monospace',
-    }).setOrigin(0.5).setDepth(2001).setInteractive({ useHandCursor: true });
+    }).setOrigin(0.5).setDepth(2001);
+    this.enlargeHitArea(closeBtn);
     closeBtn.on('pointerover', () => closeBtn.setColor('#88ff88'));
     closeBtn.on('pointerout', () => closeBtn.setColor('#44cc44'));
     closeBtn.on('pointerdown', () => {

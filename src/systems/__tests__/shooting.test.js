@@ -4,6 +4,7 @@ import {
   canFire,
   updateFireCooldown,
   isBulletExpired,
+  getBulletVelocityFromAngle,
 } from '../shooting.js';
 
 describe('calculateBulletVelocity', () => {
@@ -36,6 +37,26 @@ describe('calculateBulletVelocity', () => {
     const { vx, vy } = calculateBulletVelocity(5, 5, 5, 5, 500);
     expect(vx).toBe(0);
     expect(vy).toBe(0);
+  });
+});
+
+describe('getBulletVelocityFromAngle', () => {
+  it('fires straight right at angle 0', () => {
+    const { vx, vy } = getBulletVelocityFromAngle(0, 500);
+    expect(vx).toBeCloseTo(500, 1);
+    expect(vy).toBeCloseTo(0, 1);
+  });
+
+  it('fires straight down at angle PI/2', () => {
+    const { vx, vy } = getBulletVelocityFromAngle(Math.PI / 2, 400);
+    expect(vx).toBeCloseTo(0, 1);
+    expect(vy).toBeCloseTo(400, 1);
+  });
+
+  it('produces a velocity whose magnitude equals the speed for an arbitrary angle', () => {
+    const { vx, vy } = getBulletVelocityFromAngle(1.234, 350);
+    const magnitude = Math.sqrt(vx * vx + vy * vy);
+    expect(magnitude).toBeCloseTo(350, 1);
   });
 });
 

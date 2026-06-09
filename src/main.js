@@ -1,21 +1,52 @@
 import Phaser from 'phaser';
+import VirtualJoystickPlugin from 'phaser3-rex-plugins/plugins/virtualjoystick-plugin.js';
 import { GameScene } from './scenes/GameScene.js';
 import { ShopScene } from './scenes/ShopScene.js';
 import { loadGame, saveGame } from './systems/persistence.js';
+import { detectTouchPrimary } from './systems/touchControls.js';
+
+const coarsePointer = typeof window !== 'undefined' && window.matchMedia
+  ? window.matchMedia('(pointer: coarse)').matches
+  : false;
+const maxTouchPoints = typeof navigator !== 'undefined' ? (navigator.maxTouchPoints || 0) : 0;
+const isTouch = detectTouchPrimary({ maxTouchPoints, coarsePointer });
+
+const scale = isTouch
+  ? {
+    mode: Phaser.Scale.RESIZE,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+    parent: 'game-container',
+    width: window.innerWidth,
+    height: window.innerHeight,
+  }
+  : {
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+    parent: 'game-container',
+    width: 1024,
+    height: 768,
+  };
 
 const config = {
   type: Phaser.AUTO,
-  width: 1024,
-  height: 768,
-  parent: 'game-container',
   backgroundColor: '#000000',
   pixelArt: true,
+  scale,
   physics: {
     default: 'arcade',
     arcade: {
       gravity: { x: 0, y: 0 },
       debug: false,
     },
+  },
+  plugins: {
+    global: [
+      {
+        key: 'rexVirtualJoystick',
+        plugin: VirtualJoystickPlugin,
+        start: true,
+      },
+    ],
   },
   scene: [GameScene, ShopScene],
 };
