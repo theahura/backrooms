@@ -223,4 +223,14 @@ describe('computeTouchLayout', () => {
     expect(layout.fullscreenButton.x).toBeLessThanOrEqual(844);
     expect(layout.fullscreenButton.y).toBeLessThan(195);
   });
+
+  it('includes a pause button positioned near the top and away from other controls', () => {
+    const layout = computeTouchLayout({ width: 844, height: 390, stickRadius: radius });
+    expect(layout.pauseButton).toBeDefined();
+    expect(layout.pauseButton.x).toBeGreaterThanOrEqual(0);
+    expect(layout.pauseButton.x).toBeLessThanOrEqual(844);
+    expect(layout.pauseButton.y).toBeLessThan(195);
+    const gap = Math.abs(layout.pauseButton.x - layout.fullscreenButton.x);
+    expect(gap).toBeGreaterThan(50);
+  });
 });

@@ -2872,3 +2872,45 @@ Each of the 3 enemy types (basic zombie, crawler, spitter) should have unique id
 - O(litRooms × doorsPerRoom) per frame — negligible with ~15% switch rate and 7-12 rooms
 - Each spill zone = 1 `fillGradientStyle` + 1 `fillRect` call — minimal overhead
 - Skip spill when both rooms are lit (both already fully revealed)
+
+## Pause System Research
+
+### Problem
+The game has no way to pause during gameplay. ESC key does nothing in GameScene. Mobile has no pause button. This is a fundamental UX gap — every game needs pause functionality.
+
+### Phaser 3 Pause Architecture
+- `scene.pause()` stops the scene's `update()` loop entirely. The scene continues to render but no update ticks fire. Physics, tweens, and timers all stop.
+- `scene.resume()` restores update ticks from where they left off.
+- **Keyboard events still fire on paused scenes** (by design). Pointer/gameobject events are blocked.
+- **Best approach: separate PauseScene** launched on top of the frozen GameScene. The separate scene has its own active input manager, so pointer events work for resume buttons.
+- Pattern: GameScene ESC → `this.scene.pause()` + `this.scene.launch('PauseScene')`. PauseScene ESC → `this.scene.resume('GameScene')` + `this.scene.stop()`.
+
+### ESC Key Handling
+- Event-based: `this.input.keyboard.on('keydown-ESC', callback)` — fires even on paused scenes
+- Key object: `this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC)` — polled in update
+- ShopScene already uses `keydown-ESC` pattern for journal overlay close (line 418-419)
+
+### Overlay
+- PauseScene creates fullscreen dark rectangle + text in its own `create()` method
+- Since it's a separate scene rendered after GameScene, it naturally appears on top
+- No depth management needed (each scene has its own rendering context)
+
+### Mobile Pause Button
+- Add a small touch button using the existing `makeTouchButton()` pattern in GameScene
+- Position: top-left area (HUD is at depth 1000, touch buttons at TOUCH_UI_DEPTH=1500)
+- Add `pauseButton` position to `computeTouchLayout()` return value
+- Button triggers same `pauseGame()` as ESC key
+- PauseScene supports tap-anywhere to resume on mobile
+
+### Controls Display
+- Pure data module `pause.js` with desktop and mobile control lists
+- `getControlsList(touchMode)` returns appropriate control array
+- Desktop: WASD, Mouse, Left Click, Right Click, E, Q/Scroll, ESC
+- Mobile: Left Stick, Right Stick, FIRE, USE, WPN, BATT
+
+### Integration Points
+- `main.js`: Add PauseScene to scene list
+- `touchControls.js`: Add `pauseButton` to `computeTouchLayout()` return
+- `GameScene.js`: ESC listener in `create()`, `pauseGame()` method, mobile pause button in `createTouchControls()`
+- New `PauseScene.js`: Dark overlay, controls text, ESC/tap to resume
+- New `pause.js`: Controls data, `getControlsList()` pure function

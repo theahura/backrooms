@@ -1395,6 +1395,13 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  pauseGame() {
+    if (this.combatState.isDead || this.dayEnding || this.isTeleporting) return;
+    if (this.scene.isPaused()) return;
+    this.scene.pause();
+    this.scene.launch('PauseScene', { touchMode: this.touchMode });
+  }
+
   onPlayerDeath() {
     this.playSound('player_death');
     this.stopAmbientAudio();
@@ -1721,6 +1728,8 @@ export class GameScene extends Phaser.Scene {
         this.triggerWeaponSwitch();
       }
     });
+
+    this.input.keyboard.on('keydown-ESC', () => this.pauseGame());
   }
 
   createTouchControls() {
@@ -1786,6 +1795,8 @@ export class GameScene extends Phaser.Scene {
       });
     }
 
+    this.pauseButton = this.makeTouchButton(layout.pauseButton.x, layout.pauseButton.y, '| |', () => this.pauseGame());
+
     this.setButtonVisible(this.useButton, false);
     this.setButtonVisible(this.weaponButton, false);
 
@@ -1827,6 +1838,7 @@ export class GameScene extends Phaser.Scene {
     this.moveTouchButton(this.weaponButton, row.weaponX, row.y);
     this.moveTouchButton(this.batteryButton, row.batteryX, row.y);
     this.moveTouchButton(this.fullscreenButton, layout.fullscreenButton.x, layout.fullscreenButton.y);
+    this.moveTouchButton(this.pauseButton, layout.pauseButton.x, layout.pauseButton.y);
 
     if (this.floorText) {
       this.floorText.setPosition(this.scale.width - 180, 145);

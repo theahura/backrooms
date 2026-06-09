@@ -55,5 +55,6 @@ export function computeTouchLayout({ width, height, stickRadius }) {
       batteryX: centerX + actionHalfSpacing,
     },
     fullscreenButton: { x: centerX, y: 40 },
+    pauseButton: { x: 46, y: 40 },
   };
 }
