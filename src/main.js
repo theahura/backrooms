@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import VirtualJoystickPlugin from 'phaser3-rex-plugins/plugins/virtualjoystick-plugin.js';
+import { TitleScene } from './scenes/TitleScene.js';
 import { GameScene } from './scenes/GameScene.js';
 import { ShopScene } from './scenes/ShopScene.js';
 import { PauseScene } from './scenes/PauseScene.js';
@@ -50,7 +51,7 @@ const config = {
       },
     ],
   },
-  scene: [GameScene, ShopScene, PauseScene, RunSummaryScene],
+  scene: [TitleScene, GameScene, ShopScene, PauseScene, RunSummaryScene],
 };
 
 const game = new Phaser.Game(config);

@@ -2981,3 +2981,62 @@ RunSummaryScene (displays stats with animations, "Continue" button)
 - Success: use existing `day_complete` sound (already plays before transition)
 - Stat reveal: play existing `item_pickup` or `switch_click` sound for each stat line appearing
 - No new sounds needed
+
+## Title Screen / Main Menu Research
+
+### Design Decision: Title Screen as Boot Scene
+
+The game currently boots directly into GameScene — no title screen, no menu. Every game needs an entry point that:
+1. Sets the mood/atmosphere before gameplay
+2. Provides save management (Continue vs New Game)
+3. Gives context to new players
+
+### Scene Flow Change
+```
+Current:  Game boot → GameScene → RunSummary → ShopScene → GameScene
+Proposed: Game boot → TitleScene → ShopScene → GameScene → RunSummary → ShopScene → ...
+                                 ↘ GameScene (new game, first run)
+```
+- TitleScene becomes first in scene array (auto-started by Phaser)
+- "Continue" → ShopScene (player resumes from shop, same as after a run)
+- "New Game" → clears save via `clearSave()`, resets registry, starts GameScene fresh
+- ShopScene already has an "Enter Backrooms" button that starts GameScene
+
+### Horror Aesthetic (Backrooms-Specific)
+- **Color palette**: Sickly yellow (#D4C073) for title text, matching existing crack glow color
+- **Background**: Pure black (#000000), consistent with game's darkness theme
+- **Font**: monospace, consistent with all other scenes
+- **Effects**: Title text has slow pulsing alpha (simulating dying fluorescent light), subtitle has gentler pulse
+- **Minimal UI**: emptiness IS the Backrooms aesthetic — less on screen = more unsettling
+
+### Architecture: New Scene `TitleScene.js`
+- Follow ShopScene pattern: constructor with `super('TitleScene')`, `create()` builds all UI
+- Responsive layout via same `fitShopCamera()` pattern (zoom + centerOn for touch devices)
+- `loadGame()` called in `create()` to determine menu options
+- No `init()` needed — title scene reads directly from persistence, not registry
+- Touch-aware: detect via same `detectTouchPrimary` pattern used in main.js
+
+### UI Elements
+1. **Title**: "BACKROOMS" in large yellow-ish text, centered, with slow alpha pulse
+2. **Subtitle**: "Don't let the lights go out." in smaller dim gray text
+3. **Menu options** (centered, stacked vertically):
+   - "CONTINUE" (only if save exists) — green, interactive
+   - "NEW GAME" — green, interactive
+   - "DELETE SAVE" (only if save exists) — dim red, interactive, with confirmation
+4. **Version/credit text**: bottom corner, very dim
+
+### Phaser 3 Implementation
+- Text with `setInteractive({ useHandCursor: true })` + pointer events for hover/click
+- `this.tweens.add({ targets: title, alpha: { from: 1, to: 0.3 }, duration: 3000, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' })` for flicker
+- `this.cameras.main.fadeOut(500)` → `camerafadeoutcomplete` → `scene.start()` for transitions
+- Camera fade-in on create: `this.cameras.main.fadeIn(1000)`
+
+### Integration Points
+- `main.js`: Add TitleScene import, put first in scene array
+- `persistence.js`: Already has `loadGame()` and `clearSave()` — no changes needed
+- ShopScene/GameScene: No changes needed (data flow unchanged)
+- Title scene needs same `enlargeHitArea` pattern as ShopScene for touch targets
+
+### Sound
+- Reuse existing `createAmbientDrone()` from audioEngine.js for atmospheric background hum
+- No new sounds needed
