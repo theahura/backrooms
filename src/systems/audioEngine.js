@@ -405,6 +405,7 @@ export function createAmbientDrone(audioContext, destination) {
   filter.connect(destination);
 
   const nodes = [osc1, osc2, osc3, lfo];
+  const baseGain = 0.06;
 
   return {
     start() {
@@ -415,13 +416,18 @@ export function createAmbientDrone(audioContext, destination) {
         try { node.stop(); } catch (_) {}
       }
     },
+    setVolume(value) {
+      masterGain.gain.value = baseGain * value;
+    },
   };
 }
 
-export function playAmbientSound(soundManager, time) {
+export function playAmbientSound(soundManager, time, volumeMultiplier = 1) {
   const index = Math.abs(((time * 2654435761) >>> 0) % AMBIENT_SOUND_TYPES.length);
   const type = AMBIENT_SOUND_TYPES[index];
+  const vol = 0.5 * volumeMultiplier;
+  if (vol <= 0) return;
   try {
-    soundManager.play(type.name, { volume: 0.5 });
+    soundManager.play(type.name, { volume: vol });
   } catch (_) {}
 }

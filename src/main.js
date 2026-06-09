@@ -6,6 +6,7 @@ import { ShopScene } from './scenes/ShopScene.js';
 import { PauseScene } from './scenes/PauseScene.js';
 import { RunSummaryScene } from './scenes/RunSummaryScene.js';
 import { loadGame, saveGame } from './systems/persistence.js';
+import { loadSettings } from './systems/settings.js';
 import { detectTouchPrimary } from './systems/touchControls.js';
 
 const coarsePointer = typeof window !== 'undefined' && window.matchMedia
@@ -64,6 +65,8 @@ if (saved) {
   game.registry.set('unlockedLocations', saved.unlockedLocations);
   game.registry.set('activeLocation', saved.activeLocation);
 }
+
+game.registry.set('audioSettings', loadSettings());
 
 function saveCurrentState() {
   const shopState = game.registry.get('shopState');

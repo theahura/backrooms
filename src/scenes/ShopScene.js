@@ -12,6 +12,7 @@ import { saveGame } from '../systems/persistence.js';
 import { getLocation } from '../systems/locations.js';
 import { getJournalEntries, getJournalPage } from '../systems/lore.js';
 import { generateAllSounds } from '../systems/audioEngine.js';
+import { getEffectiveVolume, createDefaultSettings } from '../systems/settings.js';
 
 const JOURNAL_ENTRIES_PER_PAGE = 5;
 
@@ -43,6 +44,7 @@ export class ShopScene extends Phaser.Scene {
     this.collectedLore = new Set(this.registry.get('collectedLore') ?? []);
     this.journalOverlay = null;
     this.journalPage = 0;
+    this.audioSettings = this.registry.get('audioSettings') || createDefaultSettings();
   }
 
   create() {
@@ -205,8 +207,10 @@ export class ShopScene extends Phaser.Scene {
 
   playSound(key) {
     if (!this.audioReady) return;
+    const vol = 0.5 * getEffectiveVolume(this.audioSettings.masterVolume, this.audioSettings.sfxVolume);
+    if (vol <= 0) return;
     try {
-      this.sound.play(key, { volume: 0.5 });
+      this.sound.play(key, { volume: vol });
     } catch (_) {}
   }
 

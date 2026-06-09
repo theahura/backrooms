@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { getControlsList } from '../systems/pause.js';
+import { cycleVolume, saveSettings, getEffectiveVolume, createDefaultSettings } from '../systems/settings.js';
 
 export class PauseScene extends Phaser.Scene {
   constructor() {
@@ -40,6 +41,42 @@ export class PauseScene extends Phaser.Scene {
         fontFamily: 'monospace',
       }).setOrigin(0, 0);
     }
+
+    const settings = this.game.registry.get('audioSettings') || createDefaultSettings();
+    const volumeKeys = [
+      { key: 'masterVolume', label: 'Master' },
+      { key: 'sfxVolume', label: 'SFX' },
+      { key: 'ambientVolume', label: 'Ambient' },
+    ];
+
+    const volStartY = startY + controls.length * lineHeight + 20;
+    this.add.text(width / 2, volStartY, '— AUDIO —', {
+      fontSize: '16px', color: '#666666', fontFamily: 'monospace',
+    }).setOrigin(0.5);
+
+    volumeKeys.forEach((entry, i) => {
+      const y = volStartY + 30 + i * 32;
+      this.add.text(keyX, y, entry.label, {
+        fontSize: '16px', color: '#aaaaaa', fontFamily: 'monospace',
+      }).setOrigin(1, 0);
+
+      const btn = this.add.text(actionX, y, `[ ${settings[entry.key]} ]`, {
+        fontSize: '16px', color: '#ffd700', fontFamily: 'monospace',
+      }).setOrigin(0, 0);
+      btn.setInteractive({ useHandCursor: true });
+      btn.on('pointerover', () => btn.setColor('#ffee88'));
+      btn.on('pointerout', () => btn.setColor('#ffd700'));
+      btn.on('pointerdown', () => {
+        settings[entry.key] = cycleVolume(settings[entry.key]);
+        btn.setText(`[ ${settings[entry.key]} ]`);
+        this.game.registry.set('audioSettings', { ...settings });
+        saveSettings(settings);
+        const gameScene = this.scene.get('GameScene');
+        if (gameScene && gameScene.applyVolumeSettings) {
+          gameScene.applyVolumeSettings();
+        }
+      });
+    });
 
     const resumeText = this.touchMode ? 'Tap to resume' : 'Press ESC to resume';
     this.add.text(width / 2, height * 0.85, resumeText, {

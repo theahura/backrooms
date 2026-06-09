@@ -3040,3 +3040,60 @@ Proposed: Game boot → TitleScene → ShopScene → GameScene → RunSummary �
 ### Sound
 - Reuse existing `createAmbientDrone()` from audioEngine.js for atmospheric background hum
 - No new sounds needed
+
+## Audio Settings / Volume Controls Research
+
+### Current Audio Architecture
+- `audioEngine.js` generates all sounds via `OfflineAudioContext` → `AudioBuffer` → Phaser cache
+- `createAmbientDrone(audioContext, destination)` creates live oscillators with a `masterGain` node (0.06) connected to `this.sound.destination`
+- The drone's `masterGain` node is trapped in closure scope — not exposed on the returned object
+- `playAmbientSound(soundManager, time)` hardcodes `{ volume: 0.5 }`
+- GameScene `playSound(key)` hardcodes `{ volume: 1 }`
+- GameScene `playSoundAtDistance(key, distance)` computes volume via `getDistanceVolume()`
+- ShopScene `playSound(key)` hardcodes `{ volume: 0.5 }`
+- TitleScene only runs the ambient drone (no SFX)
+- PauseScene has no audio code
+
+### Phaser 3 Sound Volume API
+- `this.sound.volume` (getter/setter) controls a master GainNode for all `this.sound.play()` calls
+- Each `sound.play(key, { volume })` sets per-sound volume — multiplied with the global volume
+- Phaser has no built-in sound categories (SFX vs music) — must be implemented manually
+- The ambient drone bypasses Phaser's sound pipeline (connects oscillators → `this.sound.destination`) so `this.sound.volume` does NOT affect it
+
+### Volume Level Design (Perceptual/Logarithmic)
+- Human hearing is logarithmic — linear volume steps sound uneven
+- Stepped levels: OFF=0.0, LOW=0.05, MED=0.15, HIGH=0.4, FULL=1.0
+- Store the label string in localStorage, map to float at runtime
+
+### Settings Persistence
+- Use separate localStorage key `backrooms_settings` (not the game save key `backrooms_save`)
+- Settings survive `clearSave()` — volume preference should persist even after deleting a game save
+- Simple JSON: `{ version: 1, masterVolume: 'FULL', sfxVolume: 'FULL', ambientVolume: 'FULL' }`
+
+### Architecture: New Pure Module `settings.js`
+- `VOLUME_LEVELS = ['OFF', 'LOW', 'MED', 'HIGH', 'FULL']`
+- `VOLUME_VALUES = { OFF: 0, LOW: 0.05, MED: 0.15, HIGH: 0.4, FULL: 1.0 }`
+- `createDefaultSettings()` → `{ masterVolume: 'FULL', sfxVolume: 'FULL', ambientVolume: 'FULL' }`
+- `cycleVolume(currentLevel)` → next level in cycle (wraps OFF→LOW→...→FULL→OFF)
+- `getVolumeValue(level)` → float
+- `getEffectiveVolume(masterLevel, categoryLevel)` → float (master × category)
+- `saveSettings(settings)` → localStorage
+- `loadSettings()` → settings or defaults
+
+### Integration Points
+1. `audioEngine.js`: Modify `createAmbientDrone()` to expose `masterGain` node and accept initial gain parameter
+2. `main.js`: Load settings at boot, store in `game.registry`
+3. `GameScene.createSounds()`: Apply master volume via `this.sound.volume`; apply ambient volume to drone gain node
+4. `GameScene.playSound()`: Multiply by SFX volume setting
+5. `GameScene.playSoundAtDistance()`: Multiply computed volume by SFX volume setting
+6. `ShopScene.playSound()`: Same SFX volume multiplier
+7. `TitleScene.initAudio()`: Apply ambient volume to drone
+8. `PauseScene`: Add volume controls UI (3 cycle buttons: Master, SFX, Ambient)
+9. `TitleScene`: Add "SETTINGS" menu option that opens volume controls
+
+### UI Design
+- Cycle-button pattern: `[Master: MED]` — click/tap cycles to next level
+- Three rows: Master Volume, SFX Volume, Ambient Volume
+- Same text-interactive pattern as existing ShopScene buttons
+- In PauseScene: displayed below controls reference
+- In TitleScene: displayed as an overlay (same pattern as delete save confirmation)

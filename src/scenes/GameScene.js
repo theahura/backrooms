@@ -29,6 +29,7 @@ import { createDangerState, updateDangerTime, shouldSpawnWave, advanceWave, getW
 import { SOUND_CONFIGS, getFootstepInterval, getAmbientSoundDelay, getEnemySoundEvent, getEnemyDeathSound, getEnemyFireSound, getDistanceVolume, ENEMY_SOUND_RANGE } from '../systems/audio.js';
 import { generateAllSounds, createAmbientDrone, playAmbientSound } from '../systems/audioEngine.js';
 import { createRunStats, recordKill, updateTime, updateMaxFloor } from '../systems/runStats.js';
+import { getEffectiveVolume, getVolumeValue, createDefaultSettings } from '../systems/settings.js';
 import { SPRITE_DEFS, getAllSpriteKeys, ANIM_DEFS, getAllAnimKeys, getEnemyTextureKey, getAnimKeyForState } from '../systems/sprites.js';
 import { getLightSpillZones } from '../systems/lightSpill.js';
 
@@ -82,6 +83,7 @@ export class GameScene extends Phaser.Scene {
     this.unlockedLocations = this.registry.get('unlockedLocations') ?? ['store'];
     this.dangerState = createDangerState();
     this.runStats = createRunStats();
+    this.audioSettings = this.registry.get('audioSettings') || createDefaultSettings();
     saveGame(shopState || createShopState(), runCount + 1, [...this.collectedLore], this.unlockedLocations, this.activeLocation);
   }
 
@@ -191,6 +193,8 @@ export class GameScene extends Phaser.Scene {
     if (!this.sound || !this.sound.context) return;
 
     this.ambientDrone = createAmbientDrone(this.sound.context, this.sound.destination);
+    const ambientVol = getEffectiveVolume(this.audioSettings.masterVolume, this.audioSettings.ambientVolume);
+    this.ambientDrone.setVolume(ambientVol);
     this.ambientDrone.start();
 
     this.scheduleAmbientSound();
@@ -202,7 +206,8 @@ export class GameScene extends Phaser.Scene {
       delay,
       callback: () => {
         if (this.audioReady) {
-          playAmbientSound(this.sound, this.time.now);
+          const ambientVol = getEffectiveVolume(this.audioSettings.masterVolume, this.audioSettings.ambientVolume);
+          playAmbientSound(this.sound, this.time.now, ambientVol);
         }
         this.scheduleAmbientSound();
       },
@@ -211,8 +216,10 @@ export class GameScene extends Phaser.Scene {
 
   playSound(key) {
     if (!this.audioReady) return;
+    const vol = getEffectiveVolume(this.audioSettings.masterVolume, this.audioSettings.sfxVolume);
+    if (vol <= 0) return;
     try {
-      this.sound.play(key, { volume: 1 });
+      this.sound.play(key, { volume: vol });
     } catch (_) {}
   }
 
@@ -222,9 +229,19 @@ export class GameScene extends Phaser.Scene {
     const baseGain = config ? config.gain : 0.3;
     const volume = getDistanceVolume(distance, ENEMY_SOUND_RANGE, baseGain);
     if (volume <= 0) return;
+    const sfxVol = getEffectiveVolume(this.audioSettings.masterVolume, this.audioSettings.sfxVolume);
+    if (sfxVol <= 0) return;
     try {
-      this.sound.play(key, { volume });
+      this.sound.play(key, { volume: volume * sfxVol });
     } catch (_) {}
+  }
+
+  applyVolumeSettings() {
+    this.audioSettings = this.registry.get('audioSettings') || createDefaultSettings();
+    if (this.ambientDrone) {
+      const ambientVol = getEffectiveVolume(this.audioSettings.masterVolume, this.audioSettings.ambientVolume);
+      this.ambientDrone.setVolume(ambientVol);
+    }
   }
 
   stopAmbientAudio() {

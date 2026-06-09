@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { loadGame, clearSave } from '../systems/persistence.js';
 import { getMenuOptions, getTitleText } from '../systems/titleMenu.js';
 import { generateAllSounds, createAmbientDrone } from '../systems/audioEngine.js';
+import { getEffectiveVolume, getVolumeValue, cycleVolume, saveSettings, createDefaultSettings, VOLUME_LEVELS } from '../systems/settings.js';
 
 export class TitleScene extends Phaser.Scene {
   constructor() {
@@ -13,6 +14,7 @@ export class TitleScene extends Phaser.Scene {
     this.cameras.main.fadeIn(1000, 0, 0, 0);
     this.isTransitioning = false;
     this.confirmOverlay = null;
+    this.settingsOverlay = null;
 
     this.fitCamera();
     const onResize = () => this.fitCamera();
@@ -27,6 +29,8 @@ export class TitleScene extends Phaser.Scene {
         this._drone.stop();
         this._drone = null;
       }
+      this.hideSettingsOverlay();
+      this.hideDeleteConfirmation();
     });
 
     const { title, subtitle } = getTitleText();
@@ -82,11 +86,24 @@ export class TitleScene extends Phaser.Scene {
       text.on('pointerover', () => {
         if (baseColor === '#44cc44') text.setColor('#88ff88');
         else if (baseColor === '#cc4444') text.setColor('#ff6666');
+        else if (baseColor === '#aaaaaa') text.setColor('#cccccc');
       });
       text.on('pointerout', () => text.setColor(baseColor));
       text.on('pointerdown', () => this.onMenuSelect(opt.key));
       this.menuItems.push(text);
     }
+
+    const settingsY = startY + options.length * spacing;
+    const settingsText = this.add.text(512, settingsY, '[ SETTINGS ]', {
+      fontSize: '22px',
+      color: '#aaaaaa',
+      fontFamily: 'monospace',
+    }).setOrigin(0.5);
+    this.enlargeHitArea(settingsText);
+    settingsText.on('pointerover', () => settingsText.setColor('#cccccc'));
+    settingsText.on('pointerout', () => settingsText.setColor('#aaaaaa'));
+    settingsText.on('pointerdown', () => this.onMenuSelect('settings'));
+    this.menuItems.push(settingsText);
   }
 
   resetSaveState() {
@@ -99,7 +116,7 @@ export class TitleScene extends Phaser.Scene {
   }
 
   onMenuSelect(key) {
-    if (this.isTransitioning || this.confirmOverlay) return;
+    if (this.isTransitioning || this.confirmOverlay || this.settingsOverlay) return;
 
     if (key === 'continue') {
       this.isTransitioning = true;
@@ -116,6 +133,8 @@ export class TitleScene extends Phaser.Scene {
       });
     } else if (key === 'delete_save') {
       this.showDeleteConfirmation();
+    } else if (key === 'settings') {
+      this.showSettingsOverlay();
     }
   }
 
@@ -164,6 +183,68 @@ export class TitleScene extends Phaser.Scene {
     }
   }
 
+  showSettingsOverlay() {
+    if (this.settingsOverlay) return;
+    this.settingsOverlay = [];
+
+    const settings = this.registry.get('audioSettings') || createDefaultSettings();
+    const bg = this.add.rectangle(512, 384, 1024, 768, 0x000000, 0.8).setDepth(100).setInteractive();
+    this.settingsOverlay.push(bg);
+
+    const titleTxt = this.add.text(512, 260, 'AUDIO SETTINGS', {
+      fontSize: '24px', color: '#cccccc', fontFamily: 'monospace',
+    }).setOrigin(0.5).setDepth(101);
+    this.settingsOverlay.push(titleTxt);
+
+    const keys = [
+      { key: 'masterVolume', label: 'Master' },
+      { key: 'sfxVolume', label: 'SFX' },
+      { key: 'ambientVolume', label: 'Ambient' },
+    ];
+
+    keys.forEach((entry, i) => {
+      const y = 320 + i * 50;
+      const label = this.add.text(380, y, entry.label, {
+        fontSize: '18px', color: '#aaaaaa', fontFamily: 'monospace',
+      }).setOrigin(1, 0.5).setDepth(101);
+
+      const btn = this.add.text(520, y, `[ ${settings[entry.key]} ]`, {
+        fontSize: '18px', color: '#ffd700', fontFamily: 'monospace',
+      }).setOrigin(0, 0.5).setDepth(101);
+      this.enlargeHitArea(btn);
+      btn.on('pointerover', () => btn.setColor('#ffee88'));
+      btn.on('pointerout', () => btn.setColor('#ffd700'));
+      btn.on('pointerdown', () => {
+        settings[entry.key] = cycleVolume(settings[entry.key]);
+        btn.setText(`[ ${settings[entry.key]} ]`);
+        this.registry.set('audioSettings', { ...settings });
+        saveSettings(settings);
+        if (this._drone) {
+          const ambientVol = getEffectiveVolume(settings.masterVolume, settings.ambientVolume);
+          this._drone.setVolume(ambientVol);
+        }
+      });
+
+      this.settingsOverlay.push(label, btn);
+    });
+
+    const closeBtn = this.add.text(512, 500, '[ CLOSE ]', {
+      fontSize: '18px', color: '#44cc44', fontFamily: 'monospace',
+    }).setOrigin(0.5).setDepth(101);
+    this.enlargeHitArea(closeBtn);
+    closeBtn.on('pointerover', () => closeBtn.setColor('#88ff88'));
+    closeBtn.on('pointerout', () => closeBtn.setColor('#44cc44'));
+    closeBtn.on('pointerdown', () => this.hideSettingsOverlay());
+    this.settingsOverlay.push(closeBtn);
+  }
+
+  hideSettingsOverlay() {
+    if (this.settingsOverlay) {
+      this.settingsOverlay.forEach(obj => obj.destroy());
+      this.settingsOverlay = null;
+    }
+  }
+
   fitCamera() {
     const cam = this.cameras.main;
     const zoom = Math.min(this.scale.width / 1024, this.scale.height / 768);
@@ -186,11 +267,15 @@ export class TitleScene extends Phaser.Scene {
     const ctx = this.sound.context;
     const cache = this.cache.audio;
 
+    const audioSettings = this.registry.get('audioSettings') || createDefaultSettings();
+
     const startAudio = () => {
       generateAllSounds(ctx, cache).then(() => {
         this.audioReady = true;
         if (ctx.state === 'running') {
           this._drone = createAmbientDrone(ctx, this.sound.destination);
+          const ambientVol = getEffectiveVolume(audioSettings.masterVolume, audioSettings.ambientVolume);
+          this._drone.setVolume(ambientVol);
           this._drone.start();
         }
       }).catch(() => {});
