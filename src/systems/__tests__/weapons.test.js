@@ -24,6 +24,48 @@ describe('createWeaponState', () => {
     expect(state.slots[1]).toBe(null);
     expect(state.activeSlot).toBe(0);
   });
+
+  it('starts with shotgun in slot 0 when startingShotgun option is true', () => {
+    const state = createWeaponState({ startingShotgun: true });
+    expect(state.slots[0].id).toBe('shotgun');
+    expect(state.slots[1]).toBe(null);
+  });
+
+  it('starts with rifle in slot 0 when startingRifle option is true', () => {
+    const state = createWeaponState({ startingRifle: true });
+    expect(state.slots[0].id).toBe('rifle');
+    expect(state.slots[1]).toBe(null);
+  });
+
+  it('fills both slots when two starting weapons are owned (pistol + shotgun)', () => {
+    const state = createWeaponState({ startingPistol: true, startingShotgun: true });
+    const ids = [state.slots[0].id, state.slots[1].id].sort();
+    expect(ids).toEqual(['pistol', 'shotgun']);
+  });
+
+  it('fills both slots when two starting weapons are owned (pistol + rifle)', () => {
+    const state = createWeaponState({ startingPistol: true, startingRifle: true });
+    const ids = [state.slots[0].id, state.slots[1].id].sort();
+    expect(ids).toEqual(['pistol', 'rifle']);
+  });
+
+  it('fills both slots when two starting weapons are owned (shotgun + rifle)', () => {
+    const state = createWeaponState({ startingShotgun: true, startingRifle: true });
+    const ids = [state.slots[0].id, state.slots[1].id].sort();
+    expect(ids).toEqual(['rifle', 'shotgun']);
+  });
+
+  it('takes top 2 by priority when all three starting weapons are owned', () => {
+    const state = createWeaponState({ startingPistol: true, startingShotgun: true, startingRifle: true });
+    const ids = [state.slots[0].id, state.slots[1].id].sort();
+    expect(ids).toEqual(['rifle', 'shotgun']);
+  });
+
+  it('puts higher-priority weapon in slot 0', () => {
+    const state = createWeaponState({ startingPistol: true, startingRifle: true });
+    expect(state.slots[0].id).toBe('rifle');
+    expect(state.slots[1].id).toBe('pistol');
+  });
 });
 
 describe('switchWeapon', () => {

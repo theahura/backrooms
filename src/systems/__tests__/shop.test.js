@@ -239,6 +239,48 @@ describe('starting pistol upgrade', () => {
   });
 });
 
+describe('starting shotgun upgrade', () => {
+  it('can be purchased with 1500 gold', () => {
+    let state = addGold(createShopState(), 1500);
+    expect(canPurchase(state, 'startingShotgun')).toBe(true);
+    state = purchaseUpgrade(state, 'startingShotgun');
+    expect(state.upgrades.startingShotgun).toBe(1);
+    expect(state.gold).toBe(0);
+  });
+
+  it('cannot be purchased twice', () => {
+    let state = addGold(createShopState(), 9999);
+    state = purchaseUpgrade(state, 'startingShotgun');
+    expect(canPurchase(state, 'startingShotgun')).toBe(false);
+  });
+
+  it('cannot be purchased with insufficient gold', () => {
+    const state = addGold(createShopState(), 1499);
+    expect(canPurchase(state, 'startingShotgun')).toBe(false);
+  });
+});
+
+describe('starting rifle upgrade', () => {
+  it('can be purchased with 2000 gold', () => {
+    let state = addGold(createShopState(), 2000);
+    expect(canPurchase(state, 'startingRifle')).toBe(true);
+    state = purchaseUpgrade(state, 'startingRifle');
+    expect(state.upgrades.startingRifle).toBe(1);
+    expect(state.gold).toBe(0);
+  });
+
+  it('cannot be purchased twice', () => {
+    let state = addGold(createShopState(), 9999);
+    state = purchaseUpgrade(state, 'startingRifle');
+    expect(canPurchase(state, 'startingRifle')).toBe(false);
+  });
+
+  it('cannot be purchased with insufficient gold', () => {
+    const state = addGold(createShopState(), 1999);
+    expect(canPurchase(state, 'startingRifle')).toBe(false);
+  });
+});
+
 describe('minimap upgrade', () => {
   it('is included in default shop state at level 0', () => {
     const state = createShopState();

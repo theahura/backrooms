@@ -61,8 +61,14 @@ export class GameScene extends Phaser.Scene {
     };
     this.maxItems = getUpgradeValue('backpack', levels.backpack);
     const hasStartingPistol = (levels.startingPistol || 0) > 0;
+    const hasStartingShotgun = (levels.startingShotgun || 0) > 0;
+    const hasStartingRifle = (levels.startingRifle || 0) > 0;
     this.hasMinimap = (levels.minimap || 0) > 0;
-    this.weaponState = createWeaponState({ startingPistol: hasStartingPistol });
+    this.weaponState = createWeaponState({
+      startingPistol: hasStartingPistol,
+      startingShotgun: hasStartingShotgun,
+      startingRifle: hasStartingRifle,
+    });
     this.updateWeaponStats();
 
     const runCount = this.registry.get('runCount') ?? 0;

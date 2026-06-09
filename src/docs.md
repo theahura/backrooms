@@ -89,7 +89,7 @@ index.html
        -> src/systems/settings.js     (loadSettings on boot, stored in registry as 'audioSettings')
 
   game.registry (cross-scene in-memory state, backed by localStorage):
-    shopState          -> { gold, upgrades: { battery, flashlight, health, speed, weaponDamage, fireRate, bulletRange, backpack, startingPistol, minimap } }
+    shopState          -> { gold, upgrades: { battery, flashlight, health, speed, weaponDamage, fireRate, bulletRange, backpack, startingPistol, startingShotgun, startingRifle, minimap } }
     runCount           -> incrementing integer used as level seed
     collectedLore      -> array of lore entry IDs collected across all runs (meta-progression)
     unlockedLocations  -> array of location IDs the player has unlocked (default ['store'])

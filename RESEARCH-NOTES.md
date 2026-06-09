@@ -3204,3 +3204,42 @@ Reuses the existing `ITEM_TYPES` weight system from `items.js`:
 - Multiple enemies die at same position → separate sprites stack, player picks up individually
 - No save/load concern → drops are ephemeral like all room items
 - `roomDistances` might not have enemy's `currentRoomId` → fallback to 0 (basic loot)
+
+## Starting Weapon Variety Research
+
+### Design Context
+The APPLICATION_SPEC says "starting weapons of various kinds" under shop upgrades, but currently only "Starting Pistol" exists as a binary unlock for 1000g. The game has 3 weapon types (pistol, shotgun, rifle) and 2 weapon slots. Adding "Starting Shotgun" and "Starting Rifle" as separate binary shop upgrades addresses this spec gap.
+
+### Roguelike Design Patterns
+- **Enter the Gungeon**: Each character has a fixed starting weapon with infinite ammo. No shop-based weapon selection.
+- **Hades**: 6 weapons unlocked via escalating currency costs (1, 3, 3, 4, 5, 8 keys). Player picks exactly one before each run.
+- **Nuclear Throne**: Players earn golden weapon variants; choose one per character on the select screen.
+- **Dead Cells**: Originally randomized from unlocked pool; later patched to add explicit selection because players wanted it.
+- **Consensus**: Choose-one-before-run is the standard. However, implementing a full weapon selection UI is complex.
+
+### Design Decision: Priority-Based Slot Filling
+With only 2 weapon slots, the simplest approach is to fill slots by priority order (most expensive first):
+1. All purchased starting weapons are sorted by priority: rifle > shotgun > pistol
+2. Top 2 fill slot 0 and slot 1
+3. If all 3 are owned, the cheapest (pistol) is dropped
+4. No weapon selection UI needed — follows existing pattern exactly
+
+This avoids adding a new selection screen while still giving meaningful progression.
+
+### Pricing
+- Starting Pistol: 1000g (existing)
+- Starting Shotgun: 1500g (50% premium — strong burst damage but short range)
+- Starting Rifle: 2000g (2x pistol — long range, high damage, slow fire rate)
+- Total for all 3: 4500g — significant investment requiring many successful runs
+
+### Shop Layout Impact
+- Current: 10 upgrades, rowHeight=55, startY=160. Enter button at y≈770 (already borderline for 768px canvas)
+- Adding 2 more: 12 upgrades pushes enter button to y≈880 (off-screen)
+- Fix: Reduce rowHeight to 45 and startY to 155. Last row at y=650, enter button at y≈755 (safe)
+
+### Architecture
+- `shop.js`: Add 2 entries to UPGRADES array (identical pattern to startingPistol)
+- `weapons.js`: Rewrite `createWeaponState(options)` to accept multiple starting weapon flags and fill slots by priority
+- `GameScene.js`: Read 2 new upgrade levels, pass all flags to `createWeaponState`
+- `ShopScene.js`: Reduce rowHeight/startY to fit 12 rows. No other changes — UI is data-driven from UPGRADES array
+- No changes to persistence (createShopState auto-registers new keys, `|| 0` fallback handles old saves)
