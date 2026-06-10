@@ -48,3 +48,13 @@ export function shouldFlicker(state, time) {
   const frequency = 0.02 + 0.03 * (1 - fraction / FLICKER_THRESHOLD);
   return Math.sin(time * frequency) > 0.3;
 }
+
+export const BATTERY_HINT_THRESHOLD = 0.5;
+
+export function getBatteryHint(state, inventory) {
+  if (getBatteryFraction(state) > BATTERY_HINT_THRESHOLD) return null;
+  if (inventory.batteries > 0) {
+    return 'Beam fading -- right-click (or BATT) to insert a battery';
+  }
+  return 'Battery low -- the beam narrows as it drains. Find batteries!';
+}

@@ -1,13 +1,13 @@
 import { mulberry32 } from './random.js';
 
 const MAZE_SEED_OFFSET = 70000;
-const MIN_SUBDIVISION_SIZE = 200;
-const GAP_WIDTH = 80;
+const MIN_SUBDIVISION_SIZE = 150;
+const GAP_WIDTH = 72;
 const COLUMN_SIZE = 24;
-const COLUMN_SPACING = 200;
+const COLUMN_SPACING = 140;
 
-const CORRIDOR_MIN_SIZE = 120;
-const CORRIDOR_GAP_WIDTH = 60;
+const CORRIDOR_MIN_SIZE = 110;
+const CORRIDOR_GAP_WIDTH = 64;
 const CORRIDOR_MAX_DEPTH = 4;
 
 const CRATE_SIZES = [
@@ -15,21 +15,21 @@ const CRATE_SIZES = [
   { w: 60, h: 40 },
   { w: 80, h: 60 },
 ];
-const CRATE_COUNT = 8;
+const CRATE_COUNT = 6;
 const CRATE_GAP = 50;
 const CRATE_MAX_ATTEMPTS = 240;
 
-const CUBICLE_CELL_SIZE = 150;
-const CUBICLE_WALL_LENGTH = 120;
+const CUBICLE_CELL_SIZE = 130;
+const CUBICLE_WALL_LENGTH = 104;
 
 export function getRoomType(seed) {
   const rand = mulberry32(seed + MAZE_SEED_OFFSET);
   const roll = rand();
-  if (roll < 0.20) return 'open';
-  if (roll < 0.35) return 'maze';
-  if (roll < 0.50) return 'columns';
-  if (roll < 0.70) return 'corridor';
-  if (roll < 0.85) return 'storage';
+  if (roll < 0.05) return 'open';
+  if (roll < 0.22) return 'maze';
+  if (roll < 0.36) return 'columns';
+  if (roll < 0.62) return 'corridor';
+  if (roll < 0.81) return 'storage';
   return 'cubicles';
 }
 

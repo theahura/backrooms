@@ -57,6 +57,11 @@ const config = {
 
 const game = new Phaser.Game(config);
 
+// Exposed for Playwright playtesting (dev server only).
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  window.__game = game;
+}
+
 const saved = loadGame();
 if (saved) {
   game.registry.set('shopState', saved.shopState);

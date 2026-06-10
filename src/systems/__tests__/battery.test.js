@@ -6,6 +6,7 @@ import {
   getFlashlightConeAngle,
   shouldFlicker,
   rechargeBattery,
+  getBatteryHint,
   BATTERY_RECHARGE_AMOUNT,
 } from '../battery.js';
 
@@ -142,5 +143,24 @@ describe('rechargeBattery', () => {
     const recharged = rechargeBattery(depleted, BATTERY_RECHARGE_AMOUNT);
     expect(getFlashlightConeAngle(recharged, baseCone)).toBeGreaterThan(0);
     expect(getBatteryFraction(recharged)).toBeGreaterThan(0);
+  });
+});
+
+describe('getBatteryHint', () => {
+  const lowBattery = () => updateBattery(createBatteryState(), 105000);
+
+  it('returns no hint while the battery is healthy', () => {
+    expect(getBatteryHint(createBatteryState(), { batteries: 3 })).toBeNull();
+  });
+
+  it('explains how to recharge when low and carrying batteries', () => {
+    const hint = getBatteryHint(lowBattery(), { batteries: 2 });
+    expect(hint).toMatch(/batter/i);
+  });
+
+  it('still explains the mechanic when low with no spares', () => {
+    const hint = getBatteryHint(lowBattery(), { batteries: 0 });
+    expect(hint).toMatch(/batter/i);
+    expect(hint).not.toBe(getBatteryHint(lowBattery(), { batteries: 2 }));
   });
 });

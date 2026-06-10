@@ -45,10 +45,26 @@ Other details (from playtesting):
 - enemies should be able to move between rooms
 
 Feedback from me (DO NOT CHANGE):
-- improve the pixel art representations of everything by using an AI generation tool, e.g. nano banana (API key in environment variable)
+- improve the pixel art representations of everything by using an AI generation tool, e.g. nano banana (API key in environment variable, see .env at repo root)
 - the shop should show a 2d pixel art of the shop, and show pixel art representations of the things being bought
 - the rooms should be generated dynamically, as the player explores. A given set of rooms should be generated 2 rooms out. The best way to do this is with procedural generation
   - these rooms should then remain static once they are generated, so the player really feels like there is consistency to the rooms they are exploring but also that the rooms themselves are changing from person to person
+- Most of the rooms are wayyyy too large for the furniture and stuff that is in there. It has this weird unfinished feeling as a result. We need to either populate more things in each room or make the rooms smaller and have more walls and narrow hallways.
+  - the bigger issue is that the rooms just feel totally uncoherent. It should feel _liminal_ in some way. Right now there is just think 'furniture' scattered around and thats it
+- "Escaped" is not the right verbiage, its not an 'escape'. We are exploring the backrooms of our own volition.
+- I hate HATE HATE that it shows 'explored 2/8 rooms'. NO. It should not show the number of rooms, and the number of rooms should be infinite
+- There should only be one entrance to the backrooms from the furniture shop.
+  - Entering should feel like the user transitions to a new dimension. Right now it just looks like another room.
+    - As the player approaches the edge, there should be a strange crackling sound that gets louder, and only when the player goes through does the backroom appear. This is not a 'door' like the other doors, it should behave differently (e.g. no light leakage, it shows up on screen as a sizzling light in the wall edge)
+- It is currently impossible to tell what is an enemy, what is a weapon, what is a pickup. All of these things need to be bigger, further cementing the idea that everything should be closer
+- The 'battery' mechanic is super unintuitive. It needs to be better explained
+- The player should be able to turn off the flashlight to conserve battery, and it should automatically turn off when they are hiding
 
 Known bugs:
-- NA
+- Flash light seem to go through walls. In general the flashlight behavior is quite buggy, it seems to disappear into itself if the user rotates around (especially around the bottom, as the user rotates from 6oclock to 8oclock). This is a regression
+  - Also hiding should not block the flashlight, but it seems to
+- the pixel art of the player character is totally wrong. It's a front facing view of a character instead of a top down view!
+  - in general, i think the player character needs to be bigger on screen (cf also the room needs to be smaller). If the camera is closer to the player in smaller rooms it will emphasize a claustrophobic feeling
+  - most of the pixel art is not facing the right direction (e.g. the armoire is also front facing instead of top down)
+  - and it is all basically way too small. What kind of sprite is 18x18! that is so small the player cant really make it out at all
+- sometimes the player icon will randomly disappear (i think when it takes damage)

@@ -4,6 +4,7 @@ import {
   roomsWithinRadius,
   hasStairDown,
   localDistance,
+  isRiftDoor,
   ROOM_WIDTH,
   ROOM_HEIGHT,
 } from '../worldgen.js';
@@ -130,5 +131,39 @@ describe('per-seed variation', () => {
         return getRoomAt(seed, gx, gy).doors.length;
       }).join(',');
     expect(signature(1)).not.toBe(signature(2));
+  });
+});
+
+describe('single entrance to the backrooms', () => {
+  it('the store (0,0) has exactly one door: the east rift', () => {
+    for (let seed = 1; seed <= 60; seed++) {
+      const room = getRoomAt(seed, 0, 0);
+      expect(room.doors, `seed ${seed}`).toHaveLength(1);
+      expect(room.doors[0].wall).toBe('east');
+    }
+  });
+
+  it('no neighbor opens into the store except through the rift', () => {
+    for (const seed of [1, 7, 42, 1234]) {
+      expect(getRoomAt(seed, -1, 0).doors.some(d => d.targetRoomId === '0,0')).toBe(false);
+      expect(getRoomAt(seed, 0, -1).doors.some(d => d.targetRoomId === '0,0')).toBe(false);
+      expect(getRoomAt(seed, 0, 1).doors.some(d => d.targetRoomId === '0,0')).toBe(false);
+      expect(getRoomAt(seed, 1, 0).doors.some(d => d.targetRoomId === '0,0')).toBe(true);
+    }
+  });
+
+  it('isRiftDoor identifies the rift from both sides of the opening', () => {
+    const store = getRoomAt(5, 0, 0);
+    const east = store.doors.find(d => d.wall === 'east');
+    expect(isRiftDoor(store, east)).toBe(true);
+
+    const firstBackroom = getRoomAt(5, 1, 0);
+    const west = firstBackroom.doors.find(d => d.wall === 'west');
+    expect(isRiftDoor(firstBackroom, west)).toBe(true);
+
+    const other = getRoomAt(5, 3, 2);
+    for (const d of other.doors) {
+      expect(isRiftDoor(other, d)).toBe(false);
+    }
   });
 });

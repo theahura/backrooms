@@ -21,7 +21,7 @@ export function formatTime(ms) {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
-export function getSummaryData(stats, survived, treasureValue, roomsExplored, totalRooms, hp, maxHp) {
+export function getSummaryData(stats, survived, treasureValue, roomsExplored, hp, maxHp) {
   // The backrooms are explored of one's own volition, not escaped, and the
   // world is unbounded -- so the summary shows only how many rooms the player
   // explored, never a "X / total" ratio (the total is infinite).

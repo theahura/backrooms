@@ -39,8 +39,7 @@ describe('generateRoomFurniture', () => {
   it('returns furniture items within room bounds', () => {
     const furniture = generateRoomFurniture(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42);
 
-    expect(furniture.length).toBeGreaterThanOrEqual(4);
-    expect(furniture.length).toBeLessThanOrEqual(8);
+    expect(furniture.length).toBeGreaterThan(0);
 
     for (const item of furniture) {
       expect(item.x).toBeGreaterThanOrEqual(ROOM_X + WALL_THICKNESS);
@@ -51,18 +50,20 @@ describe('generateRoomFurniture', () => {
   });
 
   it('produces no overlapping furniture', () => {
-    const furniture = generateRoomFurniture(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42);
+    for (const seed of [3, 11, 42, 99]) {
+      const furniture = generateRoomFurniture(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed);
 
-    for (let i = 0; i < furniture.length; i++) {
-      for (let j = i + 1; j < furniture.length; j++) {
-        const a = furniture[i];
-        const b = furniture[j];
-        const overlaps =
-          a.x < b.x + b.width &&
-          a.x + a.width > b.x &&
-          a.y < b.y + b.height &&
-          a.y + a.height > b.y;
-        expect(overlaps).toBe(false);
+      for (let i = 0; i < furniture.length; i++) {
+        for (let j = i + 1; j < furniture.length; j++) {
+          const a = furniture[i];
+          const b = furniture[j];
+          const overlaps =
+            a.x < b.x + b.width &&
+            a.x + a.width > b.x &&
+            a.y < b.y + b.height &&
+            a.y + a.height > b.y;
+          expect(overlaps, `seed ${seed}`).toBe(false);
+        }
       }
     }
   });
@@ -189,4 +190,18 @@ describe('furniture blocks flashlight rays', () => {
 
     expect(maxXWith).toBeLessThan(maxXWithout);
   });
+});
+
+describe('liminal furnishing', () => {
+  const W = 720;
+  const H = 600;
+  const WALL = 16;
+
+  it('fills a small room densely enough to feel inhabited', () => {
+    for (const seed of [3, 11, 42, 99]) {
+      const items = generateRoomFurniture(0, 0, W, H, WALL, seed);
+      expect(items.length, `seed ${seed}`).toBeGreaterThanOrEqual(8);
+    }
+  });
+
 });

@@ -46,11 +46,14 @@ export function shopIconKey(upgradeId) {
 // risk for dimly-lit top-down sprites). `chroma: false` skips the green-screen
 // key-out (used for the opaque shop background).
 const SPRITE_SUFFIX =
-  'Top-down view, 2D video game sprite, pixel art style, limited color palette, ' +
-  'flat colors, bold dark outline around the shape, no drop shadow, single ' +
-  'centered object that fills most of the frame. CRITICAL BACKGROUND ' +
-  'REQUIREMENT: the entire background must be solid flat chroma key green, exact ' +
-  'hex #00FF00 (RGB 0,255,0), with NO gradient, NO noise, NO texture and NO shadow.';
+  'Strict orthographic top-down view as seen from a ceiling-mounted camera ' +
+  'looking straight down, strict 90-degree overhead angle showing ONLY the top ' +
+  'surface, no front view, no perspective, no isometric or tilted view, ' +
+  '2D video game sprite, pixel art style, limited color palette, flat colors, ' +
+  'bold dark outline around the shape, no drop shadow, single centered object ' +
+  'that fills most of the frame. CRITICAL BACKGROUND REQUIREMENT: the entire ' +
+  'background must be solid flat chroma key green, exact hex #00FF00 ' +
+  '(RGB 0,255,0), with NO gradient, NO noise, NO texture and NO shadow.';
 
 const ICON_SUFFIX =
   'Simple flat game UI icon, pixel art style, bold readable silhouette, limited ' +
@@ -71,9 +74,10 @@ export const ART_MANIFEST = [
   {
     id: 'player',
     prompt: sprite(
-      'An explorer adventurer person seen from directly straight above, wearing ' +
-        'a jacket and boots and holding a flashlight, the front of the body ' +
-        'pointing to the right'
+      'An explorer adventurer person viewed from directly overhead so that ONLY ' +
+        'the top of the head, the shoulders and the tips of the boots are ' +
+        'visible, no face visible, wearing a jacket, arms extended forward ' +
+        'holding a flashlight, the body axis pointing to the right'
     ),
     width: 24,
     height: 24,
@@ -120,16 +124,16 @@ export const ART_MANIFEST = [
   },
 
   // Furniture (stretched to logical size in-game, so generated at higher res).
-  { id: 'furniture_table', prompt: sprite('A simple wooden table seen from directly straight above'), width: 160, height: 100, keys: ['furniture_table'] },
-  { id: 'furniture_shelf', prompt: sprite('A long low wooden storage shelf seen from directly straight above'), width: 200, height: 40, keys: ['furniture_shelf'] },
-  { id: 'furniture_desk', prompt: sprite('A grey office desk seen from directly straight above'), width: 120, height: 80, keys: ['furniture_desk'] },
-  { id: 'furniture_bookcase', prompt: sprite('A tall wooden bookcase filled with books seen from directly straight above'), width: 60, height: 160, keys: ['furniture_bookcase'] },
+  { id: 'furniture_table', prompt: sprite('The flat rectangular top surface of a wooden table, only the tabletop visible, no legs visible'), width: 160, height: 100, keys: ['furniture_table'] },
+  { id: 'furniture_shelf', prompt: sprite('The top surface of a long low wooden storage shelf, only the top plank visible'), width: 200, height: 40, keys: ['furniture_shelf'] },
+  { id: 'furniture_desk', prompt: sprite('The flat rectangular top surface of a grey office desk with papers on it, only the desktop visible, no drawers visible'), width: 120, height: 80, keys: ['furniture_desk'] },
+  { id: 'furniture_bookcase', prompt: sprite('The top panel of a tall wooden bookcase, a flat rectangular wooden slab, no shelves or books visible'), width: 60, height: 160, keys: ['furniture_bookcase'] },
   { id: 'furniture_bed', prompt: sprite('A bed with a mattress and pillow and blanket seen from directly straight above'), width: 180, height: 120, keys: ['furniture_bed'] },
-  { id: 'furniture_armoire', prompt: sprite('A tall wooden wardrobe armoire seen from directly straight above'), width: 80, height: 140, keys: ['furniture_armoire'] },
-  { id: 'furniture_closet', prompt: sprite('A grey metal storage closet seen from directly straight above'), width: 100, height: 120, keys: ['furniture_closet'] },
+  { id: 'furniture_armoire', prompt: sprite('The flat rectangular wooden top panel of a tall wardrobe armoire, only the top slab visible, no doors or handles visible'), width: 80, height: 140, keys: ['furniture_armoire'] },
+  { id: 'furniture_closet', prompt: sprite('The flat rectangular top panel of a grey metal storage cabinet, only the top surface visible, no doors visible'), width: 100, height: 120, keys: ['furniture_closet'] },
   { id: 'furniture_vent', prompt: sprite('A square metal floor air vent grate seen from directly straight above'), width: 60, height: 60, keys: ['furniture_vent'] },
-  { id: 'furniture_couch', prompt: sprite('A worn fabric couch sofa seen from directly straight above'), width: 160, height: 100, keys: ['furniture_couch'] },
-  { id: 'furniture_counter', prompt: sprite('A long store checkout counter seen from directly straight above'), width: 200, height: 70, keys: ['furniture_counter'] },
+  { id: 'furniture_couch', prompt: sprite('A couch sofa viewed from directly overhead: the top of the backrest along one long edge, two armrests at the ends, and worn seat cushions filling the middle'), width: 160, height: 100, keys: ['furniture_couch'] },
+  { id: 'furniture_counter', prompt: sprite('The flat top surface of a long store checkout counter, only the countertop visible'), width: 200, height: 70, keys: ['furniture_counter'] },
 
   // Weapon pickups.
   { id: 'pickup_pistol', prompt: sprite('A handgun pistol weapon lying on the ground seen from directly straight above'), width: 28, height: 20, keys: ['pickup_pistol'] },

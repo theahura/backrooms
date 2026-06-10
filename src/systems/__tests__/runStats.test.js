@@ -72,32 +72,37 @@ describe('runStats', () => {
     const baseStats = { enemiesKilled: 5, timeElapsed: 90000, maxFloor: 2 };
 
     it('returns gold-themed data when the player survived', () => {
-      const summary = getSummaryData(baseStats, true, 350, 6, 10, 75, 100);
+      const summary = getSummaryData(baseStats, true, 350, 6, 75, 100);
       expect(summary.title).toBe('RETURNED');
       expect(summary.titleColor).toBe(0xffd700);
     });
 
     it('reports explored rooms without a finite total (the world is unbounded)', () => {
-      const summary = getSummaryData(baseStats, true, 350, 6, 999, 75, 100);
+      const summary = getSummaryData(baseStats, true, 350, 6, 75, 100);
       const roomsLine = summary.lines.find(l => l.label === 'Rooms Explored');
       expect(roomsLine.value).toBe('6');
       expect(roomsLine.value).not.toContain('/');
     });
 
     it('returns red-themed data when the player died', () => {
-      const summary = getSummaryData(baseStats, false, 0, 3, 10, 0, 100);
+      const summary = getSummaryData(baseStats, false, 0, 3, 0, 100);
       expect(summary.title).toBe('YOU DIED');
       expect(summary.titleColor).toBe(0xcc0000);
     });
 
     it('produces at least five stat lines covering the run', () => {
-      const summary = getSummaryData(baseStats, true, 500, 7, 10, 80, 100);
+      const summary = getSummaryData(baseStats, true, 500, 7, 80, 100);
       expect(summary.lines.length).toBeGreaterThanOrEqual(5);
     });
 
+    it('formats HP remaining as hp / maxHp', () => {
+      const summary = getSummaryData(baseStats, true, 350, 6, 75, 100);
+      expect(summary.lines.find(l => l.label === 'HP Remaining').value).toBe('75 / 100');
+    });
+
     it('includes HP line only when survived', () => {
-      const died = getSummaryData(baseStats, false, 0, 3, 10, 0, 100);
-      const survived = getSummaryData(baseStats, true, 350, 6, 10, 75, 100);
+      const died = getSummaryData(baseStats, false, 0, 3, 0, 100);
+      const survived = getSummaryData(baseStats, true, 350, 6, 75, 100);
       const diedLabels = died.lines.map(l => l.label);
       const survivedLabels = survived.lines.map(l => l.label);
       expect(diedLabels).not.toContain('HP Remaining');
@@ -106,7 +111,7 @@ describe('runStats', () => {
 
     it('shows formatted time in the summary', () => {
       const stats = { enemiesKilled: 0, timeElapsed: 65000, maxFloor: 0 };
-      const summary = getSummaryData(stats, true, 0, 1, 5, 100, 100);
+      const summary = getSummaryData(stats, true, 0, 1, 100, 100);
       const allValues = summary.lines.map(l => l.value);
       expect(allValues.some(v => v.includes('1:05'))).toBe(true);
     });

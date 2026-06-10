@@ -3,17 +3,19 @@ import { calculateVelocity } from '../systems/movement.js';
 import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES } from '../systems/furniture.js';
 import { generateMazeWalls, getRoomType } from '../systems/maze.js';
 import { getRoomTheme } from '../systems/roomThemes.js';
-import { getFlashlightPolygon } from '../systems/visibility.js';
+import { getFlashlightPolygon, filterSegmentsNear, FLASHLIGHT_RANGE } from '../systems/visibility.js';
+import { createRoomWalls } from '../systems/room.js';
 import { STAIR_SIZE } from '../systems/stairs.js';
-import { getRoomAt, roomsWithinRadius, hasStairDown, localDistance, ROOM_WIDTH, ROOM_HEIGHT } from '../systems/worldgen.js';
+import { getRoomAt, roomsWithinRadius, hasStairDown, localDistance, isRiftDoor, ROOM_WIDTH, ROOM_HEIGHT } from '../systems/worldgen.js';
 import { mulberry32 } from '../systems/random.js';
-import { generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_CHASE, CRAWLER_CHASE_SPEED, SPITTER_CHASE_SPEED } from '../systems/enemy.js';
-import { createCombatState, applyDamage, applyHeal, updateCombat, getHealthFraction, isInvulnerable, applyEnemyDamage, isEnemyDead, ENEMY_CONTACT_DAMAGE, ENEMY_MAX_HP, CRAWLER_MAX_HP, SPITTER_MAX_HP, CRAWLER_CONTACT_DAMAGE, SPITTER_CONTACT_DAMAGE, SPITTER_PROJECTILE_DAMAGE, CORPSE_TINT, CORPSE_ALPHA, CORPSE_ANGLE, CORPSE_DEPTH, MEDKIT_HEAL_AMOUNT } from '../systems/combat.js';
+import { generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_CHASE, CRAWLER_CHASE_SPEED, SPITTER_CHASE_SPEED, DETECTION_RANGE } from '../systems/enemy.js';
+import { createCombatState, applyDamage, applyHeal, updateCombat, getHealthFraction, isInvulnerable, applyEnemyDamage, isEnemyDead, getHurtFlash, ENEMY_CONTACT_DAMAGE, ENEMY_MAX_HP, CRAWLER_MAX_HP, SPITTER_MAX_HP, CRAWLER_CONTACT_DAMAGE, SPITTER_CONTACT_DAMAGE, SPITTER_PROJECTILE_DAMAGE, CORPSE_TINT, CORPSE_ALPHA, CORPSE_ANGLE, CORPSE_DEPTH, MEDKIT_HEAL_AMOUNT } from '../systems/combat.js';
+import { createFlashlightState, toggleFlashlight, setFlashlightHiding, isFlashlightLit, updateBatteryWithFlashlight } from '../systems/flashlight.js';
 import { calculateBulletVelocity, calculateShotgunSpread, canFire, updateFireCooldown, isBulletExpired, getBulletVelocityFromAngle, SPITTER_PROJECTILE_SPEED, SPITTER_PROJECTILE_RANGE } from '../systems/shooting.js';
 import { getMoveVelocity, resolveAimAngle, resolveFireIntent, resolveMoveVelocity, detectTouchPrimary, computeTouchLayout } from '../systems/touchControls.js';
 import { WEAPON_TYPES, createWeaponState, switchWeapon, pickupWeapon, getActiveWeapon, getEffectiveStats, generateRoomWeapon, hasAmmo, consumeAmmo, addAmmo, AMMO_PER_PICKUP } from '../systems/weapons.js';
 import { getEnemyHP, getEnemyCount, getEnemyChaseSpeed, getEnemyDamage } from '../systems/scaling.js';
-import { createBatteryState, updateBattery, getBatteryFraction, getFlashlightConeAngle, shouldFlicker, rechargeBattery, BATTERY_RECHARGE_AMOUNT } from '../systems/battery.js';
+import { createBatteryState, getBatteryFraction, getFlashlightConeAngle, shouldFlicker, rechargeBattery, getBatteryHint, BATTERY_RECHARGE_AMOUNT } from '../systems/battery.js';
 import { generateRoomItems, ITEM_TYPES } from '../systems/items.js';
 import { createInventoryState, pickupItem, useBattery, canPickupItem } from '../systems/inventory.js';
 import { getUpgradeValue, createShopState } from '../systems/shop.js';
@@ -27,8 +29,8 @@ import { getLocation, getLocationLayout, getLocationExitPosition } from '../syst
 import { generateRoomLore } from '../systems/lore.js';
 import { buildRoomGraph, buildFullRoomGraph, bfsFromRoom, getNextDoorway, getClosedDoorOnPath, getRoomDistance, getDoorwayCenter, DOORWAY_SEEK_CHANCE, ROOM_TRANSITION_COOLDOWN, MAX_ROOM_DISTANCE, MAX_ROOM_ENEMIES } from '../systems/pathfinding.js';
 import { createDangerState, updateDangerTime, shouldSpawnWave, advanceWave, getWaveComposition, getSpawnRoom } from '../systems/danger.js';
-import { SOUND_CONFIGS, getFootstepInterval, getAmbientSoundDelay, getEnemySoundEvent, getEnemyDeathSound, getEnemyFireSound, getDistanceVolume, ENEMY_SOUND_RANGE } from '../systems/audio.js';
-import { generateAllSounds, createAmbientDrone, playAmbientSound } from '../systems/audioEngine.js';
+import { SOUND_CONFIGS, getFootstepInterval, getAmbientSoundDelay, getEnemySoundEvent, getEnemyDeathSound, getEnemyFireSound, getDistanceVolume, getRiftCrackleVolume, ENEMY_SOUND_RANGE } from '../systems/audio.js';
+import { generateAllSounds, createAmbientDrone, playAmbientSound, createRiftCrackle } from '../systems/audioEngine.js';
 import { getAlertedEnemies, GUNSHOT_ALERT_COOLDOWN } from '../systems/gunfireNoise.js';
 import { createRunStats, recordKill, updateTime, updateMaxFloor } from '../systems/runStats.js';
 import { getEffectiveVolume, createDefaultSettings } from '../systems/settings.js';
@@ -161,6 +163,8 @@ export class GameScene extends Phaser.Scene {
     this.isTeleporting = false;
     this.currentFloor = 0;
     this.hidingState = createHidingState();
+    this.flashlightState = createFlashlightState();
+    this.riftCrossed = false;
     this.explorationState = createExplorationState();
 
     this.roomGraph = null;
@@ -299,6 +303,13 @@ export class GameScene extends Phaser.Scene {
 
     this.drawRoom(this.roomGfx, room, theme);
     this.createRoomPhysics(room);
+
+    // Perimeter walls occlude light (with gaps at doors); the rift is sealed
+    // against light by leaving it out of the door-gap list -- the store's
+    // light never leaks into the backrooms or vice versa.
+    const occluderDoors = room.doors.filter(d => !(room.floor === 0 && isRiftDoor(room, d)));
+    this.wallSegments.push(...createRoomWalls(room.x, room.y, room.width, room.height, occluderDoors));
+
     this.createRoomFurniture(this.furnitureGfx, room);
     if (room.id !== 0) {
       this.createRoomMaze(this.roomGfx, room, theme);
@@ -360,7 +371,19 @@ export class GameScene extends Phaser.Scene {
     this.ambientDrone.setVolume(ambientVol);
     this.ambientDrone.start();
 
+    this.riftCrackle = createRiftCrackle(this.sound.context, this.sound.destination);
+    this.riftCrackle.start();
+
     this.scheduleAmbientSound();
+  }
+
+  updateRiftCrackle() {
+    if (!this.riftCrackle || !this.riftRect) return;
+    const cx = this.riftRect.x + this.riftRect.width / 2;
+    const cy = this.riftRect.y + this.riftRect.height / 2;
+    const dist = Math.hypot(this.player.x - cx, this.player.y - cy);
+    const ambientVol = getEffectiveVolume(this.audioSettings.masterVolume, this.audioSettings.ambientVolume);
+    this.riftCrackle.setVolume(getRiftCrackleVolume(dist) * ambientVol);
   }
 
   scheduleAmbientSound() {
@@ -411,6 +434,10 @@ export class GameScene extends Phaser.Scene {
     if (this.ambientDrone) {
       this.ambientDrone.stop();
       this.ambientDrone = null;
+    }
+    if (this.riftCrackle) {
+      this.riftCrackle.stop();
+      this.riftCrackle = null;
     }
     if (this.ambientTimer) {
       this.ambientTimer.remove();
@@ -619,6 +646,8 @@ export class GameScene extends Phaser.Scene {
     const CLOSABLE_DOOR_CHANCE = 0.5;
     for (const door of room.doors) {
       if (!this.activatedRoomIds.has(door.targetRoomId)) continue;
+      // The rift is not a doorway -- never spawn a closable door on it.
+      if (room.floor === 0 && isRiftDoor(room, door)) continue;
 
       const lo = Math.min(room.id, door.targetRoomId);
       const hi = Math.max(room.id, door.targetRoomId);
@@ -738,6 +767,7 @@ export class GameScene extends Phaser.Scene {
   onEnterHiding(furniture) {
     this.playSound('hide_enter');
     this.hidingState = enterHiding(this.hidingState, furniture);
+    this.flashlightState = setFlashlightHiding(this.flashlightState, true);
     const centerX = furniture.x + furniture.width / 2;
     const centerY = furniture.y + furniture.height / 2;
     this.player.body.reset(centerX, centerY);
@@ -751,6 +781,7 @@ export class GameScene extends Phaser.Scene {
   onExitHiding() {
     this.playSound('hide_exit');
     this.hidingState = exitHiding(this.hidingState);
+    this.flashlightState = setFlashlightHiding(this.flashlightState, false);
     this.player.body.setBoundsRectangle(null);
     this.player.body.setCollideWorldBounds(false);
     this.playerFurnitureCollider.active = true;
@@ -856,6 +887,8 @@ export class GameScene extends Phaser.Scene {
 
     for (const item of items) {
       const sprite = this.itemGroup.create(item.x, item.y, `item_${item.type}`);
+      sprite.setScale(1.6);
+      sprite.refreshBody();
       sprite.setDepth(5);
       sprite.setData('itemType', item.type);
       sprite.setData('itemValue', item.value);
@@ -1061,7 +1094,10 @@ export class GameScene extends Phaser.Scene {
     this.player = this.physics.add.sprite(playerX, playerY, 'player_idle_0');
     this.player.setDepth(200);
     this.player.play('player_idle');
-    this.player.body.setSize(20, 20, true);
+    // Arcade bodies are multiplied by the sprite's display scale (40/24 here),
+    // so 12 yields a ~20px effective hitbox.
+    this.player.setDisplaySize(40, 40);
+    this.player.body.setSize(12, 12, true);
 
     this.physics.add.collider(this.player, this.walls);
     this.playerFurnitureCollider = this.physics.add.collider(this.player, this.furnitureGroup);
@@ -1074,9 +1110,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   getEnemyStats(type) {
-    if (type === 'crawler') return { hp: this.scaledCrawlerHP, contactDamage: this.scaledCrawlerDamage, textureKey: getEnemyTextureKey('crawler'), bodySize: 12 };
-    if (type === 'spitter') return { hp: this.scaledSpitterHP, contactDamage: this.scaledSpitterDamage, textureKey: getEnemyTextureKey('spitter'), bodySize: 16 };
-    return { hp: this.scaledEnemyHP, contactDamage: this.scaledEnemyDamage, textureKey: getEnemyTextureKey('basic'), bodySize: 16 };
+    // bodySize is in texture pixels and gets multiplied by the display scale
+    // (display/texture), so these stay close to the pre-scale-up hitboxes.
+    if (type === 'crawler') return { hp: this.scaledCrawlerHP, contactDamage: this.scaledCrawlerDamage, textureKey: getEnemyTextureKey('crawler'), bodySize: 7, displaySize: 34 };
+    if (type === 'spitter') return { hp: this.scaledSpitterHP, contactDamage: this.scaledSpitterDamage, textureKey: getEnemyTextureKey('spitter'), bodySize: 10, displaySize: 44 };
+    return { hp: this.scaledEnemyHP, contactDamage: this.scaledEnemyDamage, textureKey: getEnemyTextureKey('basic'), bodySize: 10, displaySize: 44 };
   }
 
   spawnDangerWave(playerRoomId, litRoomIds) {
@@ -1096,6 +1134,7 @@ export class GameScene extends Phaser.Scene {
       const y = minY + Math.random() * (maxY - minY);
       const stats = this.getEnemyStats(type);
       const enemy = this.enemyGroup.create(x, y, stats.textureKey);
+      enemy.setDisplaySize(stats.displaySize, stats.displaySize);
       enemy.body.setSize(stats.bodySize, stats.bodySize, true);
       enemy.body.setCollideWorldBounds(true);
       enemy.setDepth(60);
@@ -1148,6 +1187,7 @@ export class GameScene extends Phaser.Scene {
     for (const spawn of spawnPoints) {
       const stats = this.getEnemyStats(spawn.type);
       const enemy = this.enemyGroup.create(spawn.x, spawn.y, stats.textureKey);
+      enemy.setDisplaySize(stats.displaySize, stats.displaySize);
       enemy.body.setSize(stats.bodySize, stats.bodySize, true);
       enemy.body.setCollideWorldBounds(true);
       enemy.setDepth(60);
@@ -1217,6 +1257,7 @@ export class GameScene extends Phaser.Scene {
 
     this.weaponedFloors.add(room.floor);
     const sprite = this.add.sprite(wpnData.x, wpnData.y, `pickup_${wpnData.weaponId}`);
+    sprite.setScale(1.5);
     sprite.setDepth(5);
     sprite.setData('weaponId', wpnData.weaponId);
     this.weaponPickupSprites.push(sprite);
@@ -1283,6 +1324,30 @@ export class GameScene extends Phaser.Scene {
       this.minimapGraphics.setDepth(1000);
     }
 
+    this.hpLabelText = this.add.text(226, 22, 'HP', {
+      fontSize: '12px',
+      color: '#88cc88',
+      fontFamily: 'monospace',
+    });
+    this.hpLabelText.setScrollFactor(0);
+    this.hpLabelText.setDepth(1000);
+
+    this.batteryLabelText = this.add.text(226, 44, this.touchMode ? 'FLASHLIGHT' : 'FLASHLIGHT [F]', {
+      fontSize: '12px',
+      color: '#cccc66',
+      fontFamily: 'monospace',
+    });
+    this.batteryLabelText.setScrollFactor(0);
+    this.batteryLabelText.setDepth(1000);
+
+    this.batteryHintText = this.add.text(20, 126, '', {
+      fontSize: '13px',
+      color: '#ffcc66',
+      fontFamily: 'monospace',
+    });
+    this.batteryHintText.setScrollFactor(0);
+    this.batteryHintText.setDepth(1000);
+
     this.batteryCountText = this.add.text(20, 66, '', {
       fontSize: '14px',
       color: '#ffff00',
@@ -1331,6 +1396,35 @@ export class GameScene extends Phaser.Scene {
       });
       this.floorText.setScrollFactor(0);
       this.floorText.setDepth(1000);
+    }
+
+    // First run: spell out the battery mechanic once, up front.
+    if (this.runCount === 0) {
+      const tip = this.add.text(
+        this.cameras.main.width / 2, 150,
+        'Your flashlight drains its battery -- the beam narrows as it dies.\n' +
+        (this.touchMode
+          ? 'LIGHT toggles it off to conserve. BATT inserts a spare battery.'
+          : 'Press F to switch it off and conserve. Right-click to insert a spare battery.'),
+        {
+          fontSize: '14px',
+          color: '#ffe9a0',
+          fontFamily: 'monospace',
+          backgroundColor: '#000000cc',
+          padding: { x: 12, y: 8 },
+          align: 'center',
+        }
+      );
+      tip.setOrigin(0.5, 0);
+      tip.setScrollFactor(0);
+      tip.setDepth(1100);
+      this.tweens.add({
+        targets: tip,
+        alpha: 0,
+        delay: 9000,
+        duration: 1200,
+        onComplete: () => tip.destroy(),
+      });
     }
   }
 
@@ -1389,9 +1483,19 @@ export class GameScene extends Phaser.Scene {
       : generateCrackPoints(crackX - crackLength / 2, crackY + WALL_THICKNESS / 2, crackLength, segments, false);
 
     this.crackGlowGraphics = this.add.graphics();
-    this.crackGlowGraphics.setDepth(1);
+    this.crackGlowGraphics.setDepth(95);
+    this.crackGlowGraphics.setBlendMode(Phaser.BlendModes.ADD);
     this.crackGlowCenter = { x: crackX + (isVerticalWall ? WALL_THICKNESS / 2 : 0), y: crackY + (isVerticalWall ? 0 : WALL_THICKNESS / 2) };
     this.crackGlowSize = { w: isVerticalWall ? WALL_THICKNESS + 8 : crackLength + 8, h: isVerticalWall ? crackLength + 8 : WALL_THICKNESS + 8 };
+
+    // World-space rect of the rift opening, used to keep light spill from
+    // passing through it and to drive the proximity crackle.
+    this.riftRect = {
+      x: this.crackGlowCenter.x - this.crackGlowSize.w / 2 - 12,
+      y: this.crackGlowCenter.y - this.crackGlowSize.h / 2 - 12,
+      width: this.crackGlowSize.w + 24,
+      height: this.crackGlowSize.h + 24,
+    };
 
     const crackGfx = this.add.graphics();
     crackGfx.setDepth(2);
@@ -1415,16 +1519,65 @@ export class GameScene extends Phaser.Scene {
     crackGfx.strokePath();
   }
 
+  // The rift is not a doorway: it renders as a sizzling tear of light in the
+  // wall, flickering at high frequency with arcing sparks.
   updateCrackGlow(time) {
     if (!this.crackGlowGraphics) return;
     this.crackGlowGraphics.clear();
-    const alpha = 0.15 + 0.1 * Math.sin(time * 0.003);
-    this.crackGlowGraphics.fillStyle(0xd4c073, alpha);
+
     const cx = this.crackGlowCenter.x;
     const cy = this.crackGlowCenter.y;
     const hw = this.crackGlowSize.w / 2;
     const hh = this.crackGlowSize.h / 2;
+
+    const sizzle = 0.25 + 0.12 * Math.sin(time * 0.021) * Math.sin(time * 0.0137) + 0.12 * Math.random();
+    this.crackGlowGraphics.fillStyle(0xd4c073, sizzle);
     this.crackGlowGraphics.fillRect(cx - hw, cy - hh, hw * 2, hh * 2);
+
+    const core = 0.35 + 0.3 * Math.random();
+    this.crackGlowGraphics.fillStyle(0xfff2b0, core);
+    this.crackGlowGraphics.fillRect(cx - hw / 3, cy - hh, (hw * 2) / 3, hh * 2);
+
+    const vertical = this.crackGlowSize.h > this.crackGlowSize.w;
+    this.crackGlowGraphics.lineStyle(1, 0xffffff, 0.3 + 0.5 * Math.random());
+    for (let i = 0; i < 3; i++) {
+      const along = Math.random() * 2 - 1;
+      const sx = vertical ? cx + (Math.random() * 2 - 1) * hw : cx + along * hw;
+      const sy = vertical ? cy + along * hh : cy + (Math.random() * 2 - 1) * hh;
+      this.crackGlowGraphics.lineBetween(
+        sx, sy,
+        sx + (Math.random() * 2 - 1) * 10,
+        sy + (Math.random() * 2 - 1) * 10
+      );
+    }
+  }
+
+  zoneTouchesRift(zone) {
+    if (!this.riftRect) return false;
+    const r = this.riftRect;
+    return (
+      zone.x < r.x + r.width &&
+      zone.x + zone.width > r.x &&
+      zone.y < r.y + r.height &&
+      zone.y + zone.height > r.y
+    );
+  }
+
+  // Crossing the rift is a dimensional transition, not a doorway: white-out
+  // flash, a jolt, and the crackle peaking as the player passes through.
+  // Re-arms when the player returns to the store so every entry transitions.
+  updateRiftCrossing() {
+    if (this.currentFloor !== 0) return;
+    const room = this.entranceRoom;
+    const inBackrooms = this.player.x > room.x + room.width + 4;
+    if (inBackrooms && !this.riftCrossed) {
+      this.riftCrossed = true;
+      this.cameras.main.flash(500, 235, 225, 190);
+      this.cameras.main.shake(250, 0.006);
+      this.playSound('stair_transition');
+    } else if (!inBackrooms && this.riftCrossed && this.player.x < room.x + room.width - 40) {
+      this.riftCrossed = false;
+    }
   }
 
   createStairInfra() {
@@ -1578,7 +1731,6 @@ export class GameScene extends Phaser.Scene {
         treasureEarned: this.inventoryState.treasureValue,
         runStats: this.runStats,
         roomsExplored: this.explorationState.visitedRoomIds.size,
-        totalRooms: this.level.rooms.length,
         hp: this.combatState.hp,
         maxHp: this.combatState.maxHp,
         newLocation: newLocation || null,
@@ -1678,6 +1830,8 @@ export class GameScene extends Phaser.Scene {
       const drop = rollEnemyDrop(enemyState.type, roomDist, Math.random);
       if (drop) {
         const dropSprite = this.itemGroup.create(enemySprite.x, enemySprite.y, `item_${drop.type}`);
+        dropSprite.setScale(1.6);
+        dropSprite.refreshBody();
         dropSprite.setDepth(5);
         dropSprite.setData('itemType', drop.type);
         dropSprite.setData('itemValue', drop.value);
@@ -1736,7 +1890,6 @@ export class GameScene extends Phaser.Scene {
         treasureEarned: 0,
         runStats: this.runStats,
         roomsExplored: this.explorationState.visitedRoomIds.size,
-        totalRooms: this.level.rooms.length,
         hp: 0,
         maxHp: this.combatState.maxHp,
         newLocation: null,
@@ -1753,6 +1906,9 @@ export class GameScene extends Phaser.Scene {
 
   updateEnemies(delta) {
     const playerPos = { x: this.player.x, y: this.player.y };
+    // Enemy line-of-sight only matters within DETECTION_RANGE of the player,
+    // so prefilter the (ever-growing) occluder set once per frame.
+    const losSegments = filterSegmentsNear(playerPos, DETECTION_RANGE + 60, this.wallSegments);
     const litRoomIds = getLitRoomIds(this.switchStates);
     if (!litRoomIds.includes(0)) litRoomIds.push(0);
     const litRooms = litRoomIds.map(id => this.level.rooms.find(r => r.id === id)).filter(Boolean);
@@ -1848,7 +2004,7 @@ export class GameScene extends Phaser.Scene {
 
       const chaseSpeed = this.getScaledChaseSpeed(es.type);
       const oldState = es.state;
-      const updated = updateEnemyAI(es, playerPos, this.wallSegments, delta, this.hidingState.isHiding, chaseSpeed, navContext);
+      const updated = updateEnemyAI(es, playerPos, losSegments, delta, this.hidingState.isHiding, chaseSpeed, navContext);
 
       const soundResult = getEnemySoundEvent(oldState, updated.state, es.type, es.soundCooldown || 0, delta);
       es.soundCooldown = soundResult.newCooldown;
@@ -1911,8 +2067,13 @@ export class GameScene extends Phaser.Scene {
       this.player.setAlpha(0.3);
       this.player.setTint(0x336633);
     } else if (hurt) {
-      this.player.setAlpha(0.5);
-      this.player.setTint(0xcc4444);
+      const { alpha, flash } = getHurtFlash(this.combatState.damageCooldown);
+      this.player.setAlpha(alpha);
+      if (flash) {
+        this.player.setTintFill(0xffffff);
+      } else {
+        this.player.clearTint();
+      }
     } else {
       this.player.setAlpha(1);
       this.player.clearTint();
@@ -1944,12 +2105,14 @@ export class GameScene extends Phaser.Scene {
 
     const battY = y + height + 6;
     const battFraction = getBatteryFraction(this.batteryState);
+    const lightOn = this.flashlightState.on;
 
     gfx.fillStyle(0x222222, 0.8);
     gfx.fillRect(x, battY, width, height);
 
     let battColor = 0xcccc33;
-    if (battFraction <= 0.25) battColor = 0xcc3333;
+    if (!lightOn) battColor = 0x555555;
+    else if (battFraction <= 0.25) battColor = 0xcc3333;
     else if (battFraction <= 0.5) battColor = 0xcc8833;
 
     gfx.fillStyle(battColor, 1);
@@ -1957,6 +2120,14 @@ export class GameScene extends Phaser.Scene {
 
     gfx.lineStyle(2, 0xffffff, 0.5);
     gfx.strokeRect(x, battY, width, height);
+
+    if (!lightOn) {
+      this.batteryHintText.setText(this.touchMode ? 'FLASHLIGHT OFF -- tap LIGHT' : 'FLASHLIGHT OFF -- press F');
+    } else if (this.hidingState.isHiding) {
+      this.batteryHintText.setText('Hiding -- flashlight dark');
+    } else {
+      this.batteryHintText.setText(getBatteryHint(this.batteryState, this.inventoryState) || '');
+    }
 
     this.batteryCountText.setText(`BAT x${this.inventoryState.batteries}`);
     this.treasureText.setText(`$${this.inventoryState.treasureValue}`);
@@ -2032,6 +2203,7 @@ export class GameScene extends Phaser.Scene {
       D: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
       E: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E),
       Q: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Q),
+      F: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F),
     };
 
     const coarsePointer = typeof window !== 'undefined' && window.matchMedia
@@ -2116,6 +2288,7 @@ export class GameScene extends Phaser.Scene {
       if (this.combatState.isDead || this.dayEnding || this.hidingState.isHiding) return;
       this.onUseBattery();
     });
+    this.lightButton = this.makeTouchButton(row.lightX, row.y, 'LIGHT', () => this.toggleFlashlightAction());
 
     if (this.scale.fullscreen && this.scale.fullscreen.available) {
       this.fullscreenButton = this.makeTouchButton(layout.fullscreenButton.x, layout.fullscreenButton.y, 'FS', () => {
@@ -2169,6 +2342,7 @@ export class GameScene extends Phaser.Scene {
     this.moveTouchButton(this.useButton, layout.useButton.x, layout.useButton.y);
     this.moveTouchButton(this.weaponButton, row.weaponX, row.y);
     this.moveTouchButton(this.batteryButton, row.batteryX, row.y);
+    this.moveTouchButton(this.lightButton, row.lightX, row.y);
     this.moveTouchButton(this.fullscreenButton, layout.fullscreenButton.x, layout.fullscreenButton.y);
     this.moveTouchButton(this.pauseButton, layout.pauseButton.x, layout.pauseButton.y);
 
@@ -2252,6 +2426,12 @@ export class GameScene extends Phaser.Scene {
     this.playSound('weapon_switch');
   }
 
+  toggleFlashlightAction() {
+    if (this.combatState.isDead || this.dayEnding || this.isTeleporting) return;
+    this.flashlightState = toggleFlashlight(this.flashlightState);
+    this.playSound('switch_click');
+  }
+
   triggerInteract() {
     if (this.combatState.isDead || this.dayEnding || this.isTeleporting) return;
     if (this.hidingState.isHiding) {
@@ -2289,6 +2469,7 @@ export class GameScene extends Phaser.Scene {
         this.player.x, this.player.y,
         `pickup_${result.droppedWeapon.id}`
       );
+      dropSprite.setScale(1.5);
       dropSprite.setDepth(5);
       dropSprite.setData('weaponId', result.droppedWeapon.id);
       dropSprite.setData('weaponAmmo', result.droppedWeapon.ammo);
@@ -2359,7 +2540,10 @@ export class GameScene extends Phaser.Scene {
       this.lightGraphics.fillRect(room.x, room.y, room.width, room.height);
     }
 
-    const spillZones = getLightSpillZones(this.level.rooms, litRoomIds, this.doorStates);
+    // No light leaks through the rift in either direction -- the backrooms
+    // must stay invisible until the player passes through.
+    const spillZones = getLightSpillZones(this.level.rooms, litRoomIds, this.doorStates)
+      .filter(zone => !this.zoneTouchesRift(zone));
     for (const zone of spillZones) {
       this.maskGraphics.fillGradientStyle(0xffffff, 0xffffff, 0xffffff, 0xffffff,
         zone.alphas.topLeft, zone.alphas.topRight, zone.alphas.bottomLeft, zone.alphas.bottomRight);
@@ -2370,6 +2554,8 @@ export class GameScene extends Phaser.Scene {
       this.lightGraphics.fillRect(zone.x, zone.y, zone.width, zone.height);
     }
 
+    if (!isFlashlightLit(this.flashlightState)) return;
+
     const coneAngle = getFlashlightConeAngle(this.batteryState, this.flashlightAngle);
     if (coneAngle <= 0 || shouldFlicker(this.batteryState, time)) return;
 
@@ -2378,7 +2564,8 @@ export class GameScene extends Phaser.Scene {
       origin,
       this.playerAngle || 0,
       coneAngle,
-      this.wallSegments
+      filterSegmentsNear(origin, FLASHLIGHT_RANGE, this.wallSegments),
+      FLASHLIGHT_RANGE
     );
 
     if (polygon.length >= 3) {
@@ -2460,7 +2647,7 @@ export class GameScene extends Phaser.Scene {
     this.player.setVelocity(velocity.x, velocity.y);
 
     this.combatState = updateCombat(this.combatState, delta);
-    this.batteryState = updateBattery(this.batteryState, delta);
+    this.batteryState = updateBatteryWithFlashlight(this.batteryState, this.flashlightState, delta);
     this.fireCooldown = updateFireCooldown(this.fireCooldown, delta);
 
     const fireButtonDown = this.touchMode ? this.isFireHeld() : false;
@@ -2503,7 +2690,12 @@ export class GameScene extends Phaser.Scene {
       this.triggerInteract();
     }
 
+    if (Phaser.Input.Keyboard.JustDown(this.keys.F)) {
+      this.toggleFlashlightAction();
+    }
+
     this.ensureRoomsAroundPlayer();
+    this.updateRiftCrossing();
 
     this.updateBullets();
     this.updateEnemyBullets();
@@ -2519,6 +2711,8 @@ export class GameScene extends Phaser.Scene {
     this.drawMinimap();
 
     if (this.audioReady) {
+      this.updateRiftCrackle();
+
       const speed = Math.sqrt(this.player.body.velocity.x ** 2 + this.player.body.velocity.y ** 2);
       const interval = getFootstepInterval(speed);
       this.footstepTimer += delta;
@@ -2528,7 +2722,7 @@ export class GameScene extends Phaser.Scene {
       }
 
       const batteryFraction = this.batteryState.charge / this.batteryState.maxCharge;
-      const isLow = batteryFraction > 0 && batteryFraction <= 0.25;
+      const isLow = isFlashlightLit(this.flashlightState) && batteryFraction > 0 && batteryFraction <= 0.25;
       if (isLow) {
         this.batteryWarningTimer += delta;
         if (this.batteryWarningTimer >= 3000) {

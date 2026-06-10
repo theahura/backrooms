@@ -7,8 +7,8 @@
 // share. This lets GameScene generate rooms lazily (a few cells ahead of the
 // player) while they stay static once generated, with no fixed room count.
 
-export const ROOM_WIDTH = 1200;
-export const ROOM_HEIGHT = 1000;
+export const ROOM_WIDTH = 720;
+export const ROOM_HEIGHT = 600;
 export const DOOR_WIDTH = 80;
 const DOOR_MIN_OFFSET = 100;
 
@@ -40,13 +40,26 @@ export function localDistance(gx, gy) {
 
 // A door on the east side of (gx,gy) is the same physical opening as the west
 // side of (gx+1,gy); both are decided here so they always agree.
+//
+// The store at (0,0) has exactly one opening into the backrooms: the rift in
+// its east wall. Its other three edges are always sealed.
 function eastEdgeOpen(seed, gx, gy) {
-  if (gx === 0 && gy === 0) return true; // entrance crack is always east
+  if (gx === 0 && gy === 0) return true; // the rift
+  if (gx === -1 && gy === 0) return false; // store west wall
   return hashU32(seed, gx, gy, 1) % 1000 < DOOR_PROB * 1000;
 }
 
 function southEdgeOpen(seed, gx, gy) {
+  if (gx === 0 && (gy === 0 || gy === -1)) return false; // store south/north walls
   return hashU32(seed, gx, gy, 2) % 1000 < DOOR_PROB * 1000;
+}
+
+// The rift is the same physical opening seen from either room: the store's
+// east door and the first backroom's west door.
+export function isRiftDoor(room, door) {
+  if (room.gridX === 0 && room.gridY === 0 && door.wall === 'east') return true;
+  if (room.gridX === 1 && room.gridY === 0 && door.wall === 'west') return true;
+  return false;
 }
 
 function eastEdgeOffset(seed, gx, gy) {
