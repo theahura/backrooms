@@ -38,6 +38,7 @@ import { SPRITE_DEFS, getAllSpriteKeys, ANIM_DEFS, getAllAnimKeys, getEnemyTextu
 import { getLightSpillZones } from '../systems/lightSpill.js';
 import { generateRoomTraps } from '../systems/traps.js';
 import { rollEnemyDrop } from '../systems/lootDrops.js';
+import { CAMERA_ZOOM, partitionSceneObjects } from '../systems/camera.js';
 
 // AI-generated pixel-art PNGs (generated offline by scripts/generate-art.mjs).
 // Whatever is present is loaded in preload(); any sprite key without a PNG
@@ -213,6 +214,7 @@ export class GameScene extends Phaser.Scene {
     this.createDarknessOverlay();
     this.createHUD();
     this.createTouchControls();
+    this.setupCameraLayers();
     this.createSounds();
   }
 
@@ -972,6 +974,8 @@ export class GameScene extends Phaser.Scene {
     }
 
     const cam = this.cameras.main;
+    // This popup is HUD: route it to the un-zoomed UI camera (see setupCameraLayers).
+    this._buildingHud = true;
     const bg = this.add.graphics();
     bg.setScrollFactor(0);
     bg.setDepth(1001);
@@ -990,6 +994,7 @@ export class GameScene extends Phaser.Scene {
     loreText.setScrollFactor(0);
     loreText.setDepth(1002);
     loreText.setAlpha(0);
+    this._buildingHud = false;
 
     this.tweens.add({ targets: [bg, loreText], alpha: 1, duration: 300 });
 
@@ -1695,6 +1700,7 @@ export class GameScene extends Phaser.Scene {
     player.body.enable = false;
 
     this.cameras.main.fadeOut(300, 0, 0, 0);
+    if (this.uiCamera) this.uiCamera.fadeOut(300, 0, 0, 0);
     this.cameras.main.once('camerafadeoutcomplete', () => {
       this.currentFloor = destFloor;
       this.ensureRoomsAround(destFloor, destGx, destGy);
@@ -1711,6 +1717,7 @@ export class GameScene extends Phaser.Scene {
       this.runStats = updateMaxFloor(this.runStats, destFloor);
 
       this.cameras.main.fadeIn(300, 0, 0, 0);
+      if (this.uiCamera) this.uiCamera.fadeIn(300, 0, 0, 0);
       this.cameras.main.once('camerafadeincomplete', () => {
         this.isTeleporting = false;
       });
@@ -1725,6 +1732,7 @@ export class GameScene extends Phaser.Scene {
     this.player.body.stop();
     this.player.body.enable = false;
     this.cameras.main.fadeOut(1000, 0, 0, 0);
+    if (this.uiCamera) this.uiCamera.fadeOut(1000, 0, 0, 0);
     this.cameras.main.once('camerafadeoutcomplete', () => {
       this.scene.start('RunSummaryScene', {
         survived: true,
@@ -1884,6 +1892,7 @@ export class GameScene extends Phaser.Scene {
     this.player.body.stop();
     this.player.body.enable = false;
     this.cameras.main.fadeOut(500, 0, 0, 0);
+    if (this.uiCamera) this.uiCamera.fadeOut(500, 0, 0, 0);
     this.cameras.main.once('camerafadeoutcomplete', () => {
       this.scene.start('RunSummaryScene', {
         survived: false,
@@ -2492,6 +2501,34 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
     this.cameras.main.setBounds(-WORLD_BOUND, -WORLD_BOUND, WORLD_BOUND * 2, WORLD_BOUND * 2);
     this.physics.world.setBounds(-WORLD_BOUND, -WORLD_BOUND, WORLD_BOUND * 2, WORLD_BOUND * 2);
+  }
+
+  // Zoom the world in for a claustrophobic, "everything is closer" feel and pin
+  // the HUD to its own un-zoomed camera. Phaser's setZoom() scales scrollFactor-0
+  // objects too, so the HUD needs a dedicated camera. The main camera ignores
+  // HUD objects; the UI camera ignores world objects. Objects created later
+  // (pooled bullets, spawned enemies, loot, the lore popup) are routed by the
+  // `_buildingHud` flag because ADDED_TO_SCENE fires before chained
+  // setScrollFactor() runs, so scrollFactor can't be read in the listener.
+  setupCameraLayers() {
+    this.uiCamera = this.cameras.add(0, 0, this.scale.width, this.scale.height);
+    this.uiCamera.setName('ui');
+
+    const { hud, world } = partitionSceneObjects(this.children.list);
+    this.cameras.main.ignore(hud);
+    this.uiCamera.ignore(world);
+
+    this._buildingHud = false;
+    this._routeNewObject = (obj) => {
+      if (this._buildingHud) this.cameras.main.ignore(obj);
+      else this.uiCamera.ignore(obj);
+    };
+    this.events.on(Phaser.Scenes.Events.ADDED_TO_SCENE, this._routeNewObject);
+    this.events.once('shutdown', () => {
+      this.events.off(Phaser.Scenes.Events.ADDED_TO_SCENE, this._routeNewObject);
+    });
+
+    this.cameras.main.setZoom(CAMERA_ZOOM);
   }
 
   createDarknessOverlay() {
