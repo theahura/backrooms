@@ -10,7 +10,7 @@ export const LOCATIONS = [
     floorColor: 0x5c4a3a,
     wallColor: 0x7a6b5a,
     furniture: [
-      { type: 'counter', relX: 0.35, relY: 0.42, width: 120, height: 40, color: 0x5c3a21, canHide: false },
+      { type: 'counter', relX: 0.35, relY: 0.33, width: 120, height: 40, color: 0x5c3a21, canHide: false },
       { type: 'shelf', relX: 0.55, relY: 0.08, width: 100, height: 20, color: 0x6b4e2a, canHide: false },
       { type: 'shelf', relX: 0.55, relY: 0.18, width: 100, height: 20, color: 0x6b4e2a, canHide: false },
       { type: 'shelf', relX: 0.55, relY: 0.28, width: 100, height: 20, color: 0x6b4e2a, canHide: false },

@@ -431,3 +431,69 @@ export function playAmbientSound(soundManager, time, volumeMultiplier = 1) {
     soundManager.play(type.name, { volume: vol });
   } catch (_) {}
 }
+
+// The rift's crackling static: looped filtered noise (hiss) plus a sparse
+// impulse loop (pops). The caller drives the gain from player distance each
+// frame; setVolume takes the absolute gain, unlike the drone's multiplier.
+export function createRiftCrackle(audioContext, destination) {
+  const sampleRate = audioContext.sampleRate;
+  const seconds = 2;
+
+  const noiseBuffer = audioContext.createBuffer(1, sampleRate * seconds, sampleRate);
+  const noiseData = noiseBuffer.getChannelData(0);
+  for (let i = 0; i < noiseData.length; i++) {
+    noiseData[i] = Math.random() * 2 - 1;
+  }
+
+  const popBuffer = audioContext.createBuffer(1, sampleRate * seconds, sampleRate);
+  const popData = popBuffer.getChannelData(0);
+  for (let p = 0; p < 70; p++) {
+    const at = Math.floor(Math.random() * (popData.length - 80));
+    const strength = 0.4 + Math.random() * 0.6;
+    for (let i = 0; i < 60; i++) {
+      popData[at + i] += (Math.random() * 2 - 1) * strength * (1 - i / 60);
+    }
+  }
+
+  const noiseSource = audioContext.createBufferSource();
+  noiseSource.buffer = noiseBuffer;
+  noiseSource.loop = true;
+
+  const popSource = audioContext.createBufferSource();
+  popSource.buffer = popBuffer;
+  popSource.loop = true;
+
+  const bandpass = audioContext.createBiquadFilter();
+  bandpass.type = 'bandpass';
+  bandpass.frequency.value = 1600;
+  bandpass.Q.value = 0.7;
+
+  const highpass = audioContext.createBiquadFilter();
+  highpass.type = 'highpass';
+  highpass.frequency.value = 900;
+
+  const masterGain = audioContext.createGain();
+  masterGain.gain.value = 0;
+
+  noiseSource.connect(bandpass);
+  bandpass.connect(masterGain);
+  popSource.connect(highpass);
+  highpass.connect(masterGain);
+  masterGain.connect(destination);
+
+  const nodes = [noiseSource, popSource];
+
+  return {
+    start() {
+      for (const node of nodes) node.start();
+    },
+    stop() {
+      for (const node of nodes) {
+        try { node.stop(); } catch (_) {}
+      }
+    },
+    setVolume(value) {
+      masterGain.gain.setTargetAtTime(value, audioContext.currentTime, 0.05);
+    },
+  };
+}

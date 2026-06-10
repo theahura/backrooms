@@ -35,6 +35,17 @@ describe('getRoomType', () => {
   });
 });
 
+describe('liminal room type distribution', () => {
+  it('keeps plain open rooms rare', () => {
+    let open = 0;
+    for (let seed = 0; seed < 1000; seed++) {
+      if (getRoomType(seed) === 'open') open++;
+    }
+    expect(open).toBeLessThanOrEqual(80);
+    expect(open).toBeGreaterThan(0);
+  });
+});
+
 describe('generateMazeWalls', () => {
   const ROOM_X = 0;
   const ROOM_Y = 0;

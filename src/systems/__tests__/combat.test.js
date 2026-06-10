@@ -8,6 +8,7 @@ import {
   isInvulnerable,
   applyEnemyDamage,
   isEnemyDead,
+  getHurtFlash,
   MEDKIT_HEAL_AMOUNT,
 } from '../combat.js';
 
@@ -142,6 +143,31 @@ describe('isEnemyDead', () => {
 
   it('returns false when health is positive', () => {
     expect(isEnemyDead(25)).toBe(false);
+  });
+});
+
+describe('getHurtFlash', () => {
+  it('renders the player fully visible when not recently hurt', () => {
+    const render = getHurtFlash(0);
+    expect(render.alpha).toBe(1);
+    expect(render.flash).toBe(false);
+  });
+
+  it('blinks between phases while invulnerable', () => {
+    let transitions = 0;
+    let prev = getHurtFlash(1000).flash;
+    for (let remaining = 950; remaining > 0; remaining -= 50) {
+      const current = getHurtFlash(remaining).flash;
+      if (current !== prev) transitions++;
+      prev = current;
+    }
+    expect(transitions).toBeGreaterThanOrEqual(2);
+  });
+
+  it('never renders the player near-invisible during the damage cooldown', () => {
+    for (let remaining = 0; remaining <= 1000; remaining += 25) {
+      expect(getHurtFlash(remaining).alpha).toBeGreaterThanOrEqual(0.6);
+    }
   });
 });
 

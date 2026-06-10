@@ -401,3 +401,10 @@ export function getDistanceVolume(distance, maxRange, baseGain) {
   if (distance >= maxRange) return 0;
   return baseGain * (1 - distance / maxRange);
 }
+
+export const RIFT_HEAR_RANGE = 420;
+export const RIFT_CRACKLE_GAIN = 0.55;
+
+export function getRiftCrackleVolume(distance) {
+  return getDistanceVolume(distance, RIFT_HEAR_RANGE, RIFT_CRACKLE_GAIN);
+}

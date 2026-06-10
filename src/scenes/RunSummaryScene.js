@@ -12,7 +12,6 @@ export class RunSummaryScene extends Phaser.Scene {
     this.treasureEarned = data?.treasureEarned ?? 0;
     this.runStats = data?.runStats ?? { enemiesKilled: 0, timeElapsed: 0, maxFloor: 0 };
     this.roomsExplored = data?.roomsExplored ?? 0;
-    this.totalRooms = data?.totalRooms ?? 0;
     this.hp = data?.hp ?? 0;
     this.maxHp = data?.maxHp ?? 100;
     this.newLocation = data?.newLocation ?? null;
@@ -23,7 +22,7 @@ export class RunSummaryScene extends Phaser.Scene {
     const { width, height } = this.cameras.main;
     const summary = getSummaryData(
       this.runStats, this.survived, this.treasureEarned,
-      this.roomsExplored, this.totalRooms, this.hp, this.maxHp
+      this.roomsExplored, this.hp, this.maxHp
     );
 
     this.cameras.main.setBackgroundColor('#000000');

@@ -3322,3 +3322,32 @@ WEAPON_NOISE_RANGES = { pistol: 1, shotgun: 2, rifle: 1 }
 - Player fires while no roomGraph exists (shouldn't happen in practice): guard with `if (!this.roomGraph) return`
 - Cooldown prevents double-alerting on rapid fire (shotgun fires once per 800ms, rifle 600ms, pistol 200ms — all within 5s cooldown)
 - Enemies in different floors: getRoomDistance returns -1 (unreachable via room graph, which only has same-floor connections)
+
+## Claustrophobic Camera Zoom + Fixed HUD Camera Research
+
+### Problem
+Playtest screenshots show the player is a ~40px speck in a 720x600 room rendered at ~1:1 zoom — the opposite of the binding spec feedback: "the player character needs to be bigger on screen (cf also the room needs to be smaller). If the camera is closer to the player in smaller rooms it will emphasize a claustrophobic feeling", "it is all basically way too small", and "everything should be closer". A main-camera zoom-in addresses feedback items #4 (enemies/weapons/pickups bigger/distinguishable) and #5 (bigger player, smaller-feeling rooms, claustrophobia) simultaneously and proportionally (preserving the prior commit's hitbox/display tuning).
+
+### Phaser 3.90 camera-zoom + HUD findings (verified against node_modules/phaser source)
+- `cameras.main.setZoom()` DOES scale `setScrollFactor(0)` objects — there is no zoom-immunity flag. The canonical fix is a second, non-zoomed UI camera (`this.cameras.add(...)`). (Discourse "UI elements readjust with camera zoom"; GitHub #4100.)
+- `camera.ignore(entries)` sets a per-object `cameraFilter` bitmask ONCE at call time; for a Group it snapshots `getChildren()`. It does NOT cover future pool/spawned children (GitHub #5798 — "bullets leak onto HUD camera"). So you cannot rely on `uiCamera.ignore(group)` for pooled bullets / spawned enemies / loot drops.
+- `Phaser.Scenes.Events.ADDED_TO_SCENE` (string `'addedtoscene'`, listener sig `(gameObject, scene)`) IS reliably emitted on the scene's `this.events` in 3.90 (from `GameObject.addToDisplayList`). TIMING GOTCHA: it fires synchronously inside `this.add.*()` BEFORE chained `.setScrollFactor(0)` runs, so you cannot read scrollFactor in the listener to classify. Route by an explicit flag (e.g. `this._buildingHud`) instead: default new objects = world (`uiCamera.ignore`), flag-on = HUD (`cameras.main.ignore`).
+- Camera fade/flash are per-camera. The UI camera renders on top, so `cameras.main.fadeOut()` alone leaves the HUD visible over black. Mirror `fadeOut`/`fadeIn` on BOTH cameras for scene transitions; keep `shake` on main only (HUD shouldn't shake).
+- Scale.RESIZE (touch path in main.js): a full-screen camera created at (0,0) with size == current game size auto-resizes (CameraManager.onResize only resizes cameras matching the old game rect). A UI camera from `cameras.add(0,0,scale.width,scale.height)` qualifies — no manual resize handler needed.
+
+### Mask/darkness under zoom (verified from source)
+- Object-level `BitmapMask` (gameObject.setMask) renders the mask through the SAME camera (zoom+scroll) as the masked object. Both `darkGraphics` (masked) and `maskGraphics` (mask) are in WORLD coords, so the flashlight cone + lit-room holes stay aligned under zoom. No change needed. (Camera-level `camera.setMask` would NOT track — not used here.)
+- `cameras.main.worldView` = `width/zoom` x `height/zoom` centered on midPoint (Camera.preRender). Zooming in returns a SMALLER world rect, so the worldView-sized darkness overlay still covers the full viewport. The existing `pad=100` absorbs the one-frame worldView lag.
+- Create the BitmapMask ONCE at create-time (already done); recreating after a resize can corrupt resolution (GitHub #6769).
+
+### Codebase audit (zoom-safety)
+- Aiming/shooting already use WORLD coords via `pointer.updateWorldPoint(cam)` (GameScene update ~2600; fireBullet ~1752) — zoom-safe.
+- Touch controls (touchControls.js + GameScene ~2240-2371) are screen-space + scrollFactor(0); virtual sticks output force/rotation; fire hit-test compares screen pointer vs screen button — zoom-independent.
+- Minimap (exploration.js getWindowedMinimapData) world->minimap scale is from fixed MINIMAP_WIDTH/HEIGHT, independent of zoom; only uses camera.width for right-edge anchor — safe.
+- No culling / screen-edge proximity logic exists; lazy room gen keys off world distance — safe.
+- HUD vs world partition is clean along scrollFactor: 10 HUD objects (scrollFactor 0, depths >=1000) vs world (scrollFactor 1). EXCEPTION/trap: `interactText` (GameScene:615) is scrollFactor(1) WORLD despite depth 1000 — must render on the main (zoomed) camera; the auto-router routes it to world correctly. Only dynamic HUD object is the `showLorePopup` bg+text.
+
+### Decision
+- New pure module `src/systems/camera.js`: `CAMERA_ZOOM=2.0`, `isHudObject(obj)` (both scrollFactor axes 0), `partitionSceneObjects(objects)` -> `{hud, world}` (used for the initial partition of create()-time objects).
+- GameScene `setupCameraLayers()` after `createTouchControls()`: add UI camera, partition existing, ignore both ways, install `addedtoscene` router keyed on `_buildingHud`, then `setZoom`. Wrap `showLorePopup` adds with `_buildingHud`. Mirror fades on uiCamera. Remove the listener on `shutdown`.
+- Zoom tuned by playtest from a 1.75 starting probe to a shipped value of 2.0 (more claustrophobic; flashlight range 300 already gates vision, so awareness is unaffected).

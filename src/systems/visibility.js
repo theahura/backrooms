@@ -84,28 +84,53 @@ function castClosestRay(ray, segments) {
   return closest;
 }
 
-export function getFlashlightPolygon(origin, angle, coneAngle, segments) {
-  const visPolygon = getVisibilityPolygon(origin, segments);
+export const FLASHLIGHT_RANGE = 300;
 
-  const points = visPolygon.filter(p => {
-    const pointAngle = Math.atan2(p.y - origin.y, p.x - origin.x);
-    return isAngleInCone(pointAngle, angle, coneAngle);
+const ARC_SAMPLE_STEP = Math.PI / 18;
+
+// Keep only segments whose bounding box is within reach of a capped ray; with
+// maxRange capping, anything further can never affect the polygon.
+export function filterSegmentsNear(origin, range, segments) {
+  return segments.filter(seg => {
+    const minX = Math.min(seg.x1, seg.x2);
+    const maxX = Math.max(seg.x1, seg.x2);
+    const minY = Math.min(seg.y1, seg.y2);
+    const maxY = Math.max(seg.y1, seg.y2);
+    const dx = Math.max(minX - origin.x, 0, origin.x - maxX);
+    const dy = Math.max(minY - origin.y, 0, origin.y - maxY);
+    return dx * dx + dy * dy <= range * range;
   });
+}
 
-  const coneLeftAngle = normalizeAngle(angle - coneAngle);
-  const coneRightAngle = normalizeAngle(angle + coneAngle);
+export function getFlashlightPolygon(origin, angle, coneAngle, segments, maxRange = Infinity) {
+  const rayAngles = [angle - coneAngle, angle + coneAngle];
 
-  const leftHit = castClosestRay(
-    { x: origin.x, y: origin.y, dx: Math.cos(coneLeftAngle), dy: Math.sin(coneLeftAngle) },
-    segments
-  );
-  const rightHit = castClosestRay(
-    { x: origin.x, y: origin.y, dx: Math.cos(coneRightAngle), dy: Math.sin(coneRightAngle) },
-    segments
-  );
+  const offset = 0.00001;
+  for (const seg of segments) {
+    for (const [ex, ey] of [[seg.x1, seg.y1], [seg.x2, seg.y2]]) {
+      const a = Math.atan2(ey - origin.y, ex - origin.x);
+      for (const candidate of [a - offset, a, a + offset]) {
+        if (isAngleInCone(candidate, angle, coneAngle)) rayAngles.push(candidate);
+      }
+    }
+  }
 
-  if (leftHit) points.push({ x: leftHit.x, y: leftHit.y });
-  if (rightHit) points.push({ x: rightHit.x, y: rightHit.y });
+  for (let rel = -coneAngle; rel <= coneAngle; rel += ARC_SAMPLE_STEP) {
+    rayAngles.push(angle + rel);
+  }
+
+  const points = [];
+  for (const rayAngle of rayAngles) {
+    const dx = Math.cos(rayAngle);
+    const dy = Math.sin(rayAngle);
+    const hit = castClosestRay({ x: origin.x, y: origin.y, dx, dy }, segments);
+
+    if (hit && hit.t <= maxRange) {
+      points.push({ x: hit.x, y: hit.y });
+    } else if (Number.isFinite(maxRange)) {
+      points.push({ x: origin.x + dx * maxRange, y: origin.y + dy * maxRange });
+    }
+  }
 
   const seen = new Set();
   const deduped = points.filter(p => {

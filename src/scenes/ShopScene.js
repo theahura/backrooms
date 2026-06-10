@@ -13,6 +13,13 @@ import { getLocation } from '../systems/locations.js';
 import { getJournalEntries, getJournalPage } from '../systems/lore.js';
 import { generateAllSounds } from '../systems/audioEngine.js';
 import { getEffectiveVolume, createDefaultSettings } from '../systems/settings.js';
+import { shopIconKey } from '../systems/art.js';
+
+const SHOP_PNGS = import.meta.glob('../assets/sprites/*.png', {
+  eager: true,
+  query: '?url',
+  import: 'default',
+});
 
 const JOURNAL_ENTRIES_PER_PAGE = 5;
 
@@ -47,11 +54,26 @@ export class ShopScene extends Phaser.Scene {
     this.audioSettings = this.registry.get('audioSettings') || createDefaultSettings();
   }
 
+  preload() {
+    for (const [path, url] of Object.entries(SHOP_PNGS)) {
+      const key = path.split('/').pop().replace('.png', '');
+      if (!key.startsWith('shop_')) continue;
+      this.load.image(key, url);
+    }
+  }
+
   create() {
     this.cameras.main.setBackgroundColor('#111111');
     this.fitShopCamera();
-    const onResize = () => this.fitShopCamera();
-    this.scale.on('resize', onResize);
+
+    if (this.textures.exists('shop_bg')) {
+      const bg = this.add.image(512, 384, 'shop_bg');
+      bg.setDisplaySize(1024, 768);
+      bg.setAlpha(0.5);
+      bg.setDepth(-10);
+    }
+    this._onResize = () => this.fitShopCamera();
+    this.scale.on('resize', this._onResize);
 
     this.add.text(512, 40, 'THE SHOP', {
       fontSize: '36px',
@@ -190,7 +212,7 @@ export class ShopScene extends Phaser.Scene {
     }
 
     this.events.once('shutdown', () => {
-      this.scale.off('resize', onResize);
+      this.scale.off('resize', this._onResize);
       if (this._audioUnlockHandler && this.sound) {
         this.sound.off('unlocked', this._audioUnlockHandler);
         this._audioUnlockHandler = null;
@@ -223,6 +245,11 @@ export class ShopScene extends Phaser.Scene {
   }
 
   createUpgradeRow(upgrade, y) {
+    const iconKey = shopIconKey(upgrade.id);
+    if (iconKey && this.textures.exists(iconKey)) {
+      this.add.image(72, y + 14, iconKey).setDisplaySize(34, 34);
+    }
+
     const nameText = this.add.text(100, y, upgrade.name, {
       fontSize: '18px',
       color: '#cccccc',

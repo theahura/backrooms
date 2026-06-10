@@ -9,6 +9,8 @@ import {
   getEnemyDeathSound,
   getDistanceVolume,
   getEnemyFireSound,
+  getRiftCrackleVolume,
+  RIFT_HEAR_RANGE,
   ENEMY_SOUND_RANGE,
   ENEMY_SOUND_COOLDOWN_MIN,
   ENEMY_SOUND_COOLDOWN_MAX,
@@ -230,6 +232,22 @@ describe('enemy sound configs are accessible via public API', () => {
       const result = getEnemySoundEvent('idle', 'chase', type, 5000, 16);
       const config = getSoundConfig(result.soundKey);
       expect(config, `${result.soundKey} should resolve via getSoundConfig`).not.toBeNull();
+    }
+  });
+});
+
+describe('getRiftCrackleVolume', () => {
+  it('is loudest at the rift and silent beyond hearing range', () => {
+    expect(getRiftCrackleVolume(0)).toBeGreaterThan(0);
+    expect(getRiftCrackleVolume(RIFT_HEAR_RANGE)).toBe(0);
+    expect(getRiftCrackleVolume(RIFT_HEAR_RANGE * 3)).toBe(0);
+  });
+
+  it('rises monotonically as the player approaches', () => {
+    const distances = [RIFT_HEAR_RANGE * 0.9, RIFT_HEAR_RANGE * 0.6, RIFT_HEAR_RANGE * 0.3, 0];
+    const volumes = distances.map(d => getRiftCrackleVolume(d));
+    for (let i = 1; i < volumes.length; i++) {
+      expect(volumes[i]).toBeGreaterThan(volumes[i - 1]);
     }
   });
 });

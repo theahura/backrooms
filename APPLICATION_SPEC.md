@@ -43,12 +43,25 @@ Other details (from playtesting):
 - the player should be able to move around under a table while hidden
 - most rooms should NOT have light switches -- these should be extremely rare
 - enemies should be able to move between rooms
+- the rooms should be generated dynamically, as the player explores. A given set of rooms should be generated 2 rooms out. The best way to do this is with procedural generation
+  - these rooms should then remain static once they are generated, so the player really feels like there is consistency to the rooms they are exploring but also that the rooms themselves are changing from person to person
+- the shop should show a 2d pixel art of the shop, and show pixel art representations of the things being bought
+- There should only be one entrance to the backrooms from the furniture shop.
+  - Entering should feel like the user transitions to a new dimension. Right now it just looks like another room.
+  - As the player approaches the edge, there should be a strange crackling sound that gets louder, and only when the player goes through does the backroom appear. This is not a 'door' like the other doors, it should behave differently (e.g. no light leakage, it shows up on screen as a sizzling light in the wall edge)
+- The player should be able to turn off the flashlight to conserve battery, and it should automatically turn off when they are hiding
 
-Next things to build:
-- add more room types
-- add actual pixel art elements for things like tables, light switches, rewards, etc. instead of the current rectangle boxes
-  - use this opportunity to also give the backrooms each more flavor
-- add actual pixel art animations for the enemies and the main player character
+Feedback from me (DO NOT CHANGE):
+- I think the pixel art issue is currently the most urgent fix, please focus there first!
+
+- improve the pixel art representations of everything by using an AI generation tool, e.g. nano banana (API key in environment variable, see .env at repo root)
+- the rooms just feel totally uncoherent. It should feel _liminal_ in some way. Right now there is just think 'furniture' scattered around and thats it. Some of the rooms should feel like a furniture store, but others should feel like a library, and others should feel like a space ship, and others should feel like a forest. Each room should have a coherent, but different vibe. Some of those can be shared across rooms, but right now its too samey.
+- It is currently impossible to tell what is an enemy, what is a weapon, what is a pickup. All of these things need to be bigger, further cementing the idea that everything should be closer
+- the pixel art of the player character is totally wrong. It's a front facing view of a character instead of a top down view! Same is true of many of the enemies
+  - in general, i think the player character needs to be bigger on screen (cf also the room needs to be smaller). If the camera is closer to the player in smaller rooms it will emphasize a claustrophobic feeling
+  - most of the pixel art is not facing the right direction (e.g. the armoire is also front facing instead of top down)
+  - and it is all basically way too small. What kind of sprite is 18x18! that is so small the player cant really make it out at all
+  - I think the player character view should be top down -- we should see the top of the head, the shoulders, and the flashlight with arm stuck out. Similar for all the other sprites
 
 Known bugs:
-- NA
+- Flash light light goes through walls, especially at the edges

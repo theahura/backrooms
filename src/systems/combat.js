@@ -17,6 +17,17 @@ export const CORPSE_ALPHA = 0.6;
 export const CORPSE_ANGLE = 90;
 export const CORPSE_DEPTH = 5;
 
+export const HURT_BLINK_INTERVAL_MS = 150;
+
+// Render hint for the hurt player: a high-contrast blink that never drops the
+// sprite below clear visibility, so taking damage reads as a flash rather
+// than the player vanishing.
+export function getHurtFlash(cooldownRemaining) {
+  if (cooldownRemaining <= 0) return { alpha: 1, flash: false };
+  const flash = Math.floor(cooldownRemaining / HURT_BLINK_INTERVAL_MS) % 2 === 0;
+  return { alpha: flash ? 0.7 : 1, flash };
+}
+
 export function createCombatState(maxHp = PLAYER_MAX_HP) {
   return {
     hp: maxHp,
