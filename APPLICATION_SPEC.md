@@ -57,6 +57,7 @@ Feedback from me (DO NOT CHANGE):
   - and it is all basically way too small. What kind of sprite is 18x18! that is so small the player cant really make it out at all
   - I think the player character view should be top down -- we should see the top of the head, the shoulders, and the flashlight with arm stuck out. Similar for all the other sprites.
 - zombies and other enemies should not follow the player once they lose line of sight. That includes walls and hiding state.
+- gunfire should go over tables and desks and low furniture, should be blocked by armoires and other furniture
 
 Known bugs:
 - Hiding places, stairs, and doors will often spawn inside walls

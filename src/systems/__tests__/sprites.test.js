@@ -239,10 +239,5 @@ describe('sprites', () => {
       const key = getAnimKeyForState('spitter', 'attack');
       expect(ANIM_DEFS[key]).toBeDefined();
     });
-
-    it('returns idle animation for opening_door state', () => {
-      const key = getAnimKeyForState('crawler', 'opening_door');
-      expect(ANIM_DEFS[key]).toBeDefined();
-    });
   });
 });

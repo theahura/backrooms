@@ -27,7 +27,7 @@ import { createExplorationState, updateExploration, getWindowedMinimapData, getC
 import { generateCrackPoints } from '../systems/startroom.js';
 import { getLocation, getLocationLayout, getLocationExitPosition } from '../systems/locations.js';
 import { generateRoomLore } from '../systems/lore.js';
-import { buildRoomGraph, buildFullRoomGraph, bfsFromRoom, getNextDoorway, getClosedDoorOnPath, getRoomDistance, getDoorwayCenter, DOORWAY_SEEK_CHANCE, ROOM_TRANSITION_COOLDOWN, MAX_ROOM_DISTANCE, MAX_ROOM_ENEMIES } from '../systems/pathfinding.js';
+import { buildRoomGraph, getRoomDistance, getDoorwayCenter, DOORWAY_SEEK_CHANCE, ROOM_TRANSITION_COOLDOWN, MAX_ROOM_DISTANCE, MAX_ROOM_ENEMIES } from '../systems/pathfinding.js';
 import { createDangerState, updateDangerTime, shouldSpawnWave, advanceWave, getWaveComposition, getSpawnRoom } from '../systems/danger.js';
 import { SOUND_CONFIGS, getFootstepInterval, getAmbientSoundDelay, getEnemySoundEvent, getEnemyDeathSound, getEnemyFireSound, getDistanceVolume, getRiftCrackleVolume, ENEMY_SOUND_RANGE } from '../systems/audio.js';
 import { generateAllSounds, createAmbientDrone, playAmbientSound, createRiftCrackle } from '../systems/audioEngine.js';
@@ -169,7 +169,6 @@ export class GameScene extends Phaser.Scene {
     this.explorationState = createExplorationState();
 
     this.roomGraph = null;
-    this.fullRoomGraph = null;
     this.roomGraphDirty = true;
     this.gunshotAlertCooldown = 0;
 
@@ -1155,8 +1154,8 @@ export class GameScene extends Phaser.Scene {
         velocityY: 0,
         wanderTimer: 0,
         wanderAngle: Math.random() * Math.PI * 2,
-        lastKnownX: 0,
-        lastKnownY: 0,
+        lastKnownX: x,
+        lastKnownY: y,
         searchTimer: 0,
         attackCooldown: 0,
         health: stats.hp,
@@ -1165,8 +1164,6 @@ export class GameScene extends Phaser.Scene {
         currentRoomId: room.id,
         roomTransitionCooldown: 0,
         targetDoorway: null,
-        doorOpenTimer: 0,
-        targetDoorId: null,
         soundCooldown: 1000 + Math.random() * 3000,
       });
     }
@@ -1208,8 +1205,8 @@ export class GameScene extends Phaser.Scene {
         velocityY: 0,
         wanderTimer: 0,
         wanderAngle: spawn.wanderAngle,
-        lastKnownX: 0,
-        lastKnownY: 0,
+        lastKnownX: spawn.x,
+        lastKnownY: spawn.y,
         searchTimer: 0,
         attackCooldown: 0,
         health: stats.hp,
@@ -1218,8 +1215,6 @@ export class GameScene extends Phaser.Scene {
         currentRoomId: room.id,
         roomTransitionCooldown: 0,
         targetDoorway: null,
-        doorOpenTimer: 0,
-        targetDoorId: null,
         soundCooldown: 1000 + Math.random() * 3000,
       });
     }
@@ -1924,14 +1919,11 @@ export class GameScene extends Phaser.Scene {
 
     if (this.roomGraphDirty || !this.roomGraph) {
       this.roomGraph = buildRoomGraph(this.level.rooms, this.doorStates);
-      this.fullRoomGraph = buildFullRoomGraph(this.level.rooms, this.doorStates);
       this.roomGraphDirty = false;
     }
 
     const playerRoom = getCurrentRoom(playerPos.x, playerPos.y, this.level.rooms);
     const playerRoomId = playerRoom ? playerRoom.id : -1;
-    const cameFrom = bfsFromRoom(this.roomGraph, playerRoomId);
-    const cameFromFull = bfsFromRoom(this.fullRoomGraph, playerRoomId);
 
     const isInSafeRoom = litRoomIds.includes(playerRoomId);
     this.dangerState = updateDangerTime(this.dangerState, delta, isInSafeRoom);
@@ -1965,13 +1957,9 @@ export class GameScene extends Phaser.Scene {
       }
 
       const enemyRoomId = es.currentRoomId;
-      const isCrawler = es.type === 'crawler';
-      const doorway = isCrawler
-        ? getNextDoorway(this.fullRoomGraph, cameFromFull, enemyRoomId, playerRoomId)
-        : getNextDoorway(this.roomGraph, cameFrom, enemyRoomId, playerRoomId);
 
       let seekDoorway = false;
-      let wanderDoorway = doorway;
+      let wanderDoorway = null;
       if (es.roomTransitionCooldown <= 0 && es.state === 'idle') {
         const wanderRand = Math.random();
         if (wanderRand < DOORWAY_SEEK_CHANCE) {
@@ -1994,21 +1982,11 @@ export class GameScene extends Phaser.Scene {
         }
       }
 
-      const closedDoorOnPath = isCrawler
-        ? getClosedDoorOnPath(this.fullRoomGraph, cameFromFull, enemyRoomId, playerRoomId, this.doorStates, this.level.rooms)
-        : null;
-
       const navContext = {
-        enemyRoomId,
-        playerRoomId,
-        spawnRoomId: es.spawnRoomId,
         roomTransitionCooldown: es.roomTransitionCooldown,
         targetDoorway: es.targetDoorway,
-        doorway: seekDoorway ? wanderDoorway : doorway,
-        maxRoomDistance: MAX_ROOM_DISTANCE,
-        roomEnemyCounts,
+        doorway: wanderDoorway,
         seekDoorway,
-        closedDoorOnPath,
       };
 
       const chaseSpeed = this.getScaledChaseSpeed(es.type);
@@ -2035,16 +2013,6 @@ export class GameScene extends Phaser.Scene {
       es.attackCooldown = updated.attackCooldown;
       es.roomTransitionCooldown = updated.roomTransitionCooldown;
       es.targetDoorway = updated.targetDoorway;
-      es.doorOpenTimer = updated.doorOpenTimer;
-      es.targetDoorId = updated.targetDoorId;
-
-      if (updated.wantsToOpenDoor) {
-        const door = this.doorStates.find(d => d.id === updated.targetDoorId);
-        if (door && door.isClosed) {
-          this.onToggleDoor(updated.targetDoorId);
-        }
-        es.wantsToOpenDoor = false;
-      }
 
       if (updated.wantsToFire) {
         this.fireEnemyBullet(es.x, es.y, playerPos.x, playerPos.y);
