@@ -134,6 +134,11 @@ export const ART_MANIFEST = [
   { id: 'furniture_vent', prompt: sprite('A square metal floor air vent grate seen from directly straight above'), width: 60, height: 60, keys: ['furniture_vent'] },
   { id: 'furniture_couch', prompt: sprite('A couch sofa viewed from directly overhead: the top of the backrest along one long edge, two armrests at the ends, and worn seat cushions filling the middle'), width: 160, height: 100, keys: ['furniture_couch'] },
   { id: 'furniture_counter', prompt: sprite('The flat top surface of a long store checkout counter, only the countertop visible'), width: 200, height: 70, keys: ['furniture_counter'] },
+  { id: 'furniture_tree', prompt: sprite('The leafy round canopy of a tree seen from directly straight above, dense green foliage filling the frame'), width: 128, height: 128, keys: ['furniture_tree'] },
+  { id: 'furniture_rock', prompt: sprite('A large grey boulder rock seen from directly straight above'), width: 112, height: 96, keys: ['furniture_rock'] },
+  { id: 'furniture_bush', prompt: sprite('A low leafy green shrub bush seen from directly straight above'), width: 112, height: 88, keys: ['furniture_bush'] },
+  { id: 'furniture_console', prompt: sprite('A spaceship control console panel with glowing cyan screens and buttons seen from directly straight above'), width: 192, height: 80, keys: ['furniture_console'] },
+  { id: 'furniture_pod', prompt: sprite('A sci-fi cryo sleep pod with a glass canopy seen from directly straight above'), width: 112, height: 176, keys: ['furniture_pod'] },
 
   // Weapon pickups.
   { id: 'pickup_pistol', prompt: sprite('A handgun pistol weapon lying on the ground seen from directly straight above'), width: 28, height: 20, keys: ['pickup_pistol'] },

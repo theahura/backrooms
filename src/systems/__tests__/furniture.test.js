@@ -205,3 +205,74 @@ describe('liminal furnishing', () => {
   });
 
 });
+
+describe('vibe-driven furnishing', () => {
+  // Real shipped room dimensions (worldgen.js ROOM_WIDTH/ROOM_HEIGHT), so the
+  // tests track production rather than an oversized room.
+  const W = 720;
+  const H = 600;
+  const WALL = 16;
+
+  const forestProfile = {
+    clusters: [
+      [
+        { type: 'tree', dx: 0, dy: 0 },
+        { type: 'tree', dx: 90, dy: 0 },
+        { type: 'rock', dx: 0, dy: 80 },
+      ],
+    ],
+    singletons: ['tree', 'rock', 'bush'],
+  };
+
+  it('a custom profile only places furniture types from that profile', () => {
+    const allowed = new Set(['tree', 'rock', 'bush']);
+    for (const seed of [1, 7, 23, 88]) {
+      const furniture = generateRoomFurniture(0, 0, W, H, WALL, seed, forestProfile);
+      expect(furniture.length, `seed ${seed}`).toBeGreaterThan(0);
+      for (const item of furniture) {
+        expect(allowed.has(item.type), `seed ${seed} got ${item.type}`).toBe(true);
+      }
+    }
+  });
+
+  it('is deterministic with a profile', () => {
+    const a = generateRoomFurniture(0, 0, W, H, WALL, 55, forestProfile);
+    const b = generateRoomFurniture(0, 0, W, H, WALL, 55, forestProfile);
+    expect(a).toEqual(b);
+  });
+
+  it('falls back to the default generic profile when none is given', () => {
+    // The default mix still contains office/bedroom pieces, never forest ones.
+    const types = new Set();
+    for (let seed = 0; seed < 80; seed++) {
+      for (const item of generateRoomFurniture(0, 0, W, H, WALL, seed)) types.add(item.type);
+    }
+    expect(types.has('desk')).toBe(true);
+    expect(types.has('tree')).toBe(false);
+  });
+});
+
+describe('new vibe furniture types', () => {
+  it('forest types have correct light/hide properties', () => {
+    expect(FURNITURE_TYPES.tree.blocksLight).toBe(true);
+    expect(FURNITURE_TYPES.tree.canHide).toBe(false);
+    expect(FURNITURE_TYPES.rock.blocksLight).toBe(true);
+    expect(FURNITURE_TYPES.bush.canHide).toBe(true);
+    expect(FURNITURE_TYPES.bush.blocksLight).toBe(false);
+  });
+
+  it('spaceship types have correct light/hide properties', () => {
+    expect(FURNITURE_TYPES.console.blocksLight).toBe(true);
+    expect(FURNITURE_TYPES.console.canHide).toBe(false);
+    expect(FURNITURE_TYPES.pod.canHide).toBe(true);
+  });
+
+  it('every new type has full dimensions and a colour', () => {
+    for (const type of ['tree', 'rock', 'bush', 'console', 'pod']) {
+      const def = FURNITURE_TYPES[type];
+      expect(def.width, type).toBeGreaterThan(0);
+      expect(def.height, type).toBeGreaterThan(0);
+      expect(typeof def.color, type).toBe('number');
+    }
+  });
+});

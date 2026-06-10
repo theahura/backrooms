@@ -1,8 +1,8 @@
 import Phaser from 'phaser';
 import { calculateVelocity } from '../systems/movement.js';
 import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES } from '../systems/furniture.js';
-import { generateMazeWalls, getRoomType } from '../systems/maze.js';
-import { getRoomTheme } from '../systems/roomThemes.js';
+import { generateMazeWalls } from '../systems/maze.js';
+import { getRoomVibe } from '../systems/roomVibes.js';
 import { getFlashlightPolygon, filterSegmentsNear, FLASHLIGHT_RANGE } from '../systems/visibility.js';
 import { createRoomWalls } from '../systems/room.js';
 import { STAIR_SIZE } from '../systems/stairs.js';
@@ -298,7 +298,7 @@ export class GameScene extends Phaser.Scene {
     this.level.rooms.push(room);
     this.roomsById.set(room.id, room);
 
-    const theme = room.id === 0 ? this.activeLocationData : getRoomTheme(getRoomType(room.seed));
+    const theme = room.id === 0 ? this.activeLocationData : getRoomVibe(room.seed);
     this.roomThemes.set(room.id, theme);
 
     this.drawRoom(this.roomGfx, room, theme);
@@ -310,7 +310,7 @@ export class GameScene extends Phaser.Scene {
     const occluderDoors = room.doors.filter(d => !(room.floor === 0 && isRiftDoor(room, d)));
     this.wallSegments.push(...createRoomWalls(room.x, room.y, room.width, room.height, occluderDoors));
 
-    this.createRoomFurniture(this.furnitureGfx, room);
+    this.createRoomFurniture(this.furnitureGfx, room, theme);
     if (room.id !== 0) {
       this.createRoomMaze(this.roomGfx, room, theme);
     }
@@ -543,10 +543,10 @@ export class GameScene extends Phaser.Scene {
     addVerticalWall(room.x + WALL_THICKNESS / 2, room.y, room.height, westDoors, WALL_THICKNESS);
   }
 
-  createRoomFurniture(gfx, room) {
+  createRoomFurniture(gfx, room, vibe) {
     const furniture = room.id === 0
       ? getLocationLayout(this.activeLocation, room.x, room.y, room.width, room.height, WALL_THICKNESS)
-      : generateRoomFurniture(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed);
+      : generateRoomFurniture(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed, vibe.furniture);
     this.roomFurniture.set(room.id, furniture);
 
     for (const item of furniture) {

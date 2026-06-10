@@ -11,6 +11,13 @@ export const FURNITURE_TYPES = {
   vent: { width: 30, height: 30, color: 0x666666, canHide: true, blocksLight: false },
   couch: { width: 90, height: 40, color: 0x6a5a44, canHide: false, blocksLight: false },
   counter: { width: 100, height: 30, color: 0x7a6a50, canHide: false, blocksLight: true },
+  // Forest vibe: overgrowth that has crept into the backrooms.
+  tree: { width: 64, height: 64, color: 0x3a5a32, canHide: false, blocksLight: true },
+  rock: { width: 56, height: 48, color: 0x5a5a52, canHide: false, blocksLight: true },
+  bush: { width: 56, height: 44, color: 0x4a6a3a, canHide: true, blocksLight: false },
+  // Spaceship vibe: derelict control bay.
+  console: { width: 96, height: 40, color: 0x2a3a40, canHide: false, blocksLight: true },
+  pod: { width: 56, height: 88, color: 0x4a5a60, canHide: true, blocksLight: false },
 };
 
 // Furniture is placed as semantic clusters -- recognizable arrangements left
@@ -60,6 +67,12 @@ const CLUSTER_TEMPLATES = [
 ];
 
 const SINGLETON_TYPES = ['vent', 'armoire', 'closet', 'table'];
+
+// Used when no vibe-specific profile is supplied (e.g. the starting room is
+// furnished separately, and tests exercise the generic mix). roomVibes.js
+// supplies a per-vibe profile for the procedurally generated backrooms.
+const DEFAULT_PROFILE = { clusters: CLUSTER_TEMPLATES, singletons: SINGLETON_TYPES };
+
 const SINGLETON_COUNT = 3;
 const CLUSTER_PADDING = 16;
 const SPAWN_ZONE_PADDING = 20;
@@ -101,7 +114,8 @@ function makeItem(type, x, y) {
   return { type, x, y, width: def.width, height: def.height, color: def.color, canHide: def.canHide };
 }
 
-export function generateRoomFurniture(roomX, roomY, roomWidth, roomHeight, wallThickness, seed) {
+export function generateRoomFurniture(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, profile = DEFAULT_PROFILE) {
+  const { clusters, singletons } = profile;
   const rand = mulberry32(seed);
   const minX = roomX + wallThickness + WALL_MARGIN;
   const minY = roomY + wallThickness + WALL_MARGIN;
@@ -124,7 +138,7 @@ export function generateRoomFurniture(roomX, roomY, roomWidth, roomHeight, wallT
 
   const clusterBudget = target - SINGLETON_COUNT;
   for (let attempt = 0; attempt < 120 && placed.length < clusterBudget; attempt++) {
-    const template = CLUSTER_TEMPLATES[Math.floor(rand() * CLUSTER_TEMPLATES.length)];
+    const template = clusters[Math.floor(rand() * clusters.length)];
     const bounds = templateBounds(template);
 
     const availableW = maxX - minX - bounds.width;
@@ -141,7 +155,7 @@ export function generateRoomFurniture(roomX, roomY, roomWidth, roomHeight, wallT
   }
 
   for (let attempt = 0; attempt < 120 && placed.length < target; attempt++) {
-    const type = SINGLETON_TYPES[Math.floor(rand() * SINGLETON_TYPES.length)];
+    const type = singletons[Math.floor(rand() * singletons.length)];
     const def = FURNITURE_TYPES[type];
 
     const availableW = maxX - minX - def.width;
