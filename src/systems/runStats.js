@@ -22,13 +22,16 @@ export function formatTime(ms) {
 }
 
 export function getSummaryData(stats, survived, treasureValue, roomsExplored, totalRooms, hp, maxHp) {
-  const title = survived ? 'ESCAPED' : 'YOU DIED';
+  // The backrooms are explored of one's own volition, not escaped, and the
+  // world is unbounded -- so the summary shows only how many rooms the player
+  // explored, never a "X / total" ratio (the total is infinite).
+  const title = survived ? 'RETURNED' : 'YOU DIED';
   const titleColor = survived ? 0xffd700 : 0xcc0000;
   const accentColor = titleColor;
 
   const lines = [
     { label: 'Time', value: formatTime(stats.timeElapsed) },
-    { label: 'Rooms Explored', value: `${roomsExplored} / ${totalRooms}` },
+    { label: 'Rooms Explored', value: `${roomsExplored}` },
     { label: 'Enemies Killed', value: `${stats.enemiesKilled}` },
     { label: 'Deepest Floor', value: `B${stats.maxFloor + 1}` },
     { label: 'Treasure', value: `${treasureValue} gold` },

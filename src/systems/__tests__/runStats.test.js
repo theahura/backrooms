@@ -73,8 +73,15 @@ describe('runStats', () => {
 
     it('returns gold-themed data when the player survived', () => {
       const summary = getSummaryData(baseStats, true, 350, 6, 10, 75, 100);
-      expect(summary.title).toBe('ESCAPED');
+      expect(summary.title).toBe('RETURNED');
       expect(summary.titleColor).toBe(0xffd700);
+    });
+
+    it('reports explored rooms without a finite total (the world is unbounded)', () => {
+      const summary = getSummaryData(baseStats, true, 350, 6, 999, 75, 100);
+      const roomsLine = summary.lines.find(l => l.label === 'Rooms Explored');
+      expect(roomsLine.value).toBe('6');
+      expect(roomsLine.value).not.toContain('/');
     });
 
     it('returns red-themed data when the player died', () => {

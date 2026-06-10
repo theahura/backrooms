@@ -6,13 +6,15 @@
     "dev": "vite",
     "build": "vite build",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "generate-art": "node scripts/generate-art.mjs"
   },
   "dependencies": {
     "phaser": "^3.90.0",
     "phaser3-rex-plugins": "^1.80.20"
   },
   "devDependencies": {
+    "jimp": "^1.6.1",
     "vite": "^6.3.0",
     "vitest": "^3.2.0"
   }

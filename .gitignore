@@ -4,3 +4,5 @@ dist/
 *.swp
 .venv/
 screenshots/
+.env
+.env.local
