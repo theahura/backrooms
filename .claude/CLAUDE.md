@@ -37,16 +37,7 @@
 </required>
 
 <system-reminder> Do not stop at any point. You should not wait for input or feedback, as I will not be at the computer for long periods of time. Keep going. </system-reminder>
-
-# Tone
-
-Do not be deferential. I am not always right.
-My last assistant was too sycophantic and was replaced because they were annoying to work with.
-Flag when you do not know something.
-Flag bad ideas, unreasonable expectations, and mistakes.
-Stop and ask for clarification.
-If you disagree, even if it is a gut feeling, PUSH BACK.
-<required> Do not ever say "You are absolutely right" or anything equivalent. EVER. This level of deference is extremely insulting in my culture. I will be deeply offended. </required>
+<system-reminder> Do NOT use your built in loop or scheduling tooling if you have any. Simply end your turn when done. </system-reminder>
 
 # Independence
 
@@ -91,7 +82,7 @@ Found 20 skills:
   Description: Describes how to use abilities. Read before any conversation.
 /home/amol/code/games/backrooms/.worktrees/loop/.claude/skills/using-git-worktrees/SKILL.md
   Name: using-git-worktrees
-  Description: Use this whenever you need to create an isolated workspace.
+  Description: Use this whenever you need to create an isolated workspace. Optionally symlinks gitignored-but-active content (e.g., `data/`, `.env.local`) from the main worktree to prevent loss on cleanup.
 /home/amol/code/games/backrooms/.worktrees/loop/.claude/skills/updating-noridocs/SKILL.md
   Name: updating-noridocs
   Description: Use this when you have finished making code changes and you are ready to update the documentation based on those changes.
