@@ -102,6 +102,20 @@ export function filterSegmentsNear(origin, range, segments) {
   });
 }
 
+// Same bounding-box-vs-range prefilter as filterSegmentsNear, for the {x,y,
+// width,height} rects that interior walls are expanded from each frame.
+export function filterRectsNear(origin, range, rects) {
+  return rects.filter(rect => {
+    const minX = rect.x;
+    const maxX = rect.x + rect.width;
+    const minY = rect.y;
+    const maxY = rect.y + rect.height;
+    const dx = Math.max(minX - origin.x, 0, origin.x - maxX);
+    const dy = Math.max(minY - origin.y, 0, origin.y - maxY);
+    return dx * dx + dy * dy <= range * range;
+  });
+}
+
 export function getFlashlightPolygon(origin, angle, coneAngle, segments, maxRange = Infinity) {
   const rayAngles = [angle - coneAngle, angle + coneAngle];
 

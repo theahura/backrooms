@@ -104,6 +104,27 @@ export function wallRectSegments(rect) {
   ];
 }
 
+// The subset of a wall rect's outline that should occlude the FLASHLIGHT given a
+// light origin outside it: only the edges facing AWAY from the light (the far
+// faces, where the light lies on the edge's interior side). Skipping the near
+// faces lets the flashlight reach across the wall band to light its near
+// surface -- so the wall reads as a solid band of thickness instead of an
+// infinitely-thin shadow line -- while the far faces still stop the light, so
+// nothing leaks to the floor on the other side. (Enemy line-of-sight keeps the
+// full wallRectSegments outline; only rendering uses this culled set.)
+export function wallRectOccluders(rect, origin) {
+  const left = rect.x;
+  const right = rect.x + rect.width;
+  const top = rect.y;
+  const bottom = rect.y + rect.height;
+  const segments = [];
+  if (origin.y >= top) segments.push({ x1: left, y1: top, x2: right, y2: top });
+  if (origin.y <= bottom) segments.push({ x1: left, y1: bottom, x2: right, y2: bottom });
+  if (origin.x >= left) segments.push({ x1: left, y1: top, x2: left, y2: bottom });
+  if (origin.x <= right) segments.push({ x1: right, y1: top, x2: right, y2: bottom });
+  return segments;
+}
+
 function rectOverlapsZone(rect, zones) {
   for (const zone of zones) {
     if (rect.x < zone.x + zone.width && rect.x + rect.width > zone.x &&

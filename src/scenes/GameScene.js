@@ -1,9 +1,9 @@
 import Phaser from 'phaser';
 import { calculateVelocity } from '../systems/movement.js';
 import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES, blocksBullets } from '../systems/furniture.js';
-import { generateMazeWalls, wallRectSegments, doorEntryZones } from '../systems/maze.js';
+import { generateMazeWalls, wallRectSegments, wallRectOccluders, doorEntryZones } from '../systems/maze.js';
 import { getRoomVibe } from '../systems/roomVibes.js';
-import { getFlashlightPolygon, filterSegmentsNear, FLASHLIGHT_RANGE } from '../systems/visibility.js';
+import { getFlashlightPolygon, filterSegmentsNear, filterRectsNear, FLASHLIGHT_RANGE } from '../systems/visibility.js';
 import { createRoomWalls } from '../systems/room.js';
 import { STAIR_SIZE, STAIR_MARGIN, getStairTopLeft, stairKeepOut, getStairLandingPosition, stairLandingKeepOut } from '../systems/stairs.js';
 import { getRoomAt, roomsWithinRadius, hasStairDown, localDistance, isRiftDoor, ROOM_WIDTH, ROOM_HEIGHT } from '../systems/worldgen.js';
@@ -155,6 +155,10 @@ export class GameScene extends Phaser.Scene {
     this.walls = this.physics.add.staticGroup();
     this.furnitureGroup = this.physics.add.staticGroup();
     this.wallSegments = [];
+    // Interior maze walls are kept as solid rects (not pre-expanded segments) so
+    // the flashlight can light their near face (visible thickness) via back-face
+    // culling, while enemy line-of-sight still expands them to full outlines.
+    this.mazeWallRects = [];
 
     this.roomFurniture = new Map();
     this.combatState = createCombatState(this.maxHp);
@@ -598,7 +602,7 @@ export class GameScene extends Phaser.Scene {
 
   renderRoomMaze(gfx, mazeRects, theme) {
     for (const rect of mazeRects) {
-      this.wallSegments.push(...wallRectSegments(rect));
+      this.mazeWallRects.push(rect);
       this.walls.add(this.add.zone(rect.x + rect.width / 2, rect.y + rect.height / 2, rect.width, rect.height));
       gfx.fillStyle(theme.wallColor, 1);
       gfx.fillRect(rect.x, rect.y, rect.width, rect.height);
@@ -1837,8 +1841,13 @@ export class GameScene extends Phaser.Scene {
   updateEnemies(delta) {
     const playerPos = { x: this.player.x, y: this.player.y };
     // Enemy line-of-sight only matters within DETECTION_RANGE of the player,
-    // so prefilter the (ever-growing) occluder set once per frame.
-    const losSegments = filterSegmentsNear(playerPos, DETECTION_RANGE + 60, this.wallSegments);
+    // so prefilter the (ever-growing) occluder set once per frame. Maze walls
+    // block sight from BOTH sides, so LOS expands them to their full outlines
+    // (unlike the flashlight, which only uses their far faces).
+    const losSegments = [
+      ...filterSegmentsNear(playerPos, DETECTION_RANGE + 60, this.wallSegments),
+      ...filterRectsNear(playerPos, DETECTION_RANGE + 60, this.mazeWallRects).flatMap(wallRectSegments),
+    ];
     const litRoomIds = getLitRoomIds(this.switchStates);
     if (!litRoomIds.includes(0)) litRoomIds.push(0);
     const litRooms = litRoomIds.map(id => this.level.rooms.find(r => r.id === id)).filter(Boolean);
@@ -2491,11 +2500,18 @@ export class GameScene extends Phaser.Scene {
     if (coneAngle <= 0 || shouldFlicker(this.batteryState, time)) return;
 
     const origin = { x: this.player.x, y: this.player.y };
+    // Maze walls only contribute their far faces (back-face culling), so the
+    // cone reaches across each wall band to light its near face -- walls read
+    // as solid bands of thickness instead of infinitely-thin shadow lines.
+    const occluders = [
+      ...filterSegmentsNear(origin, FLASHLIGHT_RANGE, this.wallSegments),
+      ...filterRectsNear(origin, FLASHLIGHT_RANGE, this.mazeWallRects).flatMap(r => wallRectOccluders(r, origin)),
+    ];
     const polygon = getFlashlightPolygon(
       origin,
       this.playerAngle || 0,
       coneAngle,
-      filterSegmentsNear(origin, FLASHLIGHT_RANGE, this.wallSegments),
+      occluders,
       FLASHLIGHT_RANGE
     );
 

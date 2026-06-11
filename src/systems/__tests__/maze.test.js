@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { getRoomType, generateMazeWalls, generateColumns, doorEntryZones } from '../maze.js';
+import { getRoomType, generateMazeWalls, generateColumns, doorEntryZones, wallRectOccluders } from '../maze.js';
+import { raySegmentIntersection } from '../visibility.js';
 
 const ALL_TYPES = ['open', 'maze', 'columns', 'corridor', 'storage', 'cubicles'];
 
@@ -524,3 +525,86 @@ function assertNoDoorZoneOverlap(rects, testDoors, roomX, roomY, roomWidth, room
     }
   }
 }
+
+// Classify a returned occluder segment as one of the four edges of `rect`, so
+// tests can assert WHICH faces occlude without depending on endpoint ordering.
+function edgeKind(seg, rect) {
+  const left = rect.x;
+  const right = rect.x + rect.width;
+  const top = rect.y;
+  const bottom = rect.y + rect.height;
+  const horizontal = seg.y1 === seg.y2;
+  const vertical = seg.x1 === seg.x2;
+  if (horizontal && seg.y1 === top) return 'top';
+  if (horizontal && seg.y1 === bottom) return 'bottom';
+  if (vertical && seg.x1 === left) return 'left';
+  if (vertical && seg.x1 === right) return 'right';
+  return 'other';
+}
+
+function closestHit(origin, dx, dy, segments) {
+  const ray = { x: origin.x, y: origin.y, dx, dy };
+  let closest = null;
+  for (const seg of segments) {
+    const hit = raySegmentIntersection(ray, seg);
+    if (hit && (closest === null || hit.t < closest.t)) closest = hit;
+  }
+  return closest;
+}
+
+describe('wallRectOccluders (back-facing edges so a wall lights its near face)', () => {
+  const rect = { x: 100, y: 100, width: 60, height: 16 }; // left100 right160 top100 bottom116
+
+  it('a light below the wall occludes with the far (top) face and the sides, never the near (bottom) face', () => {
+    const kinds = new Set(wallRectOccluders(rect, { x: 130, y: 300 }).map(s => edgeKind(s, rect)));
+    expect(kinds).toEqual(new Set(['top', 'left', 'right']));
+  });
+
+  it('a light above the wall occludes with the far (bottom) face, never the near (top) face', () => {
+    const kinds = new Set(wallRectOccluders(rect, { x: 130, y: -50 }).map(s => edgeKind(s, rect)));
+    expect(kinds).toEqual(new Set(['bottom', 'left', 'right']));
+  });
+
+  it('a light left of the wall occludes with the far (right) face, never the near (left) face', () => {
+    const kinds = new Set(wallRectOccluders(rect, { x: 20, y: 108 }).map(s => edgeKind(s, rect)));
+    expect(kinds).toEqual(new Set(['top', 'bottom', 'right']));
+  });
+
+  it('a light right of the wall occludes with the far (left) face, never the near (right) face', () => {
+    const kinds = new Set(wallRectOccluders(rect, { x: 400, y: 108 }).map(s => edgeKind(s, rect)));
+    expect(kinds).toEqual(new Set(['top', 'bottom', 'left']));
+  });
+
+  it('a diagonal light occludes with exactly the two far faces', () => {
+    // below-left of the rect: near faces are bottom and left, so only the two
+    // far faces (top, right) remain.
+    const kinds = new Set(wallRectOccluders(rect, { x: 20, y: 300 }).map(s => edgeKind(s, rect)));
+    expect(kinds).toEqual(new Set(['top', 'right']));
+  });
+
+  it('only ever returns real edges of the rectangle', () => {
+    for (const origin of [{ x: 130, y: 300 }, { x: 20, y: 108 }, { x: 400, y: -50 }]) {
+      for (const seg of wallRectOccluders(rect, origin)) {
+        expect(edgeKind(seg, rect)).not.toBe('other');
+      }
+    }
+  });
+
+  it('lets the light reach across the wall band to the far face (near band lit) and stops it there (no leak)', () => {
+    // For a light on each side, a ray fired straight through the wall must pass
+    // the near face (so the near band is inside the lit region) and be stopped
+    // at the far face (so no light reaches the floor on the other side).
+    const cases = [
+      { origin: { x: 130, y: 300 }, dx: 0, dy: -1, nearDist: 300 - 116, farDist: 300 - 100 }, // below, aim up
+      { origin: { x: 130, y: -200 }, dx: 0, dy: 1, nearDist: 100 - (-200), farDist: 116 - (-200) }, // above, aim down
+      { origin: { x: -100, y: 108 }, dx: 1, dy: 0, nearDist: 100 - (-100), farDist: 160 - (-100) }, // left, aim right
+      { origin: { x: 400, y: 108 }, dx: -1, dy: 0, nearDist: 400 - 160, farDist: 400 - 100 }, // right, aim left
+    ];
+    for (const c of cases) {
+      const hit = closestHit(c.origin, c.dx, c.dy, wallRectOccluders(rect, c.origin));
+      expect(hit, `ray from ${JSON.stringify(c.origin)} should be stopped by the far face`).not.toBeNull();
+      expect(hit.t).toBeGreaterThan(c.nearDist + 1); // passed the near face -> near band is lit
+      expect(hit.t).toBeCloseTo(c.farDist, 5); // stopped exactly at the far face -> no leak through
+    }
+  });
+});

@@ -61,3 +61,5 @@ Feedback from me (DO NOT CHANGE):
 Known bugs:
 - Hiding places, stairs, and doors will often spawn inside walls
 - Some of the walls do not look like they have any width sometimes (just infinitely thin infinitely tall black walls). All walls should have 'thickness'
+- Getting shot makes the player character disappear
+- many of the sprite hitboxes for furniture do not match visually where they are

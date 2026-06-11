@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { raySegmentIntersection, getVisibilityPolygon, getFlashlightPolygon, filterSegmentsNear } from '../visibility.js';
-import { wallRectSegments } from '../maze.js';
+import { raySegmentIntersection, getVisibilityPolygon, getFlashlightPolygon, filterSegmentsNear, filterRectsNear } from '../visibility.js';
+import { wallRectSegments, wallRectOccluders, generateMazeWalls, getRoomType } from '../maze.js';
 import { createRoomWalls } from '../room.js';
 import { getRoomAt, isRiftDoor } from '../worldgen.js';
 
@@ -346,3 +346,143 @@ describe('thick wall rects (light cannot leak through wall bands)', () => {
     assertNoLightBeyondWalls(polygon, origin, segments, 300);
   });
 });
+
+describe('filterRectsNear', () => {
+  const origin = { x: 0, y: 0 };
+
+  it('keeps a rect whose nearest edge is within range', () => {
+    const near = { x: 50, y: 0, width: 20, height: 20 };
+    const far = { x: 500, y: 500, width: 20, height: 20 };
+    const kept = filterRectsNear(origin, 100, [near, far]);
+    expect(kept).toContain(near);
+    expect(kept).not.toContain(far);
+  });
+
+  it('keeps a rect that straddles the range boundary and drops one clearly beyond it', () => {
+    const straddling = { x: 90, y: -10, width: 40, height: 20 }; // nearest x=90 < 100
+    const beyond = { x: 200, y: 0, width: 10, height: 10 }; // nearest x=200 > 100
+    const kept = filterRectsNear(origin, 100, [straddling, beyond]);
+    expect(kept).toContain(straddling);
+    expect(kept).not.toContain(beyond);
+  });
+});
+
+describe('back-face wall occluders light the near band without leaking', () => {
+  function pointInPolygon(point, polygon) {
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const a = polygon[i];
+      const b = polygon[j];
+      const intersects =
+        (a.y > point.y) !== (b.y > point.y) &&
+        point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x;
+      if (intersects) inside = !inside;
+    }
+    return inside;
+  }
+
+  it('lights a point inside the near band of a wall the player is facing', () => {
+    // Light below a horizontal band, aiming up at it. A point just inside the
+    // band's near (bottom) face must fall inside the lit flashlight polygon --
+    // i.e. the wall now shows thickness instead of a flat near-face shadow.
+    const band = { x: 100, y: 100, width: 200, height: 16 }; // top100 bottom116
+    const origin = { x: 200, y: 320 };
+    const occluders = wallRectOccluders(band, origin);
+    const polygon = getFlashlightPolygon(origin, -Math.PI / 2, Math.PI / 3, occluders, 600);
+
+    const nearBandPoint = { x: 200, y: 114 }; // 2px inside the near (bottom) face
+    expect(pointInPolygon(nearBandPoint, polygon)).toBe(true);
+  });
+
+  it('does not let light leak onto the floor beyond a wall the player faces', () => {
+    const band = { x: 100, y: 100, width: 200, height: 16 };
+    const origin = { x: 200, y: 320 };
+    const occluders = wallRectOccluders(band, origin);
+    const polygon = getFlashlightPolygon(origin, -Math.PI / 2, Math.PI / 3, occluders, 600);
+
+    // No lit vertex may sit above the band's far (top) face within its x-span:
+    // that floor is on the other side of the wall.
+    for (const p of polygon) {
+      if (p.x > band.x + 1 && p.x < band.x + band.width - 1) {
+        expect(p.y, `vertex (${p.x.toFixed(1)},${p.y.toFixed(1)}) leaked past the wall`).toBeGreaterThanOrEqual(band.y - 0.5);
+      }
+    }
+    // Sample actual floor points behind the wall (not just polygon vertices):
+    // every point above the far face within the band's x-span must stay dark.
+    for (let x = band.x + 10; x < band.x + band.width - 10; x += 20) {
+      for (const y of [band.y - 10, band.y - 60, band.y - 120]) {
+        expect(pointInPolygon({ x, y }, polygon), `floor point (${x},${y}) behind the wall is lit`).toBe(false);
+      }
+    }
+  });
+
+  it('blocks every through-ray that the solid walls block, across real maze rooms', () => {
+    // Composition invariant over real generated rooms: for a dense fan of rays
+    // from the room centre, any ray the SOLID wall outlines stop must also be
+    // stopped by the back-face occluders (no floor leak past a wall), and the
+    // back-face hit is never nearer than the solid hit (light reaches at least
+    // the near face). Some rays travel strictly farther -- that is the lit
+    // near band the fix introduces.
+    const ROOM = { x: 0, y: 0, width: 720, height: 600, thickness: 16 };
+    const center = { x: ROOM.x + ROOM.width / 2, y: ROOM.y + ROOM.height / 2 };
+    const doors = [{ wall: 'east', offset: 280, width: 80, targetRoomId: 1 }];
+
+    let roomsSeen = 0;
+    let sawLitBand = false;
+    for (let seed = 0; seed < 120; seed++) {
+      const type = getRoomType(seed);
+      if (type !== 'maze' && type !== 'corridor' && type !== 'cubicles' && type !== 'storage') continue;
+      const rects = generateMazeWalls(ROOM.x, ROOM.y, ROOM.width, ROOM.height, ROOM.thickness, seed, doors);
+      if (rects.length === 0) continue;
+      roomsSeen++;
+
+      // The full outline in the SAME edge orientation the occluders use, so the
+      // culled set is an exact coordinate subset of it -- otherwise a ray that
+      // exactly grazes a shared rect corner can round its t just outside [0,1]
+      // for one endpoint ordering and inside for the other, a float artifact
+      // (not a leak) that would make this comparison fragile.
+      const fullSegments = rects.flatMap(rectEdges);
+      const culledSegments = rects.flatMap(r => wallRectOccluders(r, center));
+
+      for (let k = 0; k < 360; k++) {
+        const angle = (k / 360) * Math.PI * 2;
+        const dx = Math.cos(angle);
+        const dy = Math.sin(angle);
+        const full = closestRayHit(center, dx, dy, fullSegments);
+        if (!full) continue; // ray sees no wall; nothing to block
+        const culled = closestRayHit(center, dx, dy, culledSegments);
+        expect(culled, `seed ${seed} angle ${k}: a solid-blocked ray escaped the back-face occluders`).not.toBeNull();
+        expect(culled.t).toBeGreaterThanOrEqual(full.t - 1e-6);
+        if (culled.t > full.t + 1) sawLitBand = true;
+      }
+    }
+
+    expect(roomsSeen).toBeGreaterThan(0);
+    expect(sawLitBand, 'no wall ever lit its near band across the sweep').toBe(true);
+  });
+});
+
+function closestRayHit(origin, dx, dy, segments) {
+  const ray = { x: origin.x, y: origin.y, dx, dy };
+  let closest = null;
+  for (const seg of segments) {
+    const hit = raySegmentIntersection(ray, seg);
+    if (hit && (closest === null || hit.t < closest.t)) closest = hit;
+  }
+  return closest;
+}
+
+// The four edges of a rect in the same endpoint orientation wallRectOccluders
+// emits, so a culled edge is coordinate-identical to its full counterpart.
+function rectEdges(rect) {
+  const left = rect.x;
+  const right = rect.x + rect.width;
+  const top = rect.y;
+  const bottom = rect.y + rect.height;
+  return [
+    { x1: left, y1: top, x2: right, y2: top },
+    { x1: left, y1: bottom, x2: right, y2: bottom },
+    { x1: left, y1: top, x2: left, y2: bottom },
+    { x1: right, y1: top, x2: right, y2: bottom },
+  ];
+}
