@@ -145,10 +145,6 @@ export const ART_MANIFEST = [
   { id: 'pickup_shotgun', prompt: sprite('A pump shotgun weapon lying on the ground seen from directly straight above'), width: 32, height: 20, keys: ['pickup_shotgun'] },
   { id: 'pickup_rifle', prompt: sprite('A rifle weapon lying on the ground seen from directly straight above'), width: 32, height: 20, keys: ['pickup_rifle'] },
 
-  // Traps.
-  { id: 'trap_spike', prompt: sprite('A row of sharp metal floor spikes trap seen from directly straight above'), width: 28, height: 16, keys: ['trap_spike'] },
-  { id: 'trap_noise', prompt: sprite('A metal alarm bell noise trap device on the floor seen from directly straight above'), width: 32, height: 16, keys: ['trap_noise'] },
-
   // Misc world objects.
   { id: 'lore_note', prompt: sprite('An old worn yellowed paper note with faint handwriting seen from directly straight above'), width: 24, height: 20, keys: ['lore_note'] },
   { id: 'switch_off', prompt: sprite('A wall mounted light switch toggled to the OFF position, dark'), width: 20, height: 28, keys: ['switch_off'] },

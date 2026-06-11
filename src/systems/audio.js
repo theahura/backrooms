@@ -294,22 +294,6 @@ export const SOUND_CONFIGS = {
     Q: 3,
     decay: 0.03,
   },
-  spike_trap: {
-    duration: 0.15,
-    gain: 0.45,
-    type: 'noise_burst',
-    freq: 3500,
-    Q: 4,
-    decay: 0.06,
-  },
-  noise_trap_alarm: {
-    duration: 0.6,
-    gain: 0.5,
-    type: 'sweep_down',
-    startFreq: 1200,
-    endFreq: 200,
-    oscType: 'sawtooth',
-  },
   footstep: {
     duration: 0.06,
     gain: 0.15,
