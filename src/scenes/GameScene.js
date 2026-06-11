@@ -5,7 +5,7 @@ import { generateMazeWalls, wallRectSegments, doorEntryZones } from '../systems/
 import { getRoomVibe } from '../systems/roomVibes.js';
 import { getFlashlightPolygon, filterSegmentsNear, FLASHLIGHT_RANGE } from '../systems/visibility.js';
 import { createRoomWalls } from '../systems/room.js';
-import { STAIR_SIZE, STAIR_MARGIN, getStairTopLeft, stairKeepOut } from '../systems/stairs.js';
+import { STAIR_SIZE, STAIR_MARGIN, getStairTopLeft, stairKeepOut, getStairLandingPosition, stairLandingKeepOut } from '../systems/stairs.js';
 import { getRoomAt, roomsWithinRadius, hasStairDown, localDistance, isRiftDoor, ROOM_WIDTH, ROOM_HEIGHT } from '../systems/worldgen.js';
 import { mulberry32 } from '../systems/random.js';
 import { generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_CHASE, CRAWLER_CHASE_SPEED, SPITTER_CHASE_SPEED, DETECTION_RANGE } from '../systems/enemy.js';
@@ -315,15 +315,19 @@ export class GameScene extends Phaser.Scene {
     this.wallSegments.push(...createRoomWalls(room.x, room.y, room.width, room.height, occluderDoors));
 
     // Generate the internal maze walls FIRST so furniture (placed next) and the
-    // stair can be kept clear of them. The stair sits at the room center, so in
-    // rooms that have one the maze carves a keep-out square around it.
-    const stairKeep = this.roomStairDirection(room)
+    // stair can be kept clear of them. A room with a stair carves a keep-out
+    // square around both the centered stair AND the spot below it where the
+    // player materializes after a stair transition (see getStairLandingPosition)
+    // -- otherwise a wall or furniture piece can spawn on the landing.
+    const hasStair = this.roomStairDirection(room);
+    const stairKeep = hasStair
       ? [stairKeepOut(room, STAIR_SIZE, STAIR_MARGIN, STAIR_KEEPOUT_PAD)]
       : [];
+    const landingKeep = hasStair ? [stairLandingKeepOut(room)] : [];
     const mazeRects = room.id !== 0
-      ? generateMazeWalls(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed, room.doors, stairKeep)
+      ? generateMazeWalls(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed, room.doors, [...stairKeep, ...landingKeep])
       : [];
-    const furnitureObstacles = [...mazeRects, ...doorEntryZones(room, WALL_THICKNESS)];
+    const furnitureObstacles = [...mazeRects, ...doorEntryZones(room, WALL_THICKNESS), ...landingKeep];
 
     this.createRoomFurniture(this.furnitureGfx, room, theme, furnitureObstacles);
     if (room.id !== 0) {
@@ -1696,10 +1700,10 @@ export class GameScene extends Phaser.Scene {
 
       // Land the player below the destination room's centered stair, not on
       // top of it -- otherwise the overlap re-fires the instant isTeleporting
-      // clears and the player bounces between floors forever.
+      // clears and the player bounces between floors forever. activateRoom keeps
+      // this spot clear of walls/furniture via stairLandingKeepOut.
       const destRoom = this.roomsById.get(this.idForCell(destFloor, destGx, destGy));
-      const destX = destRoom.x + destRoom.width / 2;
-      const destY = destRoom.y + destRoom.height / 2 + STAIR_SIZE + 80;
+      const { x: destX, y: destY } = getStairLandingPosition(destRoom);
 
       player.body.reset(destX, destY);
       player.body.enable = true;

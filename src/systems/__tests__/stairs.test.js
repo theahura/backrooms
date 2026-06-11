@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { generateMultiFloorLevel, getFloorBounds, getFloorRoomCounts, FLOOR_Y_OFFSET, STAIR_SIZE, STAIR_MARGIN, getStairTopLeft, stairKeepOut } from '../stairs.js';
+import { generateMultiFloorLevel, getFloorBounds, getFloorRoomCounts, FLOOR_Y_OFFSET, STAIR_SIZE, STAIR_MARGIN, getStairTopLeft, stairKeepOut, getStairLandingPosition, stairLandingKeepOut } from '../stairs.js';
+import { generateMazeWalls } from '../maze.js';
+import { generateRoomFurniture } from '../furniture.js';
 
 describe('getFloorRoomCounts', () => {
   it('returns [4, 3] for run 0', () => {
@@ -312,5 +314,102 @@ describe('stairKeepOut', () => {
     expect(padded.y).toBe(zero.y - pad);
     expect(padded.width).toBe(zero.width + 2 * pad);
     expect(padded.height).toBe(zero.height + 2 * pad);
+  });
+});
+
+describe('getStairLandingPosition', () => {
+  it('is horizontally centered in the room', () => {
+    const room = { x: 1000, y: 2000, width: 720, height: 600 };
+    expect(getStairLandingPosition(room).x).toBe(room.x + room.width / 2);
+  });
+
+  it('lands below the room center by STAIR_SIZE + 80', () => {
+    const room = { x: 1000, y: 2000, width: 720, height: 600 };
+    expect(getStairLandingPosition(room).y).toBe(room.y + room.height / 2 + STAIR_SIZE + 80);
+  });
+
+  it('lands below the stair square so re-entry does not re-fire the overlap', () => {
+    const room = { x: 0, y: 0, width: 720, height: 600 };
+    const stair = getStairTopLeft(room);
+    expect(getStairLandingPosition(room).y).toBeGreaterThan(stair.y + STAIR_SIZE);
+  });
+
+  it('lands inside the room bounds', () => {
+    const room = { x: 0, y: 0, width: 720, height: 600 };
+    const { x, y } = getStairLandingPosition(room);
+    expect(x).toBeGreaterThan(room.x);
+    expect(x).toBeLessThan(room.x + room.width);
+    expect(y).toBeGreaterThan(room.y);
+    expect(y).toBeLessThan(room.y + room.height);
+  });
+});
+
+describe('stairLandingKeepOut', () => {
+  const room = { x: 1000, y: 2000, width: 720, height: 600 };
+
+  it('is a square centered on the landing position, defaulting to STAIR_SIZE', () => {
+    const landing = getStairLandingPosition(room);
+    expect(stairLandingKeepOut(room)).toEqual({
+      x: landing.x - STAIR_SIZE / 2,
+      y: landing.y - STAIR_SIZE / 2,
+      width: STAIR_SIZE,
+      height: STAIR_SIZE,
+    });
+  });
+
+  it('honors a custom size while staying centered on the landing', () => {
+    const landing = getStairLandingPosition(room);
+    const big = stairLandingKeepOut(room, 120);
+    expect(big.width).toBe(120);
+    expect(big.height).toBe(120);
+    expect(big.x + big.width / 2).toBe(landing.x);
+    expect(big.y + big.height / 2).toBe(landing.y);
+  });
+});
+
+describe('stair landing keep-out clears the spot the player materializes on', () => {
+  const room = { x: 0, y: 0, width: 720, height: 600 };
+  const doors = [{ wall: 'east', offset: 400, width: 80, targetRoomId: 1 }];
+  const WALL_THICKNESS = 16;
+  const STAIR_PAD = 16;
+  const overlaps = (a, b) =>
+    a.x < b.x + b.width && a.x + a.width > b.x &&
+    a.y < b.y + b.height && a.y + a.height > b.y;
+
+  it('without the landing keep-out, some seeds drop a wall AND some drop furniture on the landing', () => {
+    const keep = stairLandingKeepOut(room);
+    let wallBlocked = 0;
+    let furnitureBlocked = 0;
+    for (let seed = 0; seed < 200; seed++) {
+      const walls = generateMazeWalls(
+        room.x, room.y, room.width, room.height, WALL_THICKNESS, seed, doors,
+        [stairKeepOut(room, STAIR_SIZE, STAIR_MARGIN, STAIR_PAD)],
+      );
+      const furniture = generateRoomFurniture(
+        room.x, room.y, room.width, room.height, WALL_THICKNESS, seed, undefined, walls,
+      );
+      if (walls.some(w => overlaps(w, keep))) wallBlocked++;
+      if (furniture.some(f => overlaps(f, keep))) furnitureBlocked++;
+    }
+    expect(wallBlocked).toBeGreaterThan(0);
+    expect(furnitureBlocked).toBeGreaterThan(0);
+  });
+
+  it('with the landing keep-out, no seed drops a wall or furniture on the landing', () => {
+    const keep = stairLandingKeepOut(room);
+    let wallsSeen = 0;
+    for (let seed = 0; seed < 200; seed++) {
+      const walls = generateMazeWalls(
+        room.x, room.y, room.width, room.height, WALL_THICKNESS, seed, doors,
+        [stairKeepOut(room, STAIR_SIZE, STAIR_MARGIN, STAIR_PAD), keep],
+      );
+      wallsSeen += walls.length;
+      const furniture = generateRoomFurniture(
+        room.x, room.y, room.width, room.height, WALL_THICKNESS, seed, undefined, [...walls, keep],
+      );
+      for (const w of walls) expect(overlaps(w, keep), `wall, seed ${seed}`).toBe(false);
+      for (const f of furniture) expect(overlaps(f, keep), `furniture, seed ${seed}`).toBe(false);
+    }
+    expect(wallsSeen).toBeGreaterThan(0);
   });
 });
