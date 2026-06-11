@@ -76,6 +76,11 @@ const DEFAULT_PROFILE = { clusters: CLUSTER_TEMPLATES, singletons: SINGLETON_TYP
 const SINGLETON_COUNT = 3;
 const CLUSTER_PADDING = 16;
 const SPAWN_ZONE_PADDING = 20;
+// Small clearance so furniture sits flush-but-not-embedded against an obstacle
+// (maze wall or door entry zone). rectsOverlap applies padding to both rects,
+// so this is an ~8px gap. Kept well below CLUSTER_PADDING so dense rooms can
+// still hug their internal walls.
+const OBSTACLE_CLEARANCE = 4;
 // Wide enough that the wall-adjacent channel stays walkable and door entry
 // zones (which reach ~80px into the room) stay mostly clear.
 const WALL_MARGIN = 56;
@@ -124,7 +129,7 @@ function makeItem(type, x, y) {
   return { type, x, y, width: def.width, height: def.height, color: def.color, canHide: def.canHide };
 }
 
-export function generateRoomFurniture(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, profile = DEFAULT_PROFILE) {
+export function generateRoomFurniture(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, profile = DEFAULT_PROFILE, obstacles = []) {
   const { clusters, singletons } = profile;
   const rand = mulberry32(seed);
   const minX = roomX + wallThickness + WALL_MARGIN;
@@ -144,6 +149,7 @@ export function generateRoomFurniture(roomX, roomY, roomWidth, roomHeight, wallT
 
   const fits = candidate =>
     !rectsOverlap(candidate, spawnZone, SPAWN_ZONE_PADDING) &&
+    !obstacles.some(obstacle => rectsOverlap(candidate, obstacle, OBSTACLE_CLEARANCE)) &&
     !placed.some(existing => rectsOverlap(existing, candidate, CLUSTER_PADDING));
 
   const clusterBudget = target - SINGLETON_COUNT;

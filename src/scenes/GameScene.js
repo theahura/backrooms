@@ -1,11 +1,11 @@
 import Phaser from 'phaser';
 import { calculateVelocity } from '../systems/movement.js';
 import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES, blocksBullets } from '../systems/furniture.js';
-import { generateMazeWalls, wallRectSegments } from '../systems/maze.js';
+import { generateMazeWalls, wallRectSegments, doorEntryZones } from '../systems/maze.js';
 import { getRoomVibe } from '../systems/roomVibes.js';
 import { getFlashlightPolygon, filterSegmentsNear, FLASHLIGHT_RANGE } from '../systems/visibility.js';
 import { createRoomWalls } from '../systems/room.js';
-import { STAIR_SIZE } from '../systems/stairs.js';
+import { STAIR_SIZE, STAIR_MARGIN, getStairTopLeft, stairKeepOut } from '../systems/stairs.js';
 import { getRoomAt, roomsWithinRadius, hasStairDown, localDistance, isRiftDoor, ROOM_WIDTH, ROOM_HEIGHT } from '../systems/worldgen.js';
 import { mulberry32 } from '../systems/random.js';
 import { generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_CHASE, CRAWLER_CHASE_SPEED, SPITTER_CHASE_SPEED, DETECTION_RANGE } from '../systems/enemy.js';
@@ -50,6 +50,9 @@ const SPRITE_PNGS = import.meta.glob('../assets/sprites/*.png', {
 });
 
 const WALL_THICKNESS = 16;
+// Breathing room carved out of maze walls around a room's centered stair, so
+// the stair square is never embedded in (or flush against) an internal wall.
+const STAIR_KEEPOUT_PAD = 16;
 
 // Floors are stacked as non-overlapping horizontal bands in one physics world.
 // The offset is enormous so unbounded floors never collide in world space.
@@ -311,9 +314,20 @@ export class GameScene extends Phaser.Scene {
     const occluderDoors = room.doors.filter(d => !(room.floor === 0 && isRiftDoor(room, d)));
     this.wallSegments.push(...createRoomWalls(room.x, room.y, room.width, room.height, occluderDoors));
 
-    this.createRoomFurniture(this.furnitureGfx, room, theme);
+    // Generate the internal maze walls FIRST so furniture (placed next) and the
+    // stair can be kept clear of them. The stair sits at the room center, so in
+    // rooms that have one the maze carves a keep-out square around it.
+    const stairKeep = this.roomStairDirection(room)
+      ? [stairKeepOut(room, STAIR_SIZE, STAIR_MARGIN, STAIR_KEEPOUT_PAD)]
+      : [];
+    const mazeRects = room.id !== 0
+      ? generateMazeWalls(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed, room.doors, stairKeep)
+      : [];
+    const furnitureObstacles = [...mazeRects, ...doorEntryZones(room, WALL_THICKNESS)];
+
+    this.createRoomFurniture(this.furnitureGfx, room, theme, furnitureObstacles);
     if (room.id !== 0) {
-      this.createRoomMaze(this.roomGfx, room, theme);
+      this.renderRoomMaze(this.roomGfx, mazeRects, theme);
     }
     this.drawRoomDoorways(this.roomGfx, room, theme);
 
@@ -544,10 +558,10 @@ export class GameScene extends Phaser.Scene {
     addVerticalWall(room.x + WALL_THICKNESS / 2, room.y, room.height, westDoors, WALL_THICKNESS);
   }
 
-  createRoomFurniture(gfx, room, vibe) {
+  createRoomFurniture(gfx, room, vibe, obstacles = []) {
     const furniture = room.id === 0
       ? getLocationLayout(this.activeLocation, room.x, room.y, room.width, room.height, WALL_THICKNESS)
-      : generateRoomFurniture(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed, vibe.furniture);
+      : generateRoomFurniture(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed, vibe.furniture, obstacles);
     this.roomFurniture.set(room.id, furniture);
 
     for (const item of furniture) {
@@ -581,8 +595,7 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  createRoomMaze(gfx, room, theme) {
-    const mazeRects = generateMazeWalls(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed, room.doors);
+  renderRoomMaze(gfx, mazeRects, theme) {
     for (const rect of mazeRects) {
       this.wallSegments.push(...wallRectSegments(rect));
       this.walls.add(this.add.zone(rect.x + rect.width / 2, rect.y + rect.height / 2, rect.width, rect.height));
@@ -1571,28 +1584,24 @@ export class GameScene extends Phaser.Scene {
     this.stairZones = [];
   }
 
-  stairTopLeft(room) {
-    const margin = 100;
-    const innerW = room.width - 2 * margin;
-    const x = room.x + margin + (innerW - STAIR_SIZE) / 2;
-    const y = room.y + margin + (room.height - 2 * margin - STAIR_SIZE) / 2;
-    return { x, y };
+  // Whether this room has a stair, and which way it goes. Shared by activateRoom
+  // (to carve a maze keep-out around the stair) and activateRoomStairs (to build
+  // it), so the two never disagree about which rooms get a stair.
+  roomStairDirection(room) {
+    const isEntranceCell = room.gridX === 0 && room.gridY === 0;
+    if (room.floor > 0 && isEntranceCell) return 'up';
+    if (!isEntranceCell && hasStairDown(this.floorSeed(room.floor), room.gridX, room.gridY)) return 'down';
+    return null;
   }
 
   // Stairs are deep-links discovered as rooms activate. A non-entrance room with
   // hasStairDown gets a DOWN stair; a non-entrance floor's (0,0) cell gets an UP
   // stair. Direction/target is resolved against the return stack on entry.
   activateRoomStairs(room) {
-    const isEntranceCell = room.gridX === 0 && room.gridY === 0;
-    let direction = null;
-    if (room.floor > 0 && isEntranceCell) {
-      direction = 'up';
-    } else if (!isEntranceCell && hasStairDown(this.floorSeed(room.floor), room.gridX, room.gridY)) {
-      direction = 'down';
-    }
+    const direction = this.roomStairDirection(room);
     if (!direction) return;
 
-    const { x, y } = this.stairTopLeft(room);
+    const { x, y } = getStairTopLeft(room);
     const stairGfx = this.add.graphics();
     stairGfx.setDepth(2);
     this.drawStairVisual(stairGfx, x, y, direction);

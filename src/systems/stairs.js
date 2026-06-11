@@ -3,7 +3,33 @@ import { generateLevel } from './level.js';
 
 export const FLOOR_Y_OFFSET = 10000;
 export const STAIR_SIZE = 60;
+export const STAIR_MARGIN = 100;
 export const FLOOR_ROOM_COUNTS = [4, 3];
+
+// The stair is a fixed square centered in the room (margin inset on every side).
+// Centering it -- rather than searching for a clear spot -- keeps the
+// stair-landing math in GameScene.onStairEnter (which lands the player relative
+// to the room center) valid. Rooms with a stair instead carve their maze walls
+// away from this square (see stairKeepOut) so the stair is never inside a wall.
+export function getStairTopLeft(room, stairSize = STAIR_SIZE, margin = STAIR_MARGIN) {
+  const innerW = room.width - 2 * margin;
+  return {
+    x: room.x + margin + (innerW - stairSize) / 2,
+    y: room.y + margin + (room.height - 2 * margin - stairSize) / 2,
+  };
+}
+
+// The stair's footprint inflated by `padding` on every side -- passed to
+// generateMazeWalls as a keep-out zone so walls give the stair breathing room.
+export function stairKeepOut(room, stairSize = STAIR_SIZE, margin = STAIR_MARGIN, padding = 0) {
+  const { x, y } = getStairTopLeft(room, stairSize, margin);
+  return {
+    x: x - padding,
+    y: y - padding,
+    width: stairSize + 2 * padding,
+    height: stairSize + 2 * padding,
+  };
+}
 
 export function getFloorRoomCounts(runCount) {
   if (runCount >= 4) return [4, 3, 3, 2];

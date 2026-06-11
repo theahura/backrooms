@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateMultiFloorLevel, getFloorBounds, getFloorRoomCounts, FLOOR_Y_OFFSET, STAIR_SIZE } from '../stairs.js';
+import { generateMultiFloorLevel, getFloorBounds, getFloorRoomCounts, FLOOR_Y_OFFSET, STAIR_SIZE, STAIR_MARGIN, getStairTopLeft, stairKeepOut } from '../stairs.js';
 
 describe('getFloorRoomCounts', () => {
   it('returns [4, 3] for run 0', () => {
@@ -275,5 +275,42 @@ describe('getFloorBounds', () => {
       expect(room.x).toBeGreaterThanOrEqual(bounds2.minX);
       expect(room.x + room.width).toBeLessThanOrEqual(bounds2.maxX);
     }
+  });
+});
+
+describe('getStairTopLeft', () => {
+  it('centers the stair square within the room', () => {
+    const room = { x: 1000, y: 2000, width: 720, height: 600 };
+    const { x, y } = getStairTopLeft(room);
+    expect(x + STAIR_SIZE / 2).toBe(room.x + room.width / 2);
+    expect(y + STAIR_SIZE / 2).toBe(room.y + room.height / 2);
+  });
+
+  it('keeps the stair inside the room margins', () => {
+    const room = { x: 0, y: 0, width: 720, height: 600 };
+    const { x, y } = getStairTopLeft(room);
+    expect(x).toBeGreaterThanOrEqual(room.x + STAIR_MARGIN);
+    expect(y).toBeGreaterThanOrEqual(room.y + STAIR_MARGIN);
+    expect(x + STAIR_SIZE).toBeLessThanOrEqual(room.x + room.width - STAIR_MARGIN);
+    expect(y + STAIR_SIZE).toBeLessThanOrEqual(room.y + room.height - STAIR_MARGIN);
+  });
+});
+
+describe('stairKeepOut', () => {
+  const room = { x: 1000, y: 2000, width: 720, height: 600 };
+
+  it('with zero padding equals the stair square footprint', () => {
+    const { x, y } = getStairTopLeft(room);
+    expect(stairKeepOut(room, STAIR_SIZE, STAIR_MARGIN, 0)).toEqual({ x, y, width: STAIR_SIZE, height: STAIR_SIZE });
+  });
+
+  it('inflates the stair square by the padding on every side', () => {
+    const pad = 16;
+    const zero = stairKeepOut(room, STAIR_SIZE, STAIR_MARGIN, 0);
+    const padded = stairKeepOut(room, STAIR_SIZE, STAIR_MARGIN, pad);
+    expect(padded.x).toBe(zero.x - pad);
+    expect(padded.y).toBe(zero.y - pad);
+    expect(padded.width).toBe(zero.width + 2 * pad);
+    expect(padded.height).toBe(zero.height + 2 * pad);
   });
 });

@@ -36,7 +36,7 @@ export function getRoomType(seed) {
 // Walls are solid rects: the drawn footprint, the physics body, and the light
 // occluder (its outline, via wallRectSegments) are all the same rectangle, so
 // light can never travel inside a visually solid wall band.
-export function generateMazeWalls(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, doors) {
+export function generateMazeWalls(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, doors, keepOut = []) {
   const type = getRoomType(seed);
   if (type === 'open') return [];
 
@@ -47,7 +47,11 @@ export function generateMazeWalls(roomX, roomY, roomWidth, roomHeight, wallThick
     width: roomWidth - 2 * wallThickness,
     height: roomHeight - 2 * wallThickness,
   };
+  // Walls are carved away from door entry zones (so doorways stay clear) and
+  // from any extra keep-out zones the caller supplies (e.g. the fixed stair
+  // square, so stairs never spawn inside a wall).
   const doorZones = (doors || []).map(d => getDoorZone(roomX, roomY, roomWidth, roomHeight, wallThickness, d));
+  const zones = [...doorZones, ...keepOut];
 
   if (type === 'columns') {
     const columns = generateColumns(roomX, roomY, roomWidth, roomHeight, wallThickness, seed);
@@ -57,7 +61,7 @@ export function generateMazeWalls(roomX, roomY, roomWidth, roomHeight, wallThick
       width: col.size,
       height: col.size,
     }));
-    return rects.filter(rect => !rectOverlapsDoorZone(rect, doorZones));
+    return rects.filter(rect => !rectOverlapsZone(rect, zones));
   }
 
   if (type === 'maze' || type === 'corridor') {
@@ -70,18 +74,25 @@ export function generateMazeWalls(roomX, roomY, roomWidth, roomHeight, wallThick
     const room = { x: roomX, y: roomY, width: roomWidth, height: roomHeight };
     return segments
       .map(seg => subdivisionWallRect(seg, wallThickness, inner, room))
-      .filter(rect => rect !== null && !rectOverlapsDoorZone(rect, doorZones));
+      .filter(rect => rect !== null && !rectOverlapsZone(rect, zones));
   }
 
   if (type === 'storage') {
-    return generateStorageWalls(roomX, roomY, roomWidth, roomHeight, wallThickness, rand, doorZones);
+    return generateStorageWalls(roomX, roomY, roomWidth, roomHeight, wallThickness, rand, zones);
   }
 
   if (type === 'cubicles') {
-    return generateCubicleWalls(roomX, roomY, roomWidth, roomHeight, wallThickness, rand, doorZones);
+    return generateCubicleWalls(roomX, roomY, roomWidth, roomHeight, wallThickness, rand, zones);
   }
 
   return [];
+}
+
+// Door entry zones reach 80px past the wall into the room -- the swept floor a
+// player walks through to use the door. Exported so other placement systems
+// (furniture) can keep this area clear, the same way maze walls already do.
+export function doorEntryZones(room, wallThickness) {
+  return (room.doors || []).map(d => getDoorZone(room.x, room.y, room.width, room.height, wallThickness, d));
 }
 
 export function wallRectSegments(rect) {
@@ -93,8 +104,8 @@ export function wallRectSegments(rect) {
   ];
 }
 
-function rectOverlapsDoorZone(rect, doorZones) {
-  for (const zone of doorZones) {
+function rectOverlapsZone(rect, zones) {
+  for (const zone of zones) {
     if (rect.x < zone.x + zone.width && rect.x + rect.width > zone.x &&
         rect.y < zone.y + zone.height && rect.y + rect.height > zone.y) {
       return true;
@@ -189,7 +200,7 @@ function subdivideGeneric(bounds, segments, rand, depth, maxDepth, minSize, gapW
   }
 }
 
-function generateStorageWalls(roomX, roomY, roomWidth, roomHeight, wallThickness, rand, doorZones) {
+function generateStorageWalls(roomX, roomY, roomWidth, roomHeight, wallThickness, rand, zones) {
   const margin = wallThickness + 40;
   const innerMinX = roomX + margin;
   const innerMinY = roomY + margin;
@@ -217,7 +228,7 @@ function generateStorageWalls(roomX, roomY, roomWidth, roomHeight, wallThickness
     if (overlaps) continue;
 
     const rect = { x, y, width: w, height: h };
-    if (rectOverlapsDoorZone(rect, doorZones)) continue;
+    if (rectOverlapsZone(rect, zones)) continue;
 
     placed.push({ x, y, w, h });
     rects.push(rect);
@@ -226,7 +237,7 @@ function generateStorageWalls(roomX, roomY, roomWidth, roomHeight, wallThickness
   return rects;
 }
 
-function generateCubicleWalls(roomX, roomY, roomWidth, roomHeight, wallThickness, rand, doorZones) {
+function generateCubicleWalls(roomX, roomY, roomWidth, roomHeight, wallThickness, rand, zones) {
   const margin = wallThickness + 40;
   const innerMinX = roomX + margin;
   const innerMinY = roomY + margin;
@@ -251,7 +262,7 @@ function generateCubicleWalls(roomX, roomY, roomWidth, roomHeight, wallThickness
       const openSide = Math.floor(rand() * 4);
       const cellRects = getCubicleRects(cx, cy, wl, wallThickness, openSide);
 
-      const blocked = cellRects.some(r => rectOverlapsDoorZone(r, doorZones));
+      const blocked = cellRects.some(r => rectOverlapsZone(r, zones));
       if (!blocked) {
         rects.push(...cellRects);
       }

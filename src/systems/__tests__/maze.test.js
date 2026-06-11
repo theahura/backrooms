@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getRoomType, generateMazeWalls, generateColumns } from '../maze.js';
+import { getRoomType, generateMazeWalls, generateColumns, doorEntryZones } from '../maze.js';
 
 const ALL_TYPES = ['open', 'maze', 'columns', 'corridor', 'storage', 'cubicles'];
 
@@ -423,6 +423,87 @@ describe('columns room type wall rects', () => {
       expect(match).toBeTruthy();
       expect(rect.width).toBe(match.size);
     }
+  });
+});
+
+describe('generateMazeWalls keep-out zones', () => {
+  const ROOM_X = 0;
+  const ROOM_Y = 0;
+  const ROOM_WIDTH = 1200;
+  const ROOM_HEIGHT = 1000;
+  const WALL_THICKNESS = 16;
+  const doors = [{ wall: 'east', offset: 400, width: 80, targetRoomId: 1 }];
+
+  const overlaps = (a, b) =>
+    a.x < b.x + b.width &&
+    a.x + a.width > b.x &&
+    a.y < b.y + b.height &&
+    a.y + a.height > b.y;
+
+  it('produces no wall rect overlapping a supplied keep-out zone', () => {
+    const keepOut = { x: 500, y: 400, width: 200, height: 200 };
+    for (let seed = 0; seed < 300; seed++) {
+      const rects = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors, [keepOut]);
+      for (const rect of rects) {
+        expect(overlaps(rect, keepOut), `seed ${seed}`).toBe(false);
+      }
+    }
+  });
+
+  it('produces the same walls whether keep-out is omitted or passed empty', () => {
+    for (let seed = 0; seed < 50; seed++) {
+      const omitted = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
+      const empty = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors, []);
+      expect(empty, `seed ${seed}`).toEqual(omitted);
+    }
+  });
+});
+
+describe('doorEntryZones', () => {
+  const WALL_THICKNESS = 16;
+  const room = {
+    x: 0,
+    y: 0,
+    width: 1200,
+    height: 1000,
+    doors: [
+      { wall: 'north', offset: 300, width: 80, targetRoomId: 1 },
+      { wall: 'south', offset: 500, width: 80, targetRoomId: 2 },
+      { wall: 'east', offset: 200, width: 80, targetRoomId: 3 },
+      { wall: 'west', offset: 600, width: 80, targetRoomId: 4 },
+    ],
+  };
+
+  it('returns one entry zone per door', () => {
+    expect(doorEntryZones(room, WALL_THICKNESS)).toHaveLength(4);
+  });
+
+  it('places each entry zone against its door wall and extends it into the room', () => {
+    const [north, south, east, west] = doorEntryZones(room, WALL_THICKNESS);
+
+    // North door: zone hugs the top edge, spans the door, extends downward.
+    expect(north.y).toBe(room.y);
+    expect(north.x).toBe(room.x + 300);
+    expect(north.width).toBe(80);
+    expect(north.height).toBeGreaterThan(WALL_THICKNESS);
+
+    // South door: zone reaches the bottom edge.
+    expect(south.y + south.height).toBe(room.y + room.height);
+    expect(south.x).toBe(room.x + 500);
+
+    // East door: zone reaches the right edge, spans the door vertically.
+    expect(east.x + east.width).toBe(room.x + room.width);
+    expect(east.y).toBe(room.y + 200);
+    expect(east.height).toBe(80);
+    expect(east.width).toBeGreaterThan(WALL_THICKNESS);
+
+    // West door: zone hugs the left edge.
+    expect(west.x).toBe(room.x);
+    expect(west.y).toBe(room.y + 600);
+  });
+
+  it('returns an empty array for a room with no doors', () => {
+    expect(doorEntryZones({ x: 0, y: 0, width: 100, height: 100, doors: [] }, WALL_THICKNESS)).toEqual([]);
   });
 });
 
