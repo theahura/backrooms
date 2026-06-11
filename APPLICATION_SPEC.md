@@ -49,16 +49,15 @@ Other details (from playtesting):
   - Entering should feel like the user transitions to a new dimension. Right now it just looks like another room.
   - As the player approaches the edge, there should be a strange crackling sound that gets louder, and only when the player goes through does the backroom appear. This is not a 'door' like the other doors, it should behave differently (e.g. no light leakage, it shows up on screen as a sizzling light in the wall edge)
 - The player should be able to turn off the flashlight to conserve battery, and it should automatically turn off when they are hiding
-
-Feedback from me (DO NOT CHANGE):
-- the pixel art of the player character is totally wrong. It's a front facing view of a character instead of a top down view! Same is true of many of the enemies
-  - in general, i think the player character needs to be bigger on screen (cf also the room needs to be smaller). If the camera is closer to the player in smaller rooms it will emphasize a claustrophobic feeling
-  - most of the pixel art is not facing the right direction (e.g. the armoire is also front facing instead of top down)
-  - and it is all basically way too small. What kind of sprite is 18x18! that is so small the player cant really make it out at all
-  - I think the player character view should be top down -- we should see the top of the head, the shoulders, and the flashlight with arm stuck out. Similar for all the other sprites.
 - zombies and other enemies should not follow the player once they lose line of sight. That includes walls and hiding state.
 - gunfire should go over tables and desks and low furniture, should be blocked by armoires and other furniture
 
+Feedback from me (DO NOT CHANGE):
+- most of the pixel art is not facing the right direction (e.g. the armoire is also front facing instead of top down)
+- and it is all basically way too small. What kind of sprite is 18x18! that is so small the player cant really make it out at all
+- I think the player character view should be top down -- we should see the top of the head, the shoulders, and the flashlight with arm stuck out. Similar for all the other sprites.
+- get rid of floor traps
+
 Known bugs:
 - Hiding places, stairs, and doors will often spawn inside walls
-- The flashlight light leaks through the edges of walls
+- Some of the walls do not look like they have any width sometimes (just infinitely thin infinitely tall black walls). All walls should have 'thickness'
