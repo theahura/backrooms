@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES } from '../furniture.js';
+import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES, blocksBullets } from '../furniture.js';
 import { getFlashlightPolygon } from '../visibility.js';
 import { createRoomWalls } from '../room.js';
 import { findNearestHideable } from '../hiding.js';
@@ -274,5 +274,38 @@ describe('new vibe furniture types', () => {
       expect(def.height, type).toBeGreaterThan(0);
       expect(typeof def.color, type).toBe('number');
     }
+  });
+});
+
+describe('blocksBullets', () => {
+  // Low furniture you shoot across -- the spec's "tables and desks and low
+  // furniture" that gunfire goes over.
+  const LOW = ['table', 'desk', 'bed', 'vent', 'couch', 'bush', 'pod'];
+  // Tall/solid cover -- the spec's "armoires and other furniture" that stops
+  // gunfire.
+  const TALL = ['armoire', 'closet', 'bookcase', 'shelf', 'counter', 'tree', 'rock', 'console'];
+
+  it('lets gunfire pass over low furniture', () => {
+    for (const type of LOW) {
+      expect(blocksBullets(type), type).toBe(false);
+    }
+  });
+
+  it('stops gunfire at tall, solid furniture', () => {
+    for (const type of TALL) {
+      expect(blocksBullets(type), type).toBe(true);
+    }
+  });
+
+  it('does not stop gunfire on an unrecognised furniture type', () => {
+    expect(blocksBullets('not_a_real_type')).toBe(false);
+    expect(blocksBullets(undefined)).toBe(false);
+  });
+
+  it('classifies every furniture type as either low or tall', () => {
+    // Guards against a new furniture type being added without deciding whether
+    // gunfire passes over it -- the hand-authored LOW/TALL lists above are the
+    // ground truth and must cover the whole catalogue.
+    expect([...LOW, ...TALL].sort()).toEqual(Object.keys(FURNITURE_TYPES).sort());
   });
 });

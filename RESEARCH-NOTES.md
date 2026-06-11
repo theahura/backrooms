@@ -3417,3 +3417,35 @@ The suspected NUMERICAL seam bug does NOT exist: in JS `-0 < 0` is false, so ray
 
 ### Decision
 No visibility.js change (strict bounds stay; epsilon fix dropped as YAGNI/unevidenced). Fix is geometric: `generateMazeWalls` returns wall RECTS {x,y,width,height} where drawn footprint = physics body = occlusion outline (new `wallRectSegments(rect)` gives the 4 outline segments); subdivision walls become 16px bands centered on the old split lines with bounds-touching ends extended to the true room edge (seals the perimeter junction); columns/crates keep their footprints; cubicle partitions become 16px bands that overlap at corners (seals L-corners). Door-zone filtering becomes rect-vs-zone overlap on the final extended rect. GameScene.createRoomMaze draws/collides/occludes the same rect. Corner overshoot then wraps DRAWN corners -- correct. Perimeter walls stay boundary-line occluders (wall faces still light up; no perimeter through-leak evidenced once junctions seal).
+
+## Gunfire Over Low Furniture (Blocked by Tall Furniture) Research
+
+### Problem
+Spec "Feedback (DO NOT CHANGE)" item (APPLICATION_SPEC.md:60): "gunfire should go over tables and desks and low furniture, should be blocked by armoires and other furniture." Today all furniture goes into one static `furnitureGroup` (GameScene.js:154) and both bullet colliders block on the whole group (player bullets GameScene.js:1211, enemy/spitter bullets GameScene.js:1220 -> `onBulletHitWall`), so a player cannot shoot an enemy across a table.
+
+### Current state (code research)
+- `FURNITURE_TYPES` (furniture.js:3-21): each entry `{width,height,color,canHide,blocksLight}`. NO "tall"/"blocksBullets" flag exists.
+  - `blocksLight: true` (solid cover, 8): armoire, closet, bookcase, shelf, counter, tree, rock, console.
+  - `blocksLight: false` (low, 7): table, desk, bed, vent, couch, bush, pod.
+- Furniture zones (GameScene.js:568-574) are `this.add.zone(...)` added to `furnitureGroup` and currently carry NO `setData`. `blocksLight` is consulted only at GameScene.js:576-579 to push light-occluder `wallSegments`.
+- Same `furnitureGroup` is reused for player body collision (GameScene.js:1091) and enemy body collision (GameScene.js:1161) -- those must keep colliding with ALL furniture (you can't walk through a table).
+- GameScene is NOT unit-tested; only pure `src/systems/*.js` modules are. Gameplay wiring is verified by the Playwright playtest harness via `window.__game` introspection (memory: backrooms-playtest-harness.md). `scripts/playtest.mjs` does not currently fire bullets.
+- No `processCallback` (non-null 4th collider arg) exists anywhere in src/ today -- introducing one is a new convention. `setData`/`getData` on zones is already used (e.g. stair zones GameScene.js:1601).
+
+### Phaser 3.90.0 processCallback (verified against vendored source node_modules/phaser/src/physics/arcade/World.js)
+- `addCollider(obj1, obj2, collideCallback, processCallback, context)`. In `World.separate()` the processCallback runs FIRST, before any SeparateX/Y; if it `=== false` the method returns early with no separation and the collideCallback does NOT fire. So returning false lets a fast bullet continue straight through a static body. (Stale GitHub issue #890 claiming separation still happens does NOT match 3.90.0.)
+- Strict `=== false` check: must return a literal boolean. `undefined`/falsy-but-not-false => collision proceeds. processCallback receives the gameObjects (`body.gameObject`), so it can read `furnitureZone.getData('blocksBullets')`.
+- collider (not overlap) is correct: we WANT the stop+deactivate path for tall furniture (onBulletHitWall). overlap would never separate anything.
+- Per-frame re-invocation while overlapping a passed-through zone is harmless (trivial getData; maxSize 30 bullets; overlap clears within a frame or two at bullet speed).
+- Idiomatic vs separate groups: processCallback preserves the single-group invariant (furniture stays in one group for player/enemy body collision) with minimal churn -- preferred over splitting into tall/low groups and double-wiring the player/enemy colliders.
+
+### Design guidance (web research: The Level Design Book "Cover"; XCOM; MY.GAMES top-down level design)
+- Genre standard is a discrete per-object height/cover tier (LOW shoot-over vs TALL blocks), a boolean/enum -- NOT z-height simulation (YAGNI confirmed).
+- For a FIXED top-down camera, the recommendation is to UNIFY one "tall/solid" property to block light + line-of-sight + projectiles, because the player can't judge object height and decoupling creates the unfair "I could see/shoot it but the bullet vanished" case. XCOM precedent: high cover breaks LoS, low does not.
+- Fairness pitfalls: enemies fully hidden behind tall cover need telegraphing (silhouette/audio). In this game tall furniture ALREADY blocks light + LoS, so the player already cannot see enemies behind an armoire -- adding bullet-blocking to the same set is consistent and introduces no NEW hidden-enemy case. Bias furniture mix toward low cover (already the case: 7 low vs 8 tall types, and low types dominate cluster templates).
+
+### Decision
+Bullet-blocking set == light-blocking set (`blocksLight`). This is fairness-correct (never shoot through a sight-blocker), matches the spec's low/tall split exactly (every blocksLight:false type IS "low furniture"; every blocksLight:true type IS solid cover), and is DRY. Implementation:
+- New pure helper `blocksBullets(type)` in furniture.js returning whether that furniture type stops bullets (derived from the tall/solid `blocksLight` classification; `!!(def && def.blocksLight)`; unknown type -> false).
+- GameScene: tag each furniture zone `zone.setData('blocksBullets', blocksBullets(item.type))`; add processCallback `bulletHitsFurniture(bullet, zone) => zone.getData('blocksBullets')`; pass it as the 4th arg to BOTH bullet-vs-furniture colliders (player GameScene.js:1211, enemy GameScene.js:1220). Player/enemy body colliders unchanged (collide with all furniture).
+- TDD: unit-test `blocksBullets` per type (low->false, tall->true, unknown->false) and the design invariant (blocksBullets(t) === blocksLight(t) for every type, pinning the "no shooting through sight-blockers" fairness contract). GameScene wiring verified by a headless playtest that fires a bullet across a table (passes) vs into an armoire (stops), read via `window.__game` bulletGroup/roomFurniture.

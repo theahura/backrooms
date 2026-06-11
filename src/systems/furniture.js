@@ -80,6 +80,16 @@ const SPAWN_ZONE_PADDING = 20;
 // zones (which reach ~80px into the room) stay mostly clear.
 const WALL_MARGIN = 56;
 
+// Tall, solid furniture is cover that stops gunfire; low furniture (tables,
+// desks, beds) is shot across. This is the same tall/solid distinction that
+// occludes the flashlight and blocks line of sight, so bullet-blocking is kept
+// identical to light-blocking -- a player never shoots through something opaque
+// they cannot see through. Unknown types do not block bullets.
+export function blocksBullets(type) {
+  const def = FURNITURE_TYPES[type];
+  return !!(def && def.blocksLight);
+}
+
 export function createFurnitureSegments(x, y, width, height) {
   return [
     { x1: x, y1: y, x2: x + width, y2: y },

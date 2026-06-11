@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { calculateVelocity } from '../systems/movement.js';
-import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES } from '../systems/furniture.js';
+import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES, blocksBullets } from '../systems/furniture.js';
 import { generateMazeWalls, wallRectSegments } from '../systems/maze.js';
 import { getRoomVibe } from '../systems/roomVibes.js';
 import { getFlashlightPolygon, filterSegmentsNear, FLASHLIGHT_RANGE } from '../systems/visibility.js';
@@ -571,6 +571,7 @@ export class GameScene extends Phaser.Scene {
         item.width,
         item.height
       );
+      zone.setData('blocksBullets', blocksBullets(item.type));
       this.furnitureGroup.add(zone);
 
       if (FURNITURE_TYPES[item.type] && FURNITURE_TYPES[item.type].blocksLight) {
@@ -1208,7 +1209,7 @@ export class GameScene extends Phaser.Scene {
     this.bulletGroup = this.physics.add.group({ maxSize: 30 });
 
     this.physics.add.collider(this.bulletGroup, this.walls, this.onBulletHitWall, null, this);
-    this.physics.add.collider(this.bulletGroup, this.furnitureGroup, this.onBulletHitWall, null, this);
+    this.physics.add.collider(this.bulletGroup, this.furnitureGroup, this.onBulletHitWall, this.bulletHitsFurniture, this);
     this.physics.add.collider(this.bulletGroup, this.doorGroup, this.onBulletHitWall, null, this);
     this.physics.add.overlap(this.bulletGroup, this.enemyGroup, this.onBulletHitEnemy, null, this);
   }
@@ -1217,7 +1218,7 @@ export class GameScene extends Phaser.Scene {
     this.enemyBulletGroup = this.physics.add.group({ maxSize: 30 });
 
     this.physics.add.collider(this.enemyBulletGroup, this.walls, this.onBulletHitWall, null, this);
-    this.physics.add.collider(this.enemyBulletGroup, this.furnitureGroup, this.onBulletHitWall, null, this);
+    this.physics.add.collider(this.enemyBulletGroup, this.furnitureGroup, this.onBulletHitWall, this.bulletHitsFurniture, this);
     this.physics.add.collider(this.enemyBulletGroup, this.doorGroup, this.onBulletHitWall, null, this);
     this.physics.add.overlap(this.enemyBulletGroup, this.player, this.onEnemyBulletHitPlayer, null, this);
   }
@@ -1777,6 +1778,13 @@ export class GameScene extends Phaser.Scene {
     bullet.setData('originY', this.player.y);
     bullet.setData('damage', this.bulletDamage);
     bullet.setData('range', this.bulletRange);
+  }
+
+  // Arcade physics process callback: gunfire is stopped only by tall, solid
+  // furniture. Returning false lets the bullet fly over low furniture (tables,
+  // desks, beds) without separation or the collide callback firing.
+  bulletHitsFurniture(bullet, furnitureZone) {
+    return furnitureZone.getData('blocksBullets');
   }
 
   onBulletHitWall(bullet) {
