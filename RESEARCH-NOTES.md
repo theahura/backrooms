@@ -3378,3 +3378,42 @@ Binding spec feedback: "zombies and other enemies should not follow the player o
 
 ### Decision
 Minimal, spec-faithful change: LKP = last-seen position (stamped while canSee), search is the only no-LOS pursuit, live cross-room BFS pursuit and crawler door-opening are removed as inherently "following without LOS". Keep SEARCH_TIMEOUT=3000 and idle doorway wandering unchanged (tuning beyond the spec ask is YAGNI; playtest can revisit).
+
+## Flashlight Light Leaking Through Wall Edges Research
+
+### Problem
+New spec "Known bug": "The flashlight light leaks through the edges of walls." The flashlight is a Sight-&-Light-style raycast visibility polygon (`getFlashlightPolygon` in `src/systems/visibility.js`) filled white into the BitmapMask (invertAlpha) that punches holes in the depth-100 darkness overlay.
+
+### Geometry audit (code research)
+- Occluders are ZERO-thickness `{x1,y1,x2,y2}` lines; drawn walls are 16px-thick rects (`WALL_THICKNESS=16`, GameScene.js:52), and the two follow DIFFERENT conventions:
+  - Room perimeter (room.js:37-53): occluder exactly on the room boundary line (e.g. north at `y=room.y`); the drawn band extends 16px INWARD (GameScene.js:477-486). Adjacent rooms' bands abut into a 32px visual wall with the occluder line in the middle.
+  - Maze walls (GameScene.js:583-607): occluder is the CENTERLINE of a 16px band drawn centered on it. Box obstacles (columns/crates/cubicles, maze.js) have exact-outline occluders but each side drawn as a centered 16px rect — visuals overhang occluders by 8px on every side.
+  - Closed doors (GameScene.js:628-639, 687-700): occluder exactly on the boundary line; sprite centered on it (8px each side).
+- DUPLICATE coincident segments: `activateRoom` (GameScene.js:311-312) pushes `createRoomWalls` for EVERY activated room, so each shared wall line carries two exactly coincident, collinear, opposite-wound segment sets split at identical door offsets. Doorframe points are shared by up to 5 segments; room corners by up to 8.
+- DETERMINISTIC HOLE (strongest structural suspect): maze subdivision bounds start at `roomX + wallThickness` (maze.js:41-44), i.e. maze occluders END at the inner face of the drawn perimeter band while the perimeter occluder is at the outer boundary — a 16px occluder-free slot under visually solid wall at every maze↔perimeter junction. Near-parallel rays inside the band (denominator/parallel rejection at visibility.js:8, plus the band itself has no occluder) pass over the maze-wall end and light floor on its far side.
+- Door gaps are 1D slits in a 32px-deep visual tunnel (`drawRoomDoorways` carves both rooms' bands): diagonal rays through the slit light areas a real 16px jamb would block.
+
+### Numerical audit
+- `raySegmentIntersection` (visibility.js:1-20) uses STRICT bounds `t1 < 0 || t2 < 0 || t2 > 1` with no epsilon, and parallel rejection `|denom| < 1e-10`. A ray aimed exactly at the shared endpoint of two collinear/duplicate segments computes t2≈1+1e-10 on one and t2≈-1e-10 on the other — misses BOTH, sails past, and the angle-sorted fan gets a thin radial SPIKE of light through the seam (the canonical Sight-&-Light corner leak).
+- `getFlashlightPolygon` casts exact + ±0.00001rad endpoint rays (designed corner overshoot) and dedupes by position `toFixed(4)`, not by angle — duplicate-segment endpoint pairs can interleave in the sort (bowtie risk at cone boundary).
+
+### Web research (fixes used in practice)
+- Tolerant t-bounds: robust libs (byronknoll visibility-polygon-js) use eps=1e-7 point-equality / boundary tolerance; Möller-Trumbore convention eps=1e-7; accept `t2 ∈ [-eps, 1+eps]`. Sources: github.com/byronknoll/visibility-polygon-js, redblobgames.com/articles/visibility/ ("numerical robustness issues" admitted), ncase.me/sight-and-light.
+- Merge/weld collinear segments sharing endpoints; dedupe overlapping duplicates (byronknoll: overlapping collinear segments are explicitly ILLEGAL input requiring breakIntersections()).
+- Occlude thick walls as CLOSED RECTANGLES (4 segments at the faces) — canonical Phaser 3 port (Feronato tutorial) feeds boxes as 4-point polygons; light stops at the near face, never enters the wall interior; eliminates centerline penetration and junction slots. Trade-off: with near-face occlusion the wall band itself stays dark (Catlike Coding: "walls will always be in their own shadow, which is fine").
+- Render-order fix (slembcke, Godot occluder_light_mask, libtcod FOV_LIGHT_WALLS analogue): draw wall art ABOVE the darkness layer masked by the SAME light mask so overshoot lands on opaque wall pixels; for pitch-black horror the masked variant keeps unlit walls invisible.
+- Engine precedents for seam bleed: Godot per-tile occluders leak at tile boundaries (issue #60532) — canonical fix is merging occluder polygons / overlapping occluders; Unity ShadowCaster2D community fix generates one merged outline from the CompositeCollider2D.
+
+### Reproduction harness notes
+- `npx vite --port 5199 --strictPort &` (NOT npm run dev — vite.config.js says 8080), then `node scripts/playtest.mjs` (headless only; headed freezes on DISPLAY=:1; playwright resolves from /home/amol/code/node_modules). Screenshots → /tmp/backrooms-playtest/.
+- Only introspection hook: `window.__game` (main.js:60-63, DEV only). Read `s.player.x/y`, `s.playerAngle`, `s.wallSegments`, `s.level.rooms` via page.evaluate; aim via `page.mouse.move(512±dx, 384±dy)` (CAMERA_ZOOM=2.0 → 1024x768 screenshot shows a 512x384 world window). Player must cross the east rift out of force-lit room 0 (playtest.mjs:100-153) before the cone is visible.
+- Flashlight polygon is not exposed at runtime — recompute offline from dumped `wallSegments` + player pos + angle using the pure `getFlashlightPolygon`.
+
+### Reproduction evidence (25-pose instrumented playtest, /tmp/backrooms-lightleak)
+Instrumented GameScene to expose the live polygon (window.__dbgLight), drove 25 poses with sweeps, analyzed offline. 27 findings: rays travel INSIDE visually-solid 16px bands and exit beyond (89px traversal through a maze-wall/perimeter junction; 56px lengthwise traversal of a horizontal band near its end; light wrapping cubicle L-corners 288px past the drawn corner block). Screenshots confirm visible leaks.
+
+### Diagnosis revision (offline reconstruction of captured fixtures)
+The suspected NUMERICAL seam bug does NOT exist: in JS `-0 < 0` is false, so rays aimed exactly at shared endpoints HIT under the strict bounds (verified: pose-18 fixture returns a clean endpoint hit; pose-02 cubicle-corner fixture shows no spike). Every captured artifact is the DESIGNED +/-1e-5-rad corner-overshoot rays wrapping zero-width segment ENDS that sit inside visually solid wall material: maze occluder ends at the perimeter inner face (junction slot), cubicle/box L-corners at centerline crossings (drawn 16px corner blocks). Purely geometric.
+
+### Decision
+No visibility.js change (strict bounds stay; epsilon fix dropped as YAGNI/unevidenced). Fix is geometric: `generateMazeWalls` returns wall RECTS {x,y,width,height} where drawn footprint = physics body = occlusion outline (new `wallRectSegments(rect)` gives the 4 outline segments); subdivision walls become 16px bands centered on the old split lines with bounds-touching ends extended to the true room edge (seals the perimeter junction); columns/crates keep their footprints; cubicle partitions become 16px bands that overlap at corners (seals L-corners). Door-zone filtering becomes rect-vs-zone overlap on the final extended rect. GameScene.createRoomMaze draws/collides/occludes the same rect. Corner overshoot then wraps DRAWN corners -- correct. Perimeter walls stay boundary-line occluders (wall faces still light up; no perimeter through-leak evidenced once junctions seal).

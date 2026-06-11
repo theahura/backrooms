@@ -33,52 +33,44 @@ export function getRoomType(seed) {
   return 'cubicles';
 }
 
+// Walls are solid rects: the drawn footprint, the physics body, and the light
+// occluder (its outline, via wallRectSegments) are all the same rectangle, so
+// light can never travel inside a visually solid wall band.
 export function generateMazeWalls(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, doors) {
   const type = getRoomType(seed);
   if (type === 'open') return [];
 
   const rand = mulberry32(seed + MAZE_SEED_OFFSET + 1);
-  const innerX = roomX + wallThickness;
-  const innerY = roomY + wallThickness;
-  const innerW = roomWidth - 2 * wallThickness;
-  const innerH = roomHeight - 2 * wallThickness;
+  const inner = {
+    x: roomX + wallThickness,
+    y: roomY + wallThickness,
+    width: roomWidth - 2 * wallThickness,
+    height: roomHeight - 2 * wallThickness,
+  };
   const doorZones = (doors || []).map(d => getDoorZone(roomX, roomY, roomWidth, roomHeight, wallThickness, d));
 
   if (type === 'columns') {
     const columns = generateColumns(roomX, roomY, roomWidth, roomHeight, wallThickness, seed);
+    const rects = columns.map(col => ({
+      x: col.x - col.size / 2,
+      y: col.y - col.size / 2,
+      width: col.size,
+      height: col.size,
+    }));
+    return rects.filter(rect => !rectOverlapsDoorZone(rect, doorZones));
+  }
+
+  if (type === 'maze' || type === 'corridor') {
     const segments = [];
-    for (const col of columns) {
-      const half = col.size / 2;
-      const colSegs = [
-        { x1: col.x - half, y1: col.y - half, x2: col.x + half, y2: col.y - half },
-        { x1: col.x + half, y1: col.y - half, x2: col.x + half, y2: col.y + half },
-        { x1: col.x + half, y1: col.y + half, x2: col.x - half, y2: col.y + half },
-        { x1: col.x - half, y1: col.y + half, x2: col.x - half, y2: col.y - half },
-      ];
-      const blocked = colSegs.some(s => segmentCrossesDoorZone(s, doorZones));
-      if (!blocked) {
-        segments.push(...colSegs);
-      }
+    if (type === 'maze') {
+      subdivideGeneric(inner, segments, rand, 0, 2, MIN_SUBDIVISION_SIZE, GAP_WIDTH);
+    } else {
+      subdivideGeneric(inner, segments, rand, 0, CORRIDOR_MAX_DEPTH, CORRIDOR_MIN_SIZE, CORRIDOR_GAP_WIDTH);
     }
-    return segments;
-  }
-
-  if (type === 'maze') {
-    const segments = [];
-    subdivideGeneric(
-      { x: innerX, y: innerY, width: innerW, height: innerH },
-      segments, rand, doorZones, 0, 2, MIN_SUBDIVISION_SIZE, GAP_WIDTH
-    );
-    return segments;
-  }
-
-  if (type === 'corridor') {
-    const segments = [];
-    subdivideGeneric(
-      { x: innerX, y: innerY, width: innerW, height: innerH },
-      segments, rand, doorZones, 0, CORRIDOR_MAX_DEPTH, CORRIDOR_MIN_SIZE, CORRIDOR_GAP_WIDTH
-    );
-    return segments;
+    const room = { x: roomX, y: roomY, width: roomWidth, height: roomHeight };
+    return segments
+      .map(seg => subdivisionWallRect(seg, wallThickness, inner, room))
+      .filter(rect => rect !== null && !rectOverlapsDoorZone(rect, doorZones));
   }
 
   if (type === 'storage') {
@@ -90,6 +82,53 @@ export function generateMazeWalls(roomX, roomY, roomWidth, roomHeight, wallThick
   }
 
   return [];
+}
+
+export function wallRectSegments(rect) {
+  return [
+    { x1: rect.x, y1: rect.y, x2: rect.x + rect.width, y2: rect.y },
+    { x1: rect.x + rect.width, y1: rect.y, x2: rect.x + rect.width, y2: rect.y + rect.height },
+    { x1: rect.x + rect.width, y1: rect.y + rect.height, x2: rect.x, y2: rect.y + rect.height },
+    { x1: rect.x, y1: rect.y + rect.height, x2: rect.x, y2: rect.y },
+  ];
+}
+
+function rectOverlapsDoorZone(rect, doorZones) {
+  for (const zone of doorZones) {
+    if (rect.x < zone.x + zone.width && rect.x + rect.width > zone.x &&
+        rect.y < zone.y + zone.height && rect.y + rect.height > zone.y) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// A subdivision wall is a band centered on its split line. Ends that touch the
+// maze area edge are extended through the drawn perimeter band to the true
+// room edge, so light cannot slip through the visually solid junction.
+// The strict equality against the inner bounds relies on all coordinates being
+// integers (room origins, splits, and gaps are integer-valued); fractional
+// room coordinates would silently stop the extension from firing. Stubs
+// shorter than the wall thickness are dropped before extension on purpose:
+// nothing visually meaningful is lost, and a kept stub would be a free-floating
+// square rather than a wall.
+function subdivisionWallRect(seg, wallThickness, inner, room) {
+  const half = wallThickness / 2;
+  const horizontal = seg.y1 === seg.y2;
+  if (horizontal) {
+    let x = Math.min(seg.x1, seg.x2);
+    let right = Math.max(seg.x1, seg.x2);
+    if (right - x < wallThickness) return null;
+    if (x === inner.x) x = room.x;
+    if (right === inner.x + inner.width) right = room.x + room.width;
+    return { x, y: seg.y1 - half, width: right - x, height: wallThickness };
+  }
+  let y = Math.min(seg.y1, seg.y2);
+  let bottom = Math.max(seg.y1, seg.y2);
+  if (bottom - y < wallThickness) return null;
+  if (y === inner.y) y = room.y;
+  if (bottom === inner.y + inner.height) bottom = room.y + room.height;
+  return { x: seg.x1 - half, y, width: wallThickness, height: bottom - y };
 }
 
 function getDoorZone(roomX, roomY, roomWidth, roomHeight, wallThickness, door) {
@@ -105,33 +144,7 @@ function getDoorZone(roomX, roomY, roomWidth, roomHeight, wallThickness, door) {
   }
 }
 
-function segmentCrossesDoorZone(seg, doorZones) {
-  const isHorizontal = Math.abs(seg.y2 - seg.y1) < 1;
-  const isVertical = Math.abs(seg.x2 - seg.x1) < 1;
-
-  for (const zone of doorZones) {
-    if (isHorizontal) {
-      const minX = Math.min(seg.x1, seg.x2);
-      const maxX = Math.max(seg.x1, seg.x2);
-      const y = seg.y1;
-      if (maxX > zone.x && minX < zone.x + zone.width &&
-          y > zone.y && y < zone.y + zone.height) {
-        return true;
-      }
-    } else if (isVertical) {
-      const minY = Math.min(seg.y1, seg.y2);
-      const maxY = Math.max(seg.y1, seg.y2);
-      const x = seg.x1;
-      if (maxY > zone.y && minY < zone.y + zone.height &&
-          x > zone.x && x < zone.x + zone.width) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-function subdivideGeneric(bounds, segments, rand, doorZones, depth, maxDepth, minSize, gapWidth) {
+function subdivideGeneric(bounds, segments, rand, depth, maxDepth, minSize, gapWidth) {
   if (depth >= maxDepth) return;
   if (bounds.width < minSize * 2 || bounds.height < minSize * 2) return;
 
@@ -147,18 +160,15 @@ function subdivideGeneric(bounds, segments, rand, doorZones, depth, maxDepth, mi
     const gapStart = bounds.x + Math.floor(rand() * (bounds.width - gapWidth));
     const gapEnd = gapStart + gapWidth;
 
-    const leftSeg = { x1: bounds.x, y1: splitY, x2: gapStart, y2: splitY };
-    const rightSeg = { x1: gapEnd, y1: splitY, x2: bounds.x + bounds.width, y2: splitY };
-
-    if (gapStart > bounds.x && !segmentCrossesDoorZone(leftSeg, doorZones)) {
-      segments.push(leftSeg);
+    if (gapStart > bounds.x) {
+      segments.push({ x1: bounds.x, y1: splitY, x2: gapStart, y2: splitY });
     }
-    if (gapEnd < bounds.x + bounds.width && !segmentCrossesDoorZone(rightSeg, doorZones)) {
-      segments.push(rightSeg);
+    if (gapEnd < bounds.x + bounds.width) {
+      segments.push({ x1: gapEnd, y1: splitY, x2: bounds.x + bounds.width, y2: splitY });
     }
 
-    subdivideGeneric({ x: bounds.x, y: bounds.y, width: bounds.width, height: splitY - bounds.y }, segments, rand, doorZones, depth + 1, maxDepth, minSize, gapWidth);
-    subdivideGeneric({ x: bounds.x, y: splitY, width: bounds.width, height: bounds.y + bounds.height - splitY }, segments, rand, doorZones, depth + 1, maxDepth, minSize, gapWidth);
+    subdivideGeneric({ x: bounds.x, y: bounds.y, width: bounds.width, height: splitY - bounds.y }, segments, rand, depth + 1, maxDepth, minSize, gapWidth);
+    subdivideGeneric({ x: bounds.x, y: splitY, width: bounds.width, height: bounds.y + bounds.height - splitY }, segments, rand, depth + 1, maxDepth, minSize, gapWidth);
   } else {
     const splitRange = bounds.width - 2 * minSize;
     if (splitRange <= 0) return;
@@ -167,18 +177,15 @@ function subdivideGeneric(bounds, segments, rand, doorZones, depth, maxDepth, mi
     const gapStart = bounds.y + Math.floor(rand() * (bounds.height - gapWidth));
     const gapEnd = gapStart + gapWidth;
 
-    const topSeg = { x1: splitX, y1: bounds.y, x2: splitX, y2: gapStart };
-    const bottomSeg = { x1: splitX, y1: gapEnd, x2: splitX, y2: bounds.y + bounds.height };
-
-    if (gapStart > bounds.y && !segmentCrossesDoorZone(topSeg, doorZones)) {
-      segments.push(topSeg);
+    if (gapStart > bounds.y) {
+      segments.push({ x1: splitX, y1: bounds.y, x2: splitX, y2: gapStart });
     }
-    if (gapEnd < bounds.y + bounds.height && !segmentCrossesDoorZone(bottomSeg, doorZones)) {
-      segments.push(bottomSeg);
+    if (gapEnd < bounds.y + bounds.height) {
+      segments.push({ x1: splitX, y1: gapEnd, x2: splitX, y2: bounds.y + bounds.height });
     }
 
-    subdivideGeneric({ x: bounds.x, y: bounds.y, width: splitX - bounds.x, height: bounds.height }, segments, rand, doorZones, depth + 1, maxDepth, minSize, gapWidth);
-    subdivideGeneric({ x: splitX, y: bounds.y, width: bounds.x + bounds.width - splitX, height: bounds.height }, segments, rand, doorZones, depth + 1, maxDepth, minSize, gapWidth);
+    subdivideGeneric({ x: bounds.x, y: bounds.y, width: splitX - bounds.x, height: bounds.height }, segments, rand, depth + 1, maxDepth, minSize, gapWidth);
+    subdivideGeneric({ x: splitX, y: bounds.y, width: bounds.x + bounds.width - splitX, height: bounds.height }, segments, rand, depth + 1, maxDepth, minSize, gapWidth);
   }
 }
 
@@ -190,7 +197,7 @@ function generateStorageWalls(roomX, roomY, roomWidth, roomHeight, wallThickness
   const innerMaxY = roomY + roomHeight - margin;
 
   const placed = [];
-  const segments = [];
+  const rects = [];
 
   for (let attempt = 0; attempt < CRATE_MAX_ATTEMPTS && placed.length < CRATE_COUNT; attempt++) {
     const sizeIdx = Math.floor(rand() * CRATE_SIZES.length);
@@ -209,21 +216,14 @@ function generateStorageWalls(roomX, roomY, roomWidth, roomHeight, wallThickness
     }
     if (overlaps) continue;
 
-    const crateSegs = [
-      { x1: x, y1: y, x2: x + w, y2: y },
-      { x1: x + w, y1: y, x2: x + w, y2: y + h },
-      { x1: x + w, y1: y + h, x2: x, y2: y + h },
-      { x1: x, y1: y + h, x2: x, y2: y },
-    ];
-
-    const blocked = crateSegs.some(s => segmentCrossesDoorZone(s, doorZones));
-    if (blocked) continue;
+    const rect = { x, y, width: w, height: h };
+    if (rectOverlapsDoorZone(rect, doorZones)) continue;
 
     placed.push({ x, y, w, h });
-    segments.push(...crateSegs);
+    rects.push(rect);
   }
 
-  return segments;
+  return rects;
 }
 
 function generateCubicleWalls(roomX, roomY, roomWidth, roomHeight, wallThickness, rand, doorZones) {
@@ -238,7 +238,7 @@ function generateCubicleWalls(roomX, roomY, roomWidth, roomHeight, wallThickness
   const offsetX = innerMinX + (innerW - cols * CUBICLE_CELL_SIZE) / 2;
   const offsetY = innerMinY + (innerH - rows * CUBICLE_CELL_SIZE) / 2;
 
-  const segments = [];
+  const rects = [];
 
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
@@ -249,25 +249,28 @@ function generateCubicleWalls(roomX, roomY, roomWidth, roomHeight, wallThickness
       const wl = CUBICLE_WALL_LENGTH;
 
       const openSide = Math.floor(rand() * 4);
-      const cellSegs = getCubicleSegments(cx, cy, wl, openSide);
+      const cellRects = getCubicleRects(cx, cy, wl, wallThickness, openSide);
 
-      const blocked = cellSegs.some(s => segmentCrossesDoorZone(s, doorZones));
+      const blocked = cellRects.some(r => rectOverlapsDoorZone(r, doorZones));
       if (!blocked) {
-        segments.push(...cellSegs);
+        rects.push(...cellRects);
       }
     }
   }
 
-  return segments;
+  return rects;
 }
 
-function getCubicleSegments(cx, cy, wl, openSide) {
-  const segs = [];
-  if (openSide !== 0) segs.push({ x1: cx, y1: cy, x2: cx + wl, y2: cy });
-  if (openSide !== 1) segs.push({ x1: cx + wl, y1: cy, x2: cx + wl, y2: cy + wl });
-  if (openSide !== 2) segs.push({ x1: cx + wl, y1: cy + wl, x2: cx, y2: cy + wl });
-  if (openSide !== 3) segs.push({ x1: cx, y1: cy + wl, x2: cx, y2: cy });
-  return segs;
+// Partition bands are centered on the cubicle's edge lines, so perpendicular
+// walls of the same cubicle overlap at the corners (no see-through gap).
+function getCubicleRects(cx, cy, wl, t, openSide) {
+  const half = t / 2;
+  const cellRects = [];
+  if (openSide !== 0) cellRects.push({ x: cx, y: cy - half, width: wl, height: t });
+  if (openSide !== 1) cellRects.push({ x: cx + wl - half, y: cy, width: t, height: wl });
+  if (openSide !== 2) cellRects.push({ x: cx, y: cy + wl - half, width: wl, height: t });
+  if (openSide !== 3) cellRects.push({ x: cx - half, y: cy, width: t, height: wl });
+  return cellRects;
 }
 
 export function generateColumns(roomX, roomY, roomWidth, roomHeight, wallThickness, seed) {

@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { calculateVelocity } from '../systems/movement.js';
 import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES } from '../systems/furniture.js';
-import { generateMazeWalls } from '../systems/maze.js';
+import { generateMazeWalls, wallRectSegments } from '../systems/maze.js';
 import { getRoomVibe } from '../systems/roomVibes.js';
 import { getFlashlightPolygon, filterSegmentsNear, FLASHLIGHT_RANGE } from '../systems/visibility.js';
 import { createRoomWalls } from '../systems/room.js';
@@ -581,28 +581,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   createRoomMaze(gfx, room, theme) {
-    const mazeSegments = generateMazeWalls(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed, room.doors);
-    for (const seg of mazeSegments) {
-      this.wallSegments.push(seg);
-
-      const isHorizontal = Math.abs(seg.y2 - seg.y1) < 1;
-      const length = Math.sqrt((seg.x2 - seg.x1) ** 2 + (seg.y2 - seg.y1) ** 2);
-      if (isHorizontal) {
-        const cx = (seg.x1 + seg.x2) / 2;
-        const cy = seg.y1;
-        this.walls.add(this.add.zone(cx, cy, length, WALL_THICKNESS));
-      } else {
-        const cx = seg.x1;
-        const cy = (seg.y1 + seg.y2) / 2;
-        this.walls.add(this.add.zone(cx, cy, WALL_THICKNESS, length));
-      }
-
+    const mazeRects = generateMazeWalls(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed, room.doors);
+    for (const rect of mazeRects) {
+      this.wallSegments.push(...wallRectSegments(rect));
+      this.walls.add(this.add.zone(rect.x + rect.width / 2, rect.y + rect.height / 2, rect.width, rect.height));
       gfx.fillStyle(theme.wallColor, 1);
-      if (isHorizontal) {
-        gfx.fillRect(Math.min(seg.x1, seg.x2), seg.y1 - WALL_THICKNESS / 2, length, WALL_THICKNESS);
-      } else {
-        gfx.fillRect(seg.x1 - WALL_THICKNESS / 2, Math.min(seg.y1, seg.y2), WALL_THICKNESS, length);
-      }
+      gfx.fillRect(rect.x, rect.y, rect.width, rect.height);
     }
   }
 

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { raySegmentIntersection, getVisibilityPolygon, getFlashlightPolygon, filterSegmentsNear } from '../visibility.js';
+import { wallRectSegments } from '../maze.js';
 import { createRoomWalls } from '../room.js';
 import { getRoomAt, isRiftDoor } from '../worldgen.js';
 
@@ -244,5 +245,104 @@ describe('the rift seals the store against light', () => {
       expect(p.x).toBeLessThanOrEqual(room.x + room.width + 1e-6);
     }
     expect(Math.max(...poly.map(p => p.x))).toBeGreaterThan(room.x + room.width - 1);
+  });
+});
+
+describe('thick wall rects (light cannot leak through wall bands)', () => {
+  // Geometric oracle: no polygon vertex may receive light farther than the
+  // closest wall hit along its own ray.
+  function assertNoLightBeyondWalls(polygon, origin, segments, maxRange) {
+    for (const p of polygon) {
+      const dist = Math.hypot(p.x - origin.x, p.y - origin.y);
+      if (dist < 0.01) continue;
+      const angle = Math.atan2(p.y - origin.y, p.x - origin.x);
+      const ray = { x: origin.x, y: origin.y, dx: Math.cos(angle), dy: Math.sin(angle) };
+      let closest = maxRange;
+      for (const seg of segments) {
+        const hit = raySegmentIntersection(ray, seg);
+        if (hit && hit.t < closest) closest = hit.t;
+      }
+      expect(dist, `vertex (${p.x.toFixed(1)},${p.y.toFixed(1)})`).toBeLessThanOrEqual(closest + 2);
+    }
+  }
+
+  function assertNoVertexInsideRect(polygon, rect) {
+    for (const p of polygon) {
+      const inside =
+        p.x > rect.x + 0.01 && p.x < rect.x + rect.width - 0.01 &&
+        p.y > rect.y + 0.01 && p.y < rect.y + rect.height - 0.01;
+      expect(inside, `vertex (${p.x.toFixed(1)},${p.y.toFixed(1)}) inside wall band`).toBe(false);
+    }
+  }
+
+  it('stops light at the near face of a free-standing wall band', () => {
+    const rect = { x: 100, y: -50, width: 50, height: 100 };
+    const segments = wallRectSegments(rect);
+    const origin = { x: 0, y: 0 };
+    const polygon = getFlashlightPolygon(origin, 0, Math.PI / 6, segments, 300);
+
+    assertNoVertexInsideRect(polygon, rect);
+    for (const p of polygon) {
+      const angle = Math.atan2(p.y - origin.y, p.x - origin.x);
+      if (Math.abs(angle) < 0.45) {
+        expect(p.x).toBeLessThanOrEqual(100.01);
+      }
+    }
+  });
+
+  it('does not let grazing light tunnel lengthwise through a wall band (captured leak)', () => {
+    // Captured in playtest: light entered a horizontal band near its end and
+    // travelled 56px inside the visually solid wall before exiting beyond it.
+    const rect = { x: 968, y: 407, width: 56, height: 16 };
+    const segments = wallRectSegments(rect);
+    const origin = { x: 751, y: 400 };
+    const aim = Math.atan2(416 - origin.y, 1050 - origin.x);
+    const polygon = getFlashlightPolygon(origin, aim, Math.PI / 6, segments, 300);
+
+    assertNoVertexInsideRect(polygon, rect);
+    assertNoLightBeyondWalls(polygon, origin, segments, 300);
+    // Light past the band's right end at band height can only get there by
+    // tunneling through the band: rays over the top reach at most y=407.8 out
+    // there, rays under the near end arrive below y=423.
+    for (const p of polygon) {
+      const tunneled = p.x > rect.x + rect.width && p.y > 407.8 && p.y < 422.9;
+      expect(tunneled, `vertex (${p.x.toFixed(1)},${p.y.toFixed(1)}) tunneled through the band`).toBe(false);
+    }
+  });
+
+  it('does not leak light through the junction where a maze wall meets the room perimeter (captured leak)', () => {
+    // Captured in playtest: the maze wall occluder ended at the perimeter's
+    // inner face, letting rays cut diagonally through the visually solid
+    // junction. The wall rect must reach the true room edge.
+    const room = { x: 0, y: 0, width: 720, height: 600 };
+    const perimeter = createRoomWalls(room.x, room.y, room.width, room.height, []);
+    const wallRect = { x: 255, y: 0, width: 16, height: 353 };
+    const segments = [...perimeter, ...wallRectSegments(wallRect)];
+    const origin = { x: 245, y: 26 };
+
+    for (const aim of [Math.atan2(-10, 18), -Math.PI / 4, -Math.PI / 8]) {
+      const polygon = getFlashlightPolygon(origin, aim, 0.46, segments, 300);
+      assertNoVertexInsideRect(polygon, wallRect);
+      for (const p of polygon) {
+        expect(p.x, `vertex (${p.x.toFixed(1)},${p.y.toFixed(1)}) beyond the wall band`)
+          .toBeLessThanOrEqual(wallRect.x + wallRect.width + 0.01);
+      }
+    }
+  });
+
+  it('does not let light wrap through the drawn corner where two wall bands meet (captured leak)', () => {
+    // Captured in playtest: cubicle partition occluders met at a zero-width
+    // centerline corner, so corner rays wrapped through the drawn 16px corner
+    // block and lit the floor 71px beyond it. Overlapping band rects seal it.
+    const hBand = { x: 926, y: 264, width: 64, height: 16 };
+    const vBand = { x: 918, y: 272, width: 16, height: 64 };
+    const segments = [...wallRectSegments(hBand), ...wallRectSegments(vBand)];
+    const origin = { x: 750.6666666666673, y: 399.99999999999943 };
+    const aim = Math.atan2(272 - origin.y, 926 - origin.x);
+    const polygon = getFlashlightPolygon(origin, aim, 0.46, segments, 300);
+
+    assertNoVertexInsideRect(polygon, hBand);
+    assertNoVertexInsideRect(polygon, vBand);
+    assertNoLightBeyondWalls(polygon, origin, segments, 300);
   });
 });
