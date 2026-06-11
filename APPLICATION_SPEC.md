@@ -61,3 +61,4 @@ Feedback from me (DO NOT CHANGE):
 
 Known bugs:
 - Hiding places, stairs, and doors will often spawn inside walls
+- The flashlight light leaks through the edges of walls
