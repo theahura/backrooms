@@ -7,7 +7,7 @@ export const TRAP_TYPES = [
 
 const SEED_OFFSET = 110000;
 
-export function generateRoomTraps(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, furnitureItems, roomId, distance = 0) {
+export function generateRoomTraps(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, furnitureItems, roomId, distance = 0, obstacles = []) {
   if (roomId === 0) return [];
   if (distance < 2) return [];
 
@@ -30,12 +30,13 @@ export function generateRoomTraps(roomX, roomY, roomWidth, roomHeight, wallThick
   if (!trapDef) return [];
 
   const trapRadius = 10;
+  const blockers = obstacles.length ? furnitureItems.concat(obstacles) : furnitureItems;
   for (let attempt = 0; attempt < 20; attempt++) {
     const x = minX + rand() * (maxX - minX);
     const y = minY + rand() * (maxY - minY);
 
     let overlaps = false;
-    for (const f of furnitureItems) {
+    for (const f of blockers) {
       if (
         x >= f.x - trapRadius &&
         x <= f.x + f.width + trapRadius &&

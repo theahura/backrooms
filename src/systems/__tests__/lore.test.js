@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { generateRoomLore, LORE_ENTRIES, getJournalEntries, getJournalPage } from '../lore.js';
+import { generateMazeWalls } from '../maze.js';
 
 const ROOM_X = 0;
 const ROOM_Y = 0;
@@ -159,5 +160,46 @@ describe('getJournalPage', () => {
 
     const result2 = getJournalPage(entries, -5, 5);
     expect(result2.currentPage).toBe(0);
+  });
+});
+
+describe('generateRoomLore wall avoidance', () => {
+  const doors = [{ wall: 'east', offset: 400, width: 80, targetRoomId: 1 }];
+
+  const insideRect = (p, r) =>
+    p.x >= r.x && p.x <= r.x + r.width &&
+    p.y >= r.y && p.y <= r.y + r.height;
+
+  it('does not place lore overlapping a supplied obstacle rect', () => {
+    const obstacle = { x: 300, y: 250, width: 500, height: 500 };
+    for (let seed = 0; seed < 200; seed++) {
+      const lore = generateRoomLore(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, new Set(), [obstacle]);
+      for (const note of lore) {
+        expect(insideRect(note, obstacle), `seed ${seed}`).toBe(false);
+      }
+    }
+  });
+
+  it('does not place lore overlapping the real maze walls of the same room', () => {
+    let wallsSeen = 0;
+    for (let seed = 0; seed < 500; seed++) {
+      const walls = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
+      wallsSeen += walls.length;
+      const lore = generateRoomLore(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, new Set(), walls);
+      for (const note of lore) {
+        for (const wall of walls) {
+          expect(insideRect(note, wall), `seed ${seed}`).toBe(false);
+        }
+      }
+    }
+    expect(wallsSeen).toBeGreaterThan(0);
+  });
+
+  it('produces the same lore whether obstacles is omitted or passed empty', () => {
+    for (const seed of [3, 11, 42, 99, 123]) {
+      const omitted = generateRoomLore(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, new Set());
+      const empty = generateRoomLore(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, new Set(), []);
+      expect(empty, `seed ${seed}`).toEqual(omitted);
+    }
   });
 });

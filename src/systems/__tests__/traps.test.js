@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { generateRoomTraps } from '../traps.js';
+import { generateMazeWalls } from '../maze.js';
 
 describe('generateRoomTraps', () => {
   const baseRoom = {
@@ -177,6 +178,53 @@ describe('generateRoomTraps', () => {
     expect(noiseTraps.length).toBeGreaterThan(0);
     for (const trap of noiseTraps) {
       expect(trap.damage).toBe(0);
+    }
+  });
+});
+
+describe('generateRoomTraps wall avoidance', () => {
+  const ROOM_X = 0;
+  const ROOM_Y = 0;
+  const ROOM_WIDTH = 1200;
+  const ROOM_HEIGHT = 1000;
+  const WALL_THICKNESS = 20;
+  const DISTANCE = 4;
+  const doors = [{ wall: 'east', offset: 400, width: 80, targetRoomId: 1 }];
+
+  const insideRect = (p, r) =>
+    p.x >= r.x && p.x <= r.x + r.width &&
+    p.y >= r.y && p.y <= r.y + r.height;
+
+  it('does not place traps overlapping a supplied obstacle rect', () => {
+    const obstacle = { x: 300, y: 250, width: 500, height: 500 };
+    for (let seed = 0; seed < 200; seed++) {
+      const traps = generateRoomTraps(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, DISTANCE, [obstacle]);
+      for (const trap of traps) {
+        expect(insideRect(trap, obstacle), `seed ${seed}`).toBe(false);
+      }
+    }
+  });
+
+  it('does not place traps overlapping the real maze walls of the same room', () => {
+    let wallsSeen = 0;
+    for (let seed = 0; seed < 200; seed++) {
+      const walls = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
+      wallsSeen += walls.length;
+      const traps = generateRoomTraps(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, DISTANCE, walls);
+      for (const trap of traps) {
+        for (const wall of walls) {
+          expect(insideRect(trap, wall), `seed ${seed}`).toBe(false);
+        }
+      }
+    }
+    expect(wallsSeen).toBeGreaterThan(0);
+  });
+
+  it('produces the same traps whether obstacles is omitted or passed empty', () => {
+    for (const seed of [3, 11, 42, 99, 123]) {
+      const omitted = generateRoomTraps(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, DISTANCE);
+      const empty = generateRoomTraps(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, DISTANCE, []);
+      expect(empty, `seed ${seed}`).toEqual(omitted);
     }
   });
 });

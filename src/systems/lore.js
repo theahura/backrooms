@@ -44,7 +44,7 @@ export function getJournalPage(entries, page, perPage) {
   return { pageEntries, currentPage, totalPages };
 }
 
-export function generateRoomLore(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, furnitureItems, roomId, collectedLoreIds) {
+export function generateRoomLore(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, furnitureItems, roomId, collectedLoreIds, obstacles = []) {
   if (roomId === 0) return [];
 
   const rand = mulberry32(seed + LORE_SEED_OFFSET);
@@ -62,13 +62,14 @@ export function generateRoomLore(roomX, roomY, roomWidth, roomHeight, wallThickn
   const maxX = roomX + roomWidth - wallThickness - margin;
   const maxY = roomY + roomHeight - wallThickness - margin;
   const itemRadius = 8;
+  const blockers = obstacles.length ? furnitureItems.concat(obstacles) : furnitureItems;
 
   for (let attempt = 0; attempt < 20; attempt++) {
     const x = minX + rand() * (maxX - minX);
     const y = minY + rand() * (maxY - minY);
 
     let overlaps = false;
-    for (const f of furnitureItems) {
+    for (const f of blockers) {
       if (
         x >= f.x - itemRadius &&
         x <= f.x + f.width + itemRadius &&

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { generateRoomItems } from '../items.js';
+import { generateMazeWalls } from '../maze.js';
 
 const ROOM_X = 0;
 const ROOM_Y = 0;
@@ -129,4 +130,45 @@ describe('generateRoomItems', () => {
     expect(Object.keys(typeCounts).length).toBeGreaterThanOrEqual(3);
   });
 
+});
+
+describe('generateRoomItems wall avoidance', () => {
+  const doors = [{ wall: 'east', offset: 400, width: 80, targetRoomId: 1 }];
+
+  const insideRect = (p, r) =>
+    p.x >= r.x && p.x <= r.x + r.width &&
+    p.y >= r.y && p.y <= r.y + r.height;
+
+  it('does not place items overlapping a supplied obstacle rect', () => {
+    const obstacle = { x: 300, y: 250, width: 500, height: 500 };
+    for (let seed = 0; seed < 120; seed++) {
+      const items = generateRoomItems(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 4, [obstacle]);
+      for (const item of items) {
+        expect(insideRect(item, obstacle), `seed ${seed}`).toBe(false);
+      }
+    }
+  });
+
+  it('does not place items overlapping the real maze walls of the same room', () => {
+    let wallsSeen = 0;
+    for (let seed = 0; seed < 150; seed++) {
+      const walls = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
+      wallsSeen += walls.length;
+      const items = generateRoomItems(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 4, walls);
+      for (const item of items) {
+        for (const wall of walls) {
+          expect(insideRect(item, wall), `seed ${seed}`).toBe(false);
+        }
+      }
+    }
+    expect(wallsSeen).toBeGreaterThan(0);
+  });
+
+  it('produces the same items whether obstacles is omitted or passed empty', () => {
+    for (const seed of [3, 11, 42, 99, 123]) {
+      const omitted = generateRoomItems(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 4);
+      const empty = generateRoomItems(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 4, []);
+      expect(empty, `seed ${seed}`).toEqual(omitted);
+    }
+  });
 });

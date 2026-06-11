@@ -333,11 +333,11 @@ export class GameScene extends Phaser.Scene {
 
     this.activateRoomDoors(room);
     this.activateRoomSwitch(room);
-    this.activateRoomItems(room);
-    this.activateRoomLore(room);
-    this.activateRoomTraps(room);
+    this.activateRoomItems(room, mazeRects);
+    this.activateRoomLore(room, mazeRects);
+    this.activateRoomTraps(room, mazeRects);
     this.activateRoomEnemies(room);
-    this.activateRoomWeapon(room);
+    this.activateRoomWeapon(room, mazeRects);
     this.activateRoomStairs(room);
 
     this.roomGraphDirty = true;
@@ -876,12 +876,12 @@ export class GameScene extends Phaser.Scene {
     this.itemGroup = this.physics.add.staticGroup();
   }
 
-  activateRoomItems(room) {
+  activateRoomItems(room, mazeRects = []) {
     const furniture = this.roomFurniture.get(room.id) || [];
     const items = generateRoomItems(
       room.x, room.y, room.width, room.height,
       WALL_THICKNESS, room.seed, furniture, room.id,
-      room.distance
+      room.distance, mazeRects
     );
 
     for (const item of items) {
@@ -932,11 +932,11 @@ export class GameScene extends Phaser.Scene {
     this.lorePopup = null;
   }
 
-  activateRoomLore(room) {
+  activateRoomLore(room, mazeRects = []) {
     const furniture = this.roomFurniture.get(room.id) || [];
     const loreItems = generateRoomLore(
       room.x, room.y, room.width, room.height,
-      WALL_THICKNESS, room.seed, furniture, room.id, this.collectedLore
+      WALL_THICKNESS, room.seed, furniture, room.id, this.collectedLore, mazeRects
     );
 
     for (const item of loreItems) {
@@ -1017,12 +1017,12 @@ export class GameScene extends Phaser.Scene {
     this.trapGroup = this.physics.add.staticGroup();
   }
 
-  activateRoomTraps(room) {
+  activateRoomTraps(room, mazeRects = []) {
     const furniture = this.roomFurniture.get(room.id) || [];
     const traps = generateRoomTraps(
       room.x, room.y, room.width, room.height,
       WALL_THICKNESS, room.seed, furniture, room.id,
-      room.distance
+      room.distance, mazeRects
     );
 
     for (const trap of traps) {
@@ -1242,14 +1242,14 @@ export class GameScene extends Phaser.Scene {
 
   // One ground weapon spawns per floor, in the first non-entrance room on that
   // floor (in activation order) where a valid placement is found.
-  activateRoomWeapon(room) {
+  activateRoomWeapon(room, mazeRects = []) {
     if (room.id === 0) return;
     if (this.weaponedFloors.has(room.floor)) return;
 
     const furniture = this.roomFurniture.get(room.id) || [];
     const wpnData = generateRoomWeapon(
       room.x, room.y, room.width, room.height,
-      WALL_THICKNESS, this.levelSeed + room.floor * 100, furniture, room.id
+      WALL_THICKNESS, this.levelSeed + room.floor * 100, furniture, room.id, mazeRects
     );
     if (!wpnData) return;
 

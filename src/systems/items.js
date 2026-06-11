@@ -25,7 +25,7 @@ function pickWeightedType(rand, distance) {
   return ITEM_TYPES[ITEM_TYPES.length - 1];
 }
 
-export function generateRoomItems(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, furnitureItems, roomId, distance = 0) {
+export function generateRoomItems(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, furnitureItems, roomId, distance = 0, obstacles = []) {
   if (roomId === 0) return [];
 
   const rand = mulberry32(seed + 20000);
@@ -40,13 +40,14 @@ export function generateRoomItems(roomX, roomY, roomWidth, roomHeight, wallThick
   if (count === 0) return [];
   const placed = [];
   const itemRadius = 8;
+  const blockers = obstacles.length ? furnitureItems.concat(obstacles) : furnitureItems;
 
   for (let attempt = 0; attempt < count * 20 && placed.length < count; attempt++) {
     const x = minX + rand() * (maxX - minX);
     const y = minY + rand() * (maxY - minY);
 
     let overlaps = false;
-    for (const f of furnitureItems) {
+    for (const f of blockers) {
       if (
         x >= f.x - itemRadius &&
         x <= f.x + f.width + itemRadius &&
