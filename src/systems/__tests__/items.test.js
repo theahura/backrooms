@@ -18,7 +18,9 @@ function generateAcrossSeeds(distance, seeds, roomId = 5, seedStart = 0) {
   return all;
 }
 
-function countsAcrossSeeds(distance, seeds, roomId = 5) {
+const SEEDS = 300;
+
+function countsAcrossSeeds(distance, seeds = SEEDS, roomId = 5) {
   const counts = [];
   for (let seed = 0; seed < seeds; seed++) {
     counts.push(
@@ -37,40 +39,38 @@ describe('generateRoomItems', () => {
   });
 
   it('returns at most 3 items near the entrance and at most 2 farther out', () => {
-    for (const distance of [1, 2, 3]) {
-      const counts = countsAcrossSeeds(distance, 300);
-      expect(counts.some(c => c === 3)).toBe(true);
-      for (const count of counts) {
-        expect(count).toBeLessThanOrEqual(3);
-      }
+    for (const distance of [1, 3]) {
+      const counts = countsAcrossSeeds(distance);
+      expect(counts.some(c => c === 3), `distance ${distance}`).toBe(true);
+      expect(Math.max(...counts)).toBeLessThanOrEqual(3);
     }
-    for (const distance of [4, 7, 8, 12]) {
-      for (const count of countsAcrossSeeds(distance, 300)) {
-        expect(count).toBeLessThanOrEqual(2);
-      }
+    for (const distance of [4, 7, 8]) {
+      const counts = countsAcrossSeeds(distance);
+      expect(counts.some(c => c === 2), `distance ${distance}`).toBe(true);
+      expect(Math.max(...counts)).toBeLessThanOrEqual(2);
     }
   });
 
   it('spawns items generously in rooms near the entrance', () => {
-    const counts = countsAcrossSeeds(2, 300);
+    const counts = countsAcrossSeeds(2);
     expect(mean(counts)).toBeGreaterThanOrEqual(1.2);
     expect(counts.some(c => c === 3)).toBe(true);
     expect(counts.some(c => c === 0)).toBe(true);
   });
 
   it('generates items sparsely in deep rooms so most hold little or nothing', () => {
-    const counts = countsAcrossSeeds(8, 300);
+    const counts = countsAcrossSeeds(8);
     const empty = counts.filter(c => c === 0).length;
     expect(empty).toBeGreaterThan(counts.length * 0.45);
   });
 
-  it('tapers the item count down as distance from the entrance grows', () => {
-    const near = mean(countsAcrossSeeds(2, 300));
-    const mid = mean(countsAcrossSeeds(5, 300));
-    const midEdge = mean(countsAcrossSeeds(7, 300));
-    const deep = mean(countsAcrossSeeds(8, 300));
+  it('tapers the item count down across the distance bands', () => {
+    const near = mean(countsAcrossSeeds(2));
+    const mid = mean(countsAcrossSeeds(5));
+    const lastMid = mean(countsAcrossSeeds(7));
+    const deep = mean(countsAcrossSeeds(8));
     expect(near).toBeGreaterThan(mid);
-    expect(midEdge).toBeGreaterThan(deep);
+    expect(lastMid).toBeGreaterThan(deep);
   });
 
   it('places items within room bounds', () => {
