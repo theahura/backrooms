@@ -52,11 +52,14 @@ Other details (from playtesting):
 - zombies and other enemies should not follow the player once they lose line of sight. That includes walls and hiding state.
 - gunfire should go over tables and desks and low furniture, should be blocked by armoires and other furniture
 
+# Things that still need to be implemented
+
 Feedback from me (DO NOT CHANGE):
 - most of the pixel art is not facing the right direction (e.g. the armoire is also front facing instead of top down)
 - and it is all basically way too small. What kind of sprite is 18x18! that is so small the player cant really make it out at all
 - I think the player character view should be top down -- we should see the top of the head, the shoulders, and the flashlight with arm stuck out. Similar for all the other sprites.
 - get rid of floor traps
+- the game is way too hard. There shouldnt be more / harder enemies that spawn in later days. It should be a function of distance from the start
 
 Known bugs:
 - Hiding places, stairs, and doors will often spawn inside walls
