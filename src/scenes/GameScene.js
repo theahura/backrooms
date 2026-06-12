@@ -8,13 +8,13 @@ import { createRoomWalls } from '../systems/room.js';
 import { STAIR_SIZE, STAIR_MARGIN, getStairTopLeft, stairKeepOut, getStairLandingPosition, stairLandingKeepOut } from '../systems/stairs.js';
 import { getRoomAt, roomsWithinRadius, hasStairDown, localDistance, isRiftDoor, ROOM_WIDTH, ROOM_HEIGHT } from '../systems/worldgen.js';
 import { mulberry32 } from '../systems/random.js';
-import { generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_CHASE, CRAWLER_CHASE_SPEED, SPITTER_CHASE_SPEED, DETECTION_RANGE } from '../systems/enemy.js';
+import { generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_CHASE, DETECTION_RANGE } from '../systems/enemy.js';
 import { createCombatState, applyDamage, applyHeal, updateCombat, getHealthFraction, isInvulnerable, applyEnemyDamage, isEnemyDead, getHurtFlash, ENEMY_CONTACT_DAMAGE, ENEMY_MAX_HP, CRAWLER_MAX_HP, SPITTER_MAX_HP, CRAWLER_CONTACT_DAMAGE, SPITTER_CONTACT_DAMAGE, SPITTER_PROJECTILE_DAMAGE, CORPSE_TINT, CORPSE_ALPHA, CORPSE_ANGLE, CORPSE_DEPTH, MEDKIT_HEAL_AMOUNT } from '../systems/combat.js';
 import { createFlashlightState, toggleFlashlight, setFlashlightHiding, isFlashlightLit, updateBatteryWithFlashlight } from '../systems/flashlight.js';
 import { calculateBulletVelocity, calculateShotgunSpread, canFire, updateFireCooldown, isBulletExpired, getBulletVelocityFromAngle, SPITTER_PROJECTILE_SPEED, SPITTER_PROJECTILE_RANGE } from '../systems/shooting.js';
 import { getMoveVelocity, resolveAimAngle, resolveFireIntent, resolveMoveVelocity, detectTouchPrimary, computeTouchLayout } from '../systems/touchControls.js';
 import { WEAPON_TYPES, createWeaponState, switchWeapon, pickupWeapon, getActiveWeapon, getEffectiveStats, generateRoomWeapon, hasAmmo, consumeAmmo, addAmmo, AMMO_PER_PICKUP } from '../systems/weapons.js';
-import { getEnemyHP, getEnemyCount, getEnemyChaseSpeed, getEnemyDamage } from '../systems/scaling.js';
+import { getEnemyHP, getEnemyDamage } from '../systems/scaling.js';
 import { createBatteryState, getBatteryFraction, getFlashlightConeAngle, shouldFlicker, rechargeBattery, getBatteryHint, BATTERY_RECHARGE_AMOUNT } from '../systems/battery.js';
 import { generateRoomItems, ITEM_TYPES } from '../systems/items.js';
 import { createInventoryState, pickupItem, useBattery, canPickupItem } from '../systems/inventory.js';
@@ -108,16 +108,6 @@ export class GameScene extends Phaser.Scene {
     this.registry.set('runCount', runCount + 1);
     this.levelSeed = runCount + 1;
     this.runCount = runCount;
-    this.scaledEnemyHP = getEnemyHP(ENEMY_MAX_HP, runCount);
-    this.scaledCrawlerHP = getEnemyHP(CRAWLER_MAX_HP, runCount);
-    this.scaledSpitterHP = getEnemyHP(SPITTER_MAX_HP, runCount);
-    this.scaledEnemyChaseSpeed = getEnemyChaseSpeed(ENEMY_SPEED_CHASE, runCount);
-    this.scaledCrawlerChaseSpeed = getEnemyChaseSpeed(CRAWLER_CHASE_SPEED, runCount);
-    this.scaledSpitterChaseSpeed = getEnemyChaseSpeed(SPITTER_CHASE_SPEED, runCount);
-    this.scaledEnemyDamage = getEnemyDamage(ENEMY_CONTACT_DAMAGE, runCount);
-    this.scaledCrawlerDamage = getEnemyDamage(CRAWLER_CONTACT_DAMAGE, runCount);
-    this.scaledSpitterDamage = getEnemyDamage(SPITTER_CONTACT_DAMAGE, runCount);
-    this.extraEnemyCount = getEnemyCount(runCount);
     this.collectedLore = new Set(this.registry.get('collectedLore') ?? []);
     this.activeLocation = this.registry.get('activeLocation') ?? 'store';
     this.activeLocationData = getLocation(this.activeLocation) || getLocation('store');
@@ -1040,12 +1030,12 @@ export class GameScene extends Phaser.Scene {
     this.physics.add.overlap(this.player, this.enemyGroup, this.onEnemyContact, null, this);
   }
 
-  getEnemyStats(type) {
+  getEnemyStats(type, distance) {
     // bodySize is in texture pixels and gets multiplied by the display scale
     // (display/texture), so these stay close to the pre-scale-up hitboxes.
-    if (type === 'crawler') return { hp: this.scaledCrawlerHP, contactDamage: this.scaledCrawlerDamage, textureKey: getEnemyTextureKey('crawler'), bodySize: 7, displaySize: 34 };
-    if (type === 'spitter') return { hp: this.scaledSpitterHP, contactDamage: this.scaledSpitterDamage, textureKey: getEnemyTextureKey('spitter'), bodySize: 10, displaySize: 44 };
-    return { hp: this.scaledEnemyHP, contactDamage: this.scaledEnemyDamage, textureKey: getEnemyTextureKey('basic'), bodySize: 10, displaySize: 44 };
+    if (type === 'crawler') return { hp: getEnemyHP(CRAWLER_MAX_HP, distance), contactDamage: getEnemyDamage(CRAWLER_CONTACT_DAMAGE, distance), textureKey: getEnemyTextureKey('crawler'), bodySize: 7, displaySize: 34 };
+    if (type === 'spitter') return { hp: getEnemyHP(SPITTER_MAX_HP, distance), contactDamage: getEnemyDamage(SPITTER_CONTACT_DAMAGE, distance), textureKey: getEnemyTextureKey('spitter'), bodySize: 10, displaySize: 44 };
+    return { hp: getEnemyHP(ENEMY_MAX_HP, distance), contactDamage: getEnemyDamage(ENEMY_CONTACT_DAMAGE, distance), textureKey: getEnemyTextureKey('basic'), bodySize: 10, displaySize: 44 };
   }
 
   spawnDangerWave(playerRoomId, litRoomIds) {
@@ -1063,7 +1053,7 @@ export class GameScene extends Phaser.Scene {
     for (const type of types) {
       const x = minX + Math.random() * (maxX - minX);
       const y = minY + Math.random() * (maxY - minY);
-      const stats = this.getEnemyStats(type);
+      const stats = this.getEnemyStats(type, room.distance);
       const enemy = this.enemyGroup.create(x, y, stats.textureKey);
       enemy.setDisplaySize(stats.displaySize, stats.displaySize);
       enemy.body.setSize(stats.bodySize, stats.bodySize, true);
@@ -1110,11 +1100,11 @@ export class GameScene extends Phaser.Scene {
     const furniture = this.roomFurniture.get(room.id) || [];
     const spawnPoints = generateRoomEnemies(
       room.x, room.y, room.width, room.height,
-      WALL_THICKNESS, room.seed, furniture, room.id, this.extraEnemyCount, this.runCount
+      WALL_THICKNESS, room.seed, furniture, room.id, room.distance
     );
 
     for (const spawn of spawnPoints) {
-      const stats = this.getEnemyStats(spawn.type);
+      const stats = this.getEnemyStats(spawn.type, room.distance);
       const enemy = this.enemyGroup.create(spawn.x, spawn.y, stats.textureKey);
       enemy.setDisplaySize(stats.displaySize, stats.displaySize);
       enemy.body.setSize(stats.bodySize, stats.bodySize, true);
@@ -1832,12 +1822,6 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  getScaledChaseSpeed(type) {
-    if (type === 'crawler') return this.scaledCrawlerChaseSpeed;
-    if (type === 'spitter') return this.scaledSpitterChaseSpeed;
-    return this.scaledEnemyChaseSpeed;
-  }
-
   updateEnemies(delta) {
     const playerPos = { x: this.player.x, y: this.player.y };
     // Enemy line-of-sight only matters within DETECTION_RANGE of the player,
@@ -1924,9 +1908,8 @@ export class GameScene extends Phaser.Scene {
         seekDoorway,
       };
 
-      const chaseSpeed = this.getScaledChaseSpeed(es.type);
       const oldState = es.state;
-      const updated = updateEnemyAI(es, playerPos, losSegments, delta, this.hidingState.isHiding, chaseSpeed, navContext);
+      const updated = updateEnemyAI(es, playerPos, losSegments, delta, this.hidingState.isHiding, ENEMY_SPEED_CHASE, navContext);
 
       const soundResult = getEnemySoundEvent(oldState, updated.state, es.type, es.soundCooldown || 0, delta);
       es.soundCooldown = soundResult.newCooldown;

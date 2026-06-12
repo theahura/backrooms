@@ -1,15 +1,19 @@
-export function getEnemyHP(baseHP, runCount) {
-  return Math.min(Math.round(baseHP * (1 + 0.25 * runCount)), baseHP * 3);
+// Enemy difficulty scales with a room's distance from the entrance
+// (room.distance = door-hop Manhattan distance + FLOOR_DEPTH per floor),
+// the same axis item/loot quality already uses. Rooms within SAFE_DISTANCE
+// of the entrance stay at base difficulty permanently.
+export const SAFE_DISTANCE = 2;
+
+export function getEnemyHP(baseHP, distance) {
+  const depth = Math.max(0, distance - SAFE_DISTANCE);
+  return Math.min(Math.round(baseHP * (1 + 0.10 * depth)), Math.round(baseHP * 2.5));
 }
 
-export function getEnemyCount(runCount) {
-  return Math.min(Math.floor(runCount / 2), 3);
+export function getEnemyCount(distance) {
+  return Math.min(Math.max(0, Math.floor((distance - 3) / 4)), 3);
 }
 
-export function getEnemyChaseSpeed(baseSpeed, runCount) {
-  return baseSpeed * (1 + 0.05 * Math.min(runCount, 6));
-}
-
-export function getEnemyDamage(baseDamage, runCount) {
-  return baseDamage + 5 * Math.min(runCount, 4);
+export function getEnemyDamage(baseDamage, distance) {
+  const depth = Math.max(0, distance - SAFE_DISTANCE);
+  return Math.min(baseDamage + 5 * Math.floor(depth / 4), baseDamage + 20);
 }

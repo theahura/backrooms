@@ -1,5 +1,6 @@
 import { raySegmentIntersection } from './visibility.js';
 import { mulberry32 } from './random.js';
+import { getEnemyCount, SAFE_DISTANCE } from './scaling.js';
 
 export const ENEMY_SPEED_CHASE = 80;
 export const ENEMY_SPEED_WANDER = 30;
@@ -16,14 +17,14 @@ export const SPITTER_ATTACK_RANGE = 250;
 export const SPITTER_ATTACK_COOLDOWN = 2000;
 export const SPITTER_TELEGRAPH_MS = 300;
 
-export function getEnemyType(rand, runCount) {
+export function getEnemyType(rand, distance) {
   const roll = rand();
-  if (runCount >= 2) {
+  if (distance >= 8) {
     if (roll < 0.50) return 'basic';
     if (roll < 0.75) return 'crawler';
     return 'spitter';
   }
-  if (runCount >= 1) {
+  if (distance >= 4) {
     if (roll < 0.80) return 'basic';
     return 'crawler';
   }
@@ -55,7 +56,7 @@ export function hasLineOfSight(enemyPos, playerPos, segments, maxRange) {
   return true;
 }
 
-export function generateRoomEnemies(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, furnitureItems, roomId, extraCount = 0, runCount = 0) {
+export function generateRoomEnemies(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, furnitureItems, roomId, distance = 0) {
   if (roomId === 0) return [];
 
   const rand = mulberry32(seed + 10000);
@@ -65,7 +66,8 @@ export function generateRoomEnemies(roomX, roomY, roomWidth, roomHeight, wallThi
   const maxX = roomX + roomWidth - wallThickness - margin;
   const maxY = roomY + roomHeight - wallThickness - margin;
 
-  const count = Math.min(1 + Math.floor(rand() * 2) + extraCount, 5);
+  const base = distance <= SAFE_DISTANCE ? 0 : 1;
+  const count = Math.min(base + Math.floor(rand() * 2) + getEnemyCount(distance), 5);
   const placed = [];
   const enemyRadius = 10;
 
@@ -87,7 +89,7 @@ export function generateRoomEnemies(roomX, roomY, roomWidth, roomHeight, wallThi
     }
 
     if (!overlaps) {
-      placed.push({ x, y, wanderAngle: rand() * Math.PI * 2, type: getEnemyType(rand, runCount) });
+      placed.push({ x, y, wanderAngle: rand() * Math.PI * 2, type: getEnemyType(rand, distance) });
     }
   }
 

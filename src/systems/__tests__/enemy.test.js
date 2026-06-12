@@ -59,14 +59,45 @@ describe('generateRoomEnemies', () => {
     expect(enemies).toEqual([]);
   });
 
-  it('returns 1-2 enemies for non-starting rooms', () => {
-    const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42, [], 1);
+  it('spawns 0-1 enemies near the entrance, including some empty rooms', () => {
+    const counts = new Set();
+    for (let seed = 0; seed < 30; seed++) {
+      const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 1);
+      expect(enemies.length).toBeLessThanOrEqual(1);
+      counts.add(enemies.length);
+    }
+    expect(counts.has(0)).toBe(true);
+    expect(counts.has(1)).toBe(true);
+  });
+
+  it('returns 1-2 enemies at mid distance', () => {
+    const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42, [], 1, 4);
     expect(enemies.length).toBeGreaterThanOrEqual(1);
     expect(enemies.length).toBeLessThanOrEqual(2);
   });
 
+  it('spawns more enemies in deep rooms than mid rooms on average', () => {
+    let midTotal = 0;
+    let deepTotal = 0;
+    for (let seed = 0; seed < 100; seed++) {
+      midTotal += generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 4).length;
+      deepTotal += generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 15).length;
+    }
+    expect(midTotal).toBeGreaterThan(0);
+    expect(deepTotal).toBeGreaterThan(midTotal);
+  });
+
+  it('caps total enemies at 5 in the deepest rooms', () => {
+    for (let seed = 0; seed < 30; seed++) {
+      const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 100);
+      expect(enemies.length).toBeGreaterThanOrEqual(4);
+      expect(enemies.length).toBeLessThanOrEqual(5);
+    }
+  });
+
   it('places enemies within room bounds', () => {
-    const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42, [], 1);
+    const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42, [], 1, 4);
+    expect(enemies.length).toBeGreaterThanOrEqual(1);
 
     for (const e of enemies) {
       expect(e.x).toBeGreaterThan(ROOM_X + WALL_THICKNESS);
@@ -77,8 +108,8 @@ describe('generateRoomEnemies', () => {
   });
 
   it('produces deterministic output for the same seed', () => {
-    const first = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 99, [], 1);
-    const second = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 99, [], 1);
+    const first = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 99, [], 1, 8);
+    const second = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 99, [], 1, 8);
     expect(first.length).toBeGreaterThanOrEqual(1);
     expect(first).toEqual(second);
   });
@@ -89,8 +120,10 @@ describe('generateRoomEnemies', () => {
       { x: 100, y: 100, width: 300, height: 300 },
     ];
 
+    let enemiesSeen = 0;
     for (let seed = 0; seed < 20; seed++) {
-      const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, furniture, 1);
+      const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, furniture, 1, 8);
+      enemiesSeen += enemies.length;
 
       for (const e of enemies) {
         for (const f of furniture) {
@@ -101,6 +134,7 @@ describe('generateRoomEnemies', () => {
         }
       }
     }
+    expect(enemiesSeen).toBeGreaterThan(0);
   });
 });
 
@@ -359,54 +393,37 @@ describe('updateEnemyAI', () => {
   });
 });
 
-describe('generateRoomEnemies with extraCount', () => {
-  const ROOM_X = 0;
-  const ROOM_Y = 0;
-  const ROOM_WIDTH = 1200;
-  const ROOM_HEIGHT = 1000;
-  const WALL_THICKNESS = 16;
-
-  it('produces more enemies when extraCount is provided', () => {
-    const baseEnemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42, [], 1);
-    const extraEnemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42, [], 1, 3);
-    expect(extraEnemies.length).toBeGreaterThan(baseEnemies.length);
-  });
-
-  it('caps total enemies at 5', () => {
-    const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42, [], 1, 10);
-    expect(enemies.length).toBeLessThanOrEqual(5);
-  });
-
-});
-
 describe('getEnemyType', () => {
-  it('returns basic for all rolls at run 0', () => {
-    for (let i = 0; i < 100; i++) {
-      const roll = i / 100;
-      expect(getEnemyType(() => roll, 0)).toBe('basic');
+  it('returns basic for all rolls near the entrance (distance 0-3)', () => {
+    for (const distance of [0, 1, 2, 3]) {
+      for (let i = 0; i < 100; i++) {
+        const roll = i / 100;
+        expect(getEnemyType(() => roll, distance)).toBe('basic');
+      }
     }
   });
 
-  it('returns basic or crawler at run 1, never spitter', () => {
-    const types = new Set();
-    for (let i = 0; i < 100; i++) {
-      types.add(getEnemyType(() => i / 100, 1));
+  it('returns basic or crawler at mid distance, never spitter', () => {
+    for (const distance of [4, 7]) {
+      const types = new Set();
+      for (let i = 0; i < 100; i++) {
+        types.add(getEnemyType(() => i / 100, distance));
+      }
+      expect(types.has('basic')).toBe(true);
+      expect(types.has('crawler')).toBe(true);
+      expect(types.has('spitter')).toBe(false);
     }
-    expect(types.has('basic')).toBe(true);
-    expect(types.has('crawler')).toBe(true);
-    expect(types.has('spitter')).toBe(false);
   });
 
-  it('returns all three types at run 2+', () => {
+  it('returns all three types deep (distance 8+)', () => {
     const types = new Set();
     for (let i = 0; i < 100; i++) {
-      types.add(getEnemyType(() => i / 100, 2));
+      types.add(getEnemyType(() => i / 100, 8));
     }
     expect(types.has('basic')).toBe(true);
     expect(types.has('crawler')).toBe(true);
     expect(types.has('spitter')).toBe(true);
   });
-
 });
 
 describe('generateRoomEnemies with types', () => {
@@ -416,28 +433,22 @@ describe('generateRoomEnemies with types', () => {
   const ROOM_HEIGHT = 1000;
   const WALL_THICKNESS = 16;
 
-  it('returns spawn objects with a type field', () => {
-    const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42, [], 1, 0, 0);
-    expect(enemies.length).toBeGreaterThanOrEqual(1);
-    for (const e of enemies) {
-      expect(e).toHaveProperty('type');
-      expect(['basic', 'crawler', 'spitter']).toContain(e.type);
-    }
-  });
-
-  it('produces only basic type at run 0', () => {
+  it('produces only basic type near the entrance', () => {
+    let enemiesSeen = 0;
     for (let seed = 0; seed < 10; seed++) {
-      const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 0, 0);
+      const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 3);
+      enemiesSeen += enemies.length;
       for (const e of enemies) {
         expect(e.type).toBe('basic');
       }
     }
+    expect(enemiesSeen).toBeGreaterThan(0);
   });
 
-  it('can produce all three types at run 2+', () => {
+  it('can produce all three types in deep rooms', () => {
     const types = new Set();
     for (let seed = 0; seed < 50; seed++) {
-      const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 0, 2);
+      const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 8);
       for (const e of enemies) {
         types.add(e.type);
       }
