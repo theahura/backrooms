@@ -18,27 +18,59 @@ function generateAcrossSeeds(distance, seeds, roomId = 5, seedStart = 0) {
   return all;
 }
 
+function countsAcrossSeeds(distance, seeds, roomId = 5) {
+  const counts = [];
+  for (let seed = 0; seed < seeds; seed++) {
+    counts.push(
+      generateRoomItems(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], roomId, distance).length
+    );
+  }
+  return counts;
+}
+
+const mean = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
+
 describe('generateRoomItems', () => {
   it('returns no items for room 0 (starting room)', () => {
     const items = generateRoomItems(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42, [], 0, 5);
     expect(items).toEqual([]);
   });
 
-  it('returns at most 2 items for non-starting rooms', () => {
-    for (let seed = 0; seed < 20; seed++) {
-      const items = generateRoomItems(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 4);
-      expect(items.length).toBeLessThanOrEqual(2);
+  it('returns at most 3 items near the entrance and at most 2 farther out', () => {
+    for (const distance of [1, 2, 3]) {
+      const counts = countsAcrossSeeds(distance, 300);
+      expect(counts.some(c => c === 3)).toBe(true);
+      for (const count of counts) {
+        expect(count).toBeLessThanOrEqual(3);
+      }
+    }
+    for (const distance of [4, 7, 8, 12]) {
+      for (const count of countsAcrossSeeds(distance, 300)) {
+        expect(count).toBeLessThanOrEqual(2);
+      }
     }
   });
 
-  it('generates items sparsely so most rooms hold little or nothing', () => {
-    const total = 200;
-    let empty = 0;
-    for (let seed = 0; seed < total; seed++) {
-      const items = generateRoomItems(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 5, 4);
-      if (items.length === 0) empty++;
-    }
-    expect(empty).toBeGreaterThan(total * 0.45);
+  it('spawns items generously in rooms near the entrance', () => {
+    const counts = countsAcrossSeeds(2, 300);
+    expect(mean(counts)).toBeGreaterThanOrEqual(1.2);
+    expect(counts.some(c => c === 3)).toBe(true);
+    expect(counts.some(c => c === 0)).toBe(true);
+  });
+
+  it('generates items sparsely in deep rooms so most hold little or nothing', () => {
+    const counts = countsAcrossSeeds(8, 300);
+    const empty = counts.filter(c => c === 0).length;
+    expect(empty).toBeGreaterThan(counts.length * 0.45);
+  });
+
+  it('tapers the item count down as distance from the entrance grows', () => {
+    const near = mean(countsAcrossSeeds(2, 300));
+    const mid = mean(countsAcrossSeeds(5, 300));
+    const midEdge = mean(countsAcrossSeeds(7, 300));
+    const deep = mean(countsAcrossSeeds(8, 300));
+    expect(near).toBeGreaterThan(mid);
+    expect(midEdge).toBeGreaterThan(deep);
   });
 
   it('places items within room bounds', () => {
