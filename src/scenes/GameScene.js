@@ -1016,10 +1016,11 @@ export class GameScene extends Phaser.Scene {
     this.player = this.physics.add.sprite(playerX, playerY, 'player_idle_0');
     this.player.setDepth(200);
     this.player.play('player_idle');
-    // Arcade bodies are multiplied by the sprite's display scale (40/24 here),
-    // so 12 yields a ~20px effective hitbox.
+    // Arcade bodies are multiplied by the sprite's display scale. The texture
+    // is 32px displayed at 40px (scale 1.25), so 19 yields a ~24px effective
+    // hitbox -- unchanged from the pre-redraw 20px texture.
     this.player.setDisplaySize(40, 40);
-    this.player.body.setSize(12, 12, true);
+    this.player.body.setSize(19, 19, true);
 
     this.physics.add.collider(this.player, this.walls);
     this.playerFurnitureCollider = this.physics.add.collider(this.player, this.furnitureGroup);
@@ -1033,9 +1034,11 @@ export class GameScene extends Phaser.Scene {
   getEnemyStats(type, distance) {
     // bodySize is in texture pixels and gets multiplied by the display scale
     // (display/texture), so these stay close to the pre-scale-up hitboxes.
-    if (type === 'crawler') return { hp: getEnemyHP(CRAWLER_MAX_HP, distance), contactDamage: getEnemyDamage(CRAWLER_CONTACT_DAMAGE, distance), textureKey: getEnemyTextureKey('crawler'), bodySize: 7, displaySize: 34 };
-    if (type === 'spitter') return { hp: getEnemyHP(SPITTER_MAX_HP, distance), contactDamage: getEnemyDamage(SPITTER_CONTACT_DAMAGE, distance), textureKey: getEnemyTextureKey('spitter'), bodySize: 10, displaySize: 44 };
-    return { hp: getEnemyHP(ENEMY_MAX_HP, distance), contactDamage: getEnemyDamage(ENEMY_CONTACT_DAMAGE, distance), textureKey: getEnemyTextureKey('basic'), bodySize: 10, displaySize: 44 };
+    // Sized for the redrawn 24px (crawler) / 32px (basic, spitter) textures so
+    // the effective world hitboxes match the pre-redraw 14px/20px textures.
+    if (type === 'crawler') return { hp: getEnemyHP(CRAWLER_MAX_HP, distance), contactDamage: getEnemyDamage(CRAWLER_CONTACT_DAMAGE, distance), textureKey: getEnemyTextureKey('crawler'), bodySize: 12, displaySize: 34 };
+    if (type === 'spitter') return { hp: getEnemyHP(SPITTER_MAX_HP, distance), contactDamage: getEnemyDamage(SPITTER_CONTACT_DAMAGE, distance), textureKey: getEnemyTextureKey('spitter'), bodySize: 16, displaySize: 44 };
+    return { hp: getEnemyHP(ENEMY_MAX_HP, distance), contactDamage: getEnemyDamage(ENEMY_CONTACT_DAMAGE, distance), textureKey: getEnemyTextureKey('basic'), bodySize: 16, displaySize: 44 };
   }
 
   spawnDangerWave(playerRoomId, litRoomIds) {
@@ -1962,10 +1965,10 @@ export class GameScene extends Phaser.Scene {
       this.player.setAlpha(0.3);
       this.player.setTint(0x336633);
     } else if (hurt) {
-      const { alpha, flash } = getHurtFlash(this.combatState.damageCooldown);
+      const { alpha, tint } = getHurtFlash(this.combatState.damageCooldown);
       this.player.setAlpha(alpha);
-      if (flash) {
-        this.player.setTintFill(0xffffff);
+      if (tint !== null) {
+        this.player.setTint(tint);
       } else {
         this.player.clearTint();
       }

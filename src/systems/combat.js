@@ -18,14 +18,19 @@ export const CORPSE_ANGLE = 90;
 export const CORPSE_DEPTH = 5;
 
 export const HURT_BLINK_INTERVAL_MS = 150;
+export const HURT_TINT = 0xff4444;
 
-// Render hint for the hurt player: a high-contrast blink that never drops the
-// sprite below clear visibility, so taking damage reads as a flash rather
-// than the player vanishing.
+// Render hint for the hurt player: a red blink applied as a MULTIPLY tint
+// (`setTint`), never a flat fill (`setTintFill`). A multiply tint keeps the
+// sprite's dark outline and detail, so the silhouette stays visible against
+// any background -- both dark floors and the bright flashlight cone. A flat
+// fill instead paints the whole sprite one colour and vanishes whenever that
+// colour matches the background (the recurring "player disappears" bug). The
+// alpha never drops below 0.85 so the blink reads as a flash, not a fade-out.
 export function getHurtFlash(cooldownRemaining) {
-  if (cooldownRemaining <= 0) return { alpha: 1, flash: false };
+  if (cooldownRemaining <= 0) return { alpha: 1, tint: null };
   const flash = Math.floor(cooldownRemaining / HURT_BLINK_INTERVAL_MS) % 2 === 0;
-  return { alpha: flash ? 0.7 : 1, flash };
+  return flash ? { alpha: 0.85, tint: HURT_TINT } : { alpha: 1, tint: null };
 }
 
 export function createCombatState(maxHp = PLAYER_MAX_HP) {

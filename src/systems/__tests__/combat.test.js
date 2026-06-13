@@ -147,17 +147,17 @@ describe('isEnemyDead', () => {
 });
 
 describe('getHurtFlash', () => {
-  it('renders the player fully visible when not recently hurt', () => {
+  it('renders the player fully visible with no tint when not recently hurt', () => {
     const render = getHurtFlash(0);
     expect(render.alpha).toBe(1);
-    expect(render.flash).toBe(false);
+    expect(render.tint).toBeNull();
   });
 
-  it('blinks between phases while invulnerable', () => {
+  it('blinks between tinted and untinted phases while invulnerable', () => {
     let transitions = 0;
-    let prev = getHurtFlash(1000).flash;
+    let prev = getHurtFlash(1000).tint === null;
     for (let remaining = 950; remaining > 0; remaining -= 50) {
-      const current = getHurtFlash(remaining).flash;
+      const current = getHurtFlash(remaining).tint === null;
       if (current !== prev) transitions++;
       prev = current;
     }
@@ -167,6 +167,25 @@ describe('getHurtFlash', () => {
   it('never renders the player near-invisible during the damage cooldown', () => {
     for (let remaining = 0; remaining <= 1000; remaining += 25) {
       expect(getHurtFlash(remaining).alpha).toBeGreaterThanOrEqual(0.6);
+    }
+  });
+
+  it('flashes a visible red tint rather than an invisible white-out while hurt', () => {
+    const tints = [];
+    for (let remaining = 0; remaining <= 1000; remaining += 25) {
+      const { tint } = getHurtFlash(remaining);
+      if (tint !== null) tints.push(tint);
+    }
+    expect(tints.length).toBeGreaterThan(0);
+    for (const tint of tints) {
+      const r = (tint >> 16) & 0xff;
+      const g = (tint >> 8) & 0xff;
+      const b = tint & 0xff;
+      // Damage reads as a red flash (red-dominant). Visibility itself is
+      // guaranteed by the alpha-floor test above plus the scene applying this
+      // as a multiply tint (setTint), not a flat fill that erases the sprite.
+      expect(r).toBeGreaterThan(g);
+      expect(r).toBeGreaterThan(b);
     }
   });
 });
