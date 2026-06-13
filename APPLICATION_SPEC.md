@@ -53,13 +53,20 @@ Other details (from playtesting):
 - gunfire should go over tables and desks and low furniture, should be blocked by armoires and other furniture
 - difficulty should scale based on distance from the starting room
 
+# Dev notes
+
+To create pixel art, use gemini nano banana. There is a key in the .env file at repo root.
+
 # Things that still need to be implemented
 
 Feedback from me (DO NOT CHANGE):
 - most of the pixel art is not facing the right direction (e.g. the armoire is also front facing instead of top down)
 - and it is all basically way too small. What kind of sprite is 18x18! that is so small the player cant really make it out at all
 - I think the player character view should be top down -- we should see the top of the head, the shoulders, and the flashlight with arm stuck out. Similar for all the other sprites.
-- There should be more lower rewards earlier on given how high the market prices are
+- enemies should make sounds that get louder as they get closer and have attack sounds
+- the level should not change day to day, so the player can build a mental map over time
+- the rooms themselves should have sounds for various things in them. We should have more variety (and more detail) for the various kinds of things that can be in given rooms, and some of them should make sounds of their own
+- we should add lamps / lights to the game, areas that do provide light automatically in some rooms
 
 Known bugs:
 - Hiding places, stairs, and doors will often spawn inside walls
