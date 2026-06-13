@@ -83,25 +83,29 @@ function outline(g) {
 }
 const toRows = (g) => g.map((r) => r.join(''));
 
-// ── Player: head + shoulders + east-pointing arm holding a flashlight ────────
-function player({ armDy = 0, bootPhase = 0 } = {}) {
+// ── Player: STRICT overhead -- only the top of the head, the shoulder mass and
+// the outstretched flashlight arm are visible (no torso, no feet -- those would
+// read as an oblique/side view). The walk cycle moves the shoulders + arm, not
+// legs. Authored facing east.
+function player({ armDy = 0, shoulderDx = 0 } = {}) {
   const g = makeGrid(32, 32);
-  // shoulders / jacket torso, slightly west so the arm+light reach east
-  ellipse(g, 13, 17, 8, 9, ['4', '4', '3', '3', '2', '1']);
-  // boots: two toe hints poking south, alternating for the walk cycle
-  rect(g, 9 + (bootPhase === 1 ? 1 : 0), 25, 11 + (bootPhase === 1 ? 1 : 0), 27, '6');
-  rect(g, 15 - (bootPhase === 2 ? 1 : 0), 25, 17 - (bootPhase === 2 ? 1 : 0), 27, '6');
-  // head (top of head, hair) with a light top and a small skin face hint east
-  circle(g, 13, 13, 5, ['7', '7', '6', '6']);
-  rect(g, 16, 12, 17, 14, '8'); // forehead/face hint toward facing edge
-  // upper arm (jacket sleeve) reaching east-northeast
-  thickLine(g, 18, 15 + armDy, 23, 15 + armDy, 1, '3');
-  // forearm / hand
-  thickLine(g, 23, 15 + armDy, 25, 16 + armDy, 1, '8');
-  // flashlight body (metal) then bright lens at the tip
-  rect(g, 25, 14 + armDy, 28, 17 + armDy, '9');
-  rect(g, 26, 15 + armDy, 28, 16 + armDy, 'A');
-  rect(g, 29, 14 + armDy, 30, 17 + armDy, 'L');
+  const hx = 13; // head stays put; the shoulders roll beneath it as it walks
+  const sx = 13 + shoulderDx;
+  // shoulder mass: wide and shallow (an overhead pair of shoulders / upper
+  // back), distinctly broader than the head and with no body extending south
+  ellipse(g, sx, 17, 9, 5, ['4', '3', '2', '1']);
+  // a darker centre seam so the two shoulders read as shoulders, not a blob
+  rect(g, sx, 14, sx, 20, '1');
+  // top of the head (hair), the dominant overhead feature
+  circle(g, hx, 12, 5, ['7', '7', '6', '6']);
+  rect(g, hx + 3, 11, hx + 4, 13, '8'); // small brow/face hint toward facing
+  // arm anchored to the east shoulder, holding the flashlight out east
+  const ax = sx + 6;
+  thickLine(g, ax, 16 + armDy, ax + 5, 16 + armDy, 1, '3'); // sleeve
+  thickLine(g, ax + 5, 16 + armDy, ax + 7, 17 + armDy, 1, '8'); // hand
+  rect(g, ax + 7, 15 + armDy, ax + 10, 18 + armDy, '9'); // flashlight body
+  rect(g, ax + 8, 16 + armDy, ax + 10, 17 + armDy, 'A');
+  rect(g, ax + 11, 15 + armDy, ax + 12, 18 + armDy, 'L'); // bright lens (facing)
   outline(g);
   return g;
 }
@@ -162,10 +166,10 @@ function spitter({ pulse = 0, mouth = 0, sway = 0 } = {}) {
 
 // ── Build all frames ─────────────────────────────────────────────────────────
 const FRAMES = {
-  player_idle_0: ['player', player({ armDy: 0, bootPhase: 0 })],
-  player_idle_1: ['player', player({ armDy: -1, bootPhase: 0 })],
-  player_walk_0: ['player', player({ armDy: 0, bootPhase: 1 })],
-  player_walk_1: ['player', player({ armDy: -1, bootPhase: 2 })],
+  player_idle_0: ['player', player({ armDy: 0, shoulderDx: 0 })],
+  player_idle_1: ['player', player({ armDy: -1, shoulderDx: 0 })],
+  player_walk_0: ['player', player({ armDy: 0, shoulderDx: -1 })],
+  player_walk_1: ['player', player({ armDy: -1, shoulderDx: 1 })],
   enemy_idle_0: ['enemy', zombie({ armSwing: 0 })],
   enemy_walk_0: ['enemy', zombie({ armSwing: 1 })],
   enemy_walk_1: ['enemy', zombie({ armSwing: -1 })],
