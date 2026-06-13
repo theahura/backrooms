@@ -77,13 +77,6 @@ describe('getAlertedEnemies', () => {
     expect(result).toEqual([]);
   });
 
-  it('does not alert opening_door-state enemies', () => {
-    const graph = createLinearGraph();
-    const enemies = [makeEnemy({ currentRoomId: 1, state: 'opening_door' })];
-    const result = getAlertedEnemies(enemies, graph, 0, 1);
-    expect(result).toEqual([]);
-  });
-
   it('returns multiple enemy indices when several are in range', () => {
     const graph = createLinearGraph();
     const enemies = [

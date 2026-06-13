@@ -9,6 +9,7 @@ import {
   generateRoomWeapon,
 } from '../weapons.js';
 import { calculateShotgunSpread } from '../shooting.js';
+import { generateMazeWalls } from '../maze.js';
 
 describe('createWeaponState', () => {
   it('starts with both slots empty by default', () => {
@@ -234,6 +235,47 @@ describe('generateRoomWeapon', () => {
     const insideFurniture = result.x >= 100 && result.x <= 700 &&
                             result.y >= 100 && result.y <= 500;
     expect(insideFurniture).toBe(false);
+  });
+});
+
+describe('generateRoomWeapon wall avoidance', () => {
+  const doors = [{ wall: 'east', offset: 250, width: 80, targetRoomId: 1 }];
+
+  const insideRect = (p, r) =>
+    p.x >= r.x && p.x <= r.x + r.width &&
+    p.y >= r.y && p.y <= r.y + r.height;
+
+  it('does not place a weapon overlapping a supplied obstacle rect', () => {
+    const obstacle = { x: 150, y: 120, width: 500, height: 360 };
+    for (let seed = 0; seed < 150; seed++) {
+      const result = generateRoomWeapon(0, 0, 800, 600, 16, seed, [], 1, [obstacle]);
+      if (result) {
+        expect(insideRect(result, obstacle), `seed ${seed}`).toBe(false);
+      }
+    }
+  });
+
+  it('does not place a weapon overlapping the real maze walls of the same room', () => {
+    let wallsSeen = 0;
+    for (let seed = 0; seed < 150; seed++) {
+      const walls = generateMazeWalls(0, 0, 800, 600, 16, seed, doors);
+      wallsSeen += walls.length;
+      const result = generateRoomWeapon(0, 0, 800, 600, 16, seed, [], 1, walls);
+      if (result) {
+        for (const wall of walls) {
+          expect(insideRect(result, wall), `seed ${seed}`).toBe(false);
+        }
+      }
+    }
+    expect(wallsSeen).toBeGreaterThan(0);
+  });
+
+  it('produces the same weapon whether obstacles is omitted or passed empty', () => {
+    for (const seed of [3, 11, 42, 99, 123]) {
+      const omitted = generateRoomWeapon(0, 0, 800, 600, 16, seed, [], 1);
+      const empty = generateRoomWeapon(0, 0, 800, 600, 16, seed, [], 1, []);
+      expect(empty, `seed ${seed}`).toEqual(omitted);
+    }
   });
 });
 

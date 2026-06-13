@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { generateRoomItems } from '../items.js';
+import { generateMazeWalls } from '../maze.js';
 
 const ROOM_X = 0;
 const ROOM_Y = 0;
@@ -17,27 +18,59 @@ function generateAcrossSeeds(distance, seeds, roomId = 5, seedStart = 0) {
   return all;
 }
 
+const SEEDS = 300;
+
+function countsAcrossSeeds(distance, seeds = SEEDS, roomId = 5) {
+  const counts = [];
+  for (let seed = 0; seed < seeds; seed++) {
+    counts.push(
+      generateRoomItems(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], roomId, distance).length
+    );
+  }
+  return counts;
+}
+
+const mean = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
+
 describe('generateRoomItems', () => {
   it('returns no items for room 0 (starting room)', () => {
     const items = generateRoomItems(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42, [], 0, 5);
     expect(items).toEqual([]);
   });
 
-  it('returns at most 2 items for non-starting rooms', () => {
-    for (let seed = 0; seed < 20; seed++) {
-      const items = generateRoomItems(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 4);
-      expect(items.length).toBeLessThanOrEqual(2);
+  it('returns at most 3 items near the entrance and at most 2 farther out', () => {
+    for (const distance of [1, 3]) {
+      const counts = countsAcrossSeeds(distance);
+      expect(counts.some(c => c === 3), `distance ${distance}`).toBe(true);
+      expect(Math.max(...counts)).toBeLessThanOrEqual(3);
+    }
+    for (const distance of [4, 7, 8]) {
+      const counts = countsAcrossSeeds(distance);
+      expect(counts.some(c => c === 2), `distance ${distance}`).toBe(true);
+      expect(Math.max(...counts)).toBeLessThanOrEqual(2);
     }
   });
 
-  it('generates items sparsely so most rooms hold little or nothing', () => {
-    const total = 200;
-    let empty = 0;
-    for (let seed = 0; seed < total; seed++) {
-      const items = generateRoomItems(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 5, 4);
-      if (items.length === 0) empty++;
-    }
-    expect(empty).toBeGreaterThan(total * 0.45);
+  it('spawns items generously in rooms near the entrance', () => {
+    const counts = countsAcrossSeeds(2);
+    expect(mean(counts)).toBeGreaterThanOrEqual(1.2);
+    expect(counts.some(c => c === 3)).toBe(true);
+    expect(counts.some(c => c === 0)).toBe(true);
+  });
+
+  it('generates items sparsely in deep rooms so most hold little or nothing', () => {
+    const counts = countsAcrossSeeds(8);
+    const empty = counts.filter(c => c === 0).length;
+    expect(empty).toBeGreaterThan(counts.length * 0.45);
+  });
+
+  it('tapers the item count down across the distance bands', () => {
+    const near = mean(countsAcrossSeeds(2));
+    const mid = mean(countsAcrossSeeds(5));
+    const lastMid = mean(countsAcrossSeeds(7));
+    const deep = mean(countsAcrossSeeds(8));
+    expect(near).toBeGreaterThan(mid);
+    expect(lastMid).toBeGreaterThan(deep);
   });
 
   it('places items within room bounds', () => {
@@ -129,4 +162,45 @@ describe('generateRoomItems', () => {
     expect(Object.keys(typeCounts).length).toBeGreaterThanOrEqual(3);
   });
 
+});
+
+describe('generateRoomItems wall avoidance', () => {
+  const doors = [{ wall: 'east', offset: 400, width: 80, targetRoomId: 1 }];
+
+  const insideRect = (p, r) =>
+    p.x >= r.x && p.x <= r.x + r.width &&
+    p.y >= r.y && p.y <= r.y + r.height;
+
+  it('does not place items overlapping a supplied obstacle rect', () => {
+    const obstacle = { x: 300, y: 250, width: 500, height: 500 };
+    for (let seed = 0; seed < 120; seed++) {
+      const items = generateRoomItems(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 4, [obstacle]);
+      for (const item of items) {
+        expect(insideRect(item, obstacle), `seed ${seed}`).toBe(false);
+      }
+    }
+  });
+
+  it('does not place items overlapping the real maze walls of the same room', () => {
+    let wallsSeen = 0;
+    for (let seed = 0; seed < 150; seed++) {
+      const walls = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
+      wallsSeen += walls.length;
+      const items = generateRoomItems(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 4, walls);
+      for (const item of items) {
+        for (const wall of walls) {
+          expect(insideRect(item, wall), `seed ${seed}`).toBe(false);
+        }
+      }
+    }
+    expect(wallsSeen).toBeGreaterThan(0);
+  });
+
+  it('produces the same items whether obstacles is omitted or passed empty', () => {
+    for (const seed of [3, 11, 42, 99, 123]) {
+      const omitted = generateRoomItems(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 4);
+      const empty = generateRoomItems(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 4, []);
+      expect(empty, `seed ${seed}`).toEqual(omitted);
+    }
+  });
 });

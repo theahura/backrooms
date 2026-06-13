@@ -1,10 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildRoomGraph,
-  buildFullRoomGraph,
   bfsFromRoom,
-  getNextDoorway,
-  getClosedDoorOnPath,
   getDoorwayCenter,
   getRoomDistance,
 } from '../pathfinding.js';
@@ -129,43 +126,6 @@ describe('bfsFromRoom', () => {
   });
 });
 
-describe('getNextDoorway', () => {
-  it('returns the doorway to the next room toward the player', () => {
-    const rooms = makeLinearRooms();
-    const graph = buildRoomGraph(rooms, []);
-    const cameFrom = bfsFromRoom(graph, 0);
-
-    const doorway = getNextDoorway(graph, cameFrom, 2, 0);
-
-    expect(doorway).not.toBeNull();
-    expect(typeof doorway.x).toBe('number');
-    expect(typeof doorway.y).toBe('number');
-  });
-
-  it('returns null when enemy is already in the player room', () => {
-    const rooms = makeLinearRooms();
-    const graph = buildRoomGraph(rooms, []);
-    const cameFrom = bfsFromRoom(graph, 0);
-
-    const doorway = getNextDoorway(graph, cameFrom, 0, 0);
-
-    expect(doorway).toBeNull();
-  });
-
-  it('returns null when no path exists', () => {
-    const rooms = makeLinearRooms();
-    const doorStates = [
-      { id: 0, roomId: 0, targetRoomId: 1, wall: 'east', offset: 200, width: 80, isClosed: true, segment: {} },
-    ];
-    const graph = buildRoomGraph(rooms, doorStates);
-    const cameFrom = bfsFromRoom(graph, 0);
-
-    const doorway = getNextDoorway(graph, cameFrom, 2, 0);
-
-    expect(doorway).toBeNull();
-  });
-});
-
 describe('getDoorwayCenter', () => {
   const room = makeRoom(0, 0, 0, []);
 
@@ -234,60 +194,3 @@ describe('getRoomDistance', () => {
     expect(getRoomDistance(graph, 0, 2)).toBe(-1);
   });
 });
-
-describe('buildFullRoomGraph', () => {
-  it('allows BFS to find paths through closed doors', () => {
-    const rooms = makeLinearRooms();
-    const doorStates = [
-      { id: 0, roomId: 0, targetRoomId: 1, wall: 'east', offset: 200, width: 80, isClosed: true, segment: {} },
-    ];
-
-    const graph = buildFullRoomGraph(rooms, doorStates);
-    const cameFrom = bfsFromRoom(graph, 0);
-
-    expect(cameFrom.has(1)).toBe(true);
-    expect(cameFrom.has(2)).toBe(true);
-  });
-});
-
-describe('getClosedDoorOnPath', () => {
-  it('returns door info when next edge has a closed door', () => {
-    const rooms = makeLinearRooms();
-    const doorStates = [
-      { id: 3, roomId: 0, targetRoomId: 1, wall: 'east', offset: 200, width: 80, isClosed: true, segment: {} },
-    ];
-
-    const fullGraph = buildFullRoomGraph(rooms, doorStates);
-    const cameFrom = bfsFromRoom(fullGraph, 0);
-
-    const result = getClosedDoorOnPath(fullGraph, cameFrom, 1, 0, doorStates, rooms);
-
-    expect(result).not.toBeNull();
-    expect(result.doorId).toBe(3);
-    expect(result.center.x).toBe(1200);
-    expect(result.center.y).toBe(240);
-  });
-
-  it('returns null when next edge is open', () => {
-    const rooms = makeLinearRooms();
-
-    const fullGraph = buildFullRoomGraph(rooms, []);
-    const cameFrom = bfsFromRoom(fullGraph, 0);
-
-    const result = getClosedDoorOnPath(fullGraph, cameFrom, 1, 0, [], rooms);
-
-    expect(result).toBeNull();
-  });
-
-  it('returns null when enemy is in the same room as player', () => {
-    const rooms = makeLinearRooms();
-
-    const fullGraph = buildFullRoomGraph(rooms, []);
-    const cameFrom = bfsFromRoom(fullGraph, 0);
-
-    const result = getClosedDoorOnPath(fullGraph, cameFrom, 0, 0, [], rooms);
-
-    expect(result).toBeNull();
-  });
-});
-

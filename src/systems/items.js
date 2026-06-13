@@ -10,6 +10,15 @@ export const ITEM_TYPES = [
   { type: 'gem', value: 1000, weight: { base: -11, perRoom: 2.4 }, color: 0x00cccc, size: { w: 10, h: 10 } },
 ];
 
+export const NEAR_DISTANCE = 3;
+export const DEEP_DISTANCE = 8;
+
+function itemCountForRoll(r, distance) {
+  if (distance <= NEAR_DISTANCE) return r < 0.15 ? 0 : r < 0.55 ? 1 : r < 0.85 ? 2 : 3;
+  if (distance < DEEP_DISTANCE) return r < 0.35 ? 0 : r < 0.8 ? 1 : 2;
+  return r < 0.55 ? 0 : r < 0.9 ? 1 : 2;
+}
+
 function weightForDistance(itemType, distance) {
   return Math.max(0, itemType.weight.base + itemType.weight.perRoom * distance);
 }
@@ -25,7 +34,7 @@ function pickWeightedType(rand, distance) {
   return ITEM_TYPES[ITEM_TYPES.length - 1];
 }
 
-export function generateRoomItems(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, furnitureItems, roomId, distance = 0) {
+export function generateRoomItems(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, furnitureItems, roomId, distance = 0, obstacles = []) {
   if (roomId === 0) return [];
 
   const rand = mulberry32(seed + 20000);
@@ -36,17 +45,18 @@ export function generateRoomItems(roomX, roomY, roomWidth, roomHeight, wallThick
   const maxY = roomY + roomHeight - wallThickness - margin;
 
   const r = rand();
-  const count = r < 0.55 ? 0 : r < 0.9 ? 1 : 2;
+  const count = itemCountForRoll(r, distance);
   if (count === 0) return [];
   const placed = [];
   const itemRadius = 8;
+  const blockers = obstacles.length ? furnitureItems.concat(obstacles) : furnitureItems;
 
   for (let attempt = 0; attempt < count * 20 && placed.length < count; attempt++) {
     const x = minX + rand() * (maxX - minX);
     const y = minY + rand() * (maxY - minY);
 
     let overlaps = false;
-    for (const f of furnitureItems) {
+    for (const f of blockers) {
       if (
         x >= f.x - itemRadius &&
         x <= f.x + f.width + itemRadius &&

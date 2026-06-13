@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hasLineOfSight, generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_WANDER, ENEMY_SPEED_CHASE, getEnemyType, CRAWLER_CHASE_SPEED, CRAWLER_WANDER_SPEED, SPITTER_CHASE_SPEED, SPITTER_ATTACK_RANGE, SPITTER_ATTACK_COOLDOWN, DOOR_OPEN_TIME, CRAWLER_DOOR_INTERACT_RANGE } from '../enemy.js';
+import { hasLineOfSight, generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_WANDER, ENEMY_SPEED_CHASE, getEnemyType, CRAWLER_CHASE_SPEED, CRAWLER_WANDER_SPEED, SPITTER_CHASE_SPEED, SPITTER_ATTACK_RANGE, SPITTER_ATTACK_COOLDOWN } from '../enemy.js';
 
 describe('hasLineOfSight', () => {
   it('returns true when no walls between enemy and player', () => {
@@ -59,14 +59,45 @@ describe('generateRoomEnemies', () => {
     expect(enemies).toEqual([]);
   });
 
-  it('returns 1-2 enemies for non-starting rooms', () => {
-    const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42, [], 1);
+  it('spawns 0-1 enemies near the entrance, including some empty rooms', () => {
+    const counts = new Set();
+    for (let seed = 0; seed < 30; seed++) {
+      const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 1);
+      expect(enemies.length).toBeLessThanOrEqual(1);
+      counts.add(enemies.length);
+    }
+    expect(counts.has(0)).toBe(true);
+    expect(counts.has(1)).toBe(true);
+  });
+
+  it('returns 1-2 enemies at mid distance', () => {
+    const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42, [], 1, 4);
     expect(enemies.length).toBeGreaterThanOrEqual(1);
     expect(enemies.length).toBeLessThanOrEqual(2);
   });
 
+  it('spawns more enemies in deep rooms than mid rooms on average', () => {
+    let midTotal = 0;
+    let deepTotal = 0;
+    for (let seed = 0; seed < 100; seed++) {
+      midTotal += generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 4).length;
+      deepTotal += generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 15).length;
+    }
+    expect(midTotal).toBeGreaterThan(0);
+    expect(deepTotal).toBeGreaterThan(midTotal);
+  });
+
+  it('caps total enemies at 5 in the deepest rooms', () => {
+    for (let seed = 0; seed < 30; seed++) {
+      const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 100);
+      expect(enemies.length).toBeGreaterThanOrEqual(4);
+      expect(enemies.length).toBeLessThanOrEqual(5);
+    }
+  });
+
   it('places enemies within room bounds', () => {
-    const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42, [], 1);
+    const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42, [], 1, 4);
+    expect(enemies.length).toBeGreaterThanOrEqual(1);
 
     for (const e of enemies) {
       expect(e.x).toBeGreaterThan(ROOM_X + WALL_THICKNESS);
@@ -77,8 +108,8 @@ describe('generateRoomEnemies', () => {
   });
 
   it('produces deterministic output for the same seed', () => {
-    const first = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 99, [], 1);
-    const second = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 99, [], 1);
+    const first = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 99, [], 1, 8);
+    const second = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 99, [], 1, 8);
     expect(first.length).toBeGreaterThanOrEqual(1);
     expect(first).toEqual(second);
   });
@@ -89,8 +120,10 @@ describe('generateRoomEnemies', () => {
       { x: 100, y: 100, width: 300, height: 300 },
     ];
 
+    let enemiesSeen = 0;
     for (let seed = 0; seed < 20; seed++) {
-      const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, furniture, 1);
+      const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, furniture, 1, 8);
+      enemiesSeen += enemies.length;
 
       for (const e of enemies) {
         for (const f of furniture) {
@@ -101,6 +134,7 @@ describe('generateRoomEnemies', () => {
         }
       }
     }
+    expect(enemiesSeen).toBeGreaterThan(0);
   });
 });
 
@@ -132,8 +166,8 @@ describe('updateEnemyAI', () => {
     expect(updated.velocityX).toBeGreaterThan(0);
   });
 
-  it('transitions from chase to search when LOS is lost', () => {
-    const enemy = createEnemy({ state: 'chase' });
+  it('transitions from chase to search toward the position the player was last seen', () => {
+    const enemy = createEnemy({ state: 'chase', lastKnownX: 180, lastKnownY: 120 });
     const player = { x: 200, y: 100 };
     const segments = [
       { x1: 150, y1: 0, x2: 150, y2: 200 },
@@ -142,8 +176,44 @@ describe('updateEnemyAI', () => {
     const updated = updateEnemyAI(enemy, player, segments, 16);
 
     expect(updated.state).toBe('search');
+    expect(updated.lastKnownX).toBe(180);
+    expect(updated.lastKnownY).toBe(120);
+  });
+
+  it('chasing enemy with LOS records the player position as last seen', () => {
+    const enemy = createEnemy({ state: 'chase', lastKnownX: 0, lastKnownY: 0 });
+    const player = { x: 200, y: 150 };
+
+    const updated = updateEnemyAI(enemy, player, [], 16);
+
+    expect(updated.state).toBe('chase');
     expect(updated.lastKnownX).toBe(200);
-    expect(updated.lastKnownY).toBe(100);
+    expect(updated.lastKnownY).toBe(150);
+  });
+
+  it('on losing LOS the search heads toward the last-seen position, not the player', () => {
+    const enemy = createEnemy({ state: 'chase', x: 100, y: 100, lastKnownX: 100, lastKnownY: 300 });
+    const player = { x: 300, y: 100 };
+    const segments = [
+      { x1: 200, y1: 0, x2: 200, y2: 400 },
+    ];
+
+    const updated = updateEnemyAI(enemy, player, segments, 16);
+
+    expect(updated.state).toBe('search');
+    expect(updated.velocityY).toBeGreaterThan(0);
+    expect(Math.abs(updated.velocityX)).toBeLessThan(1);
+  });
+
+  it('noise-alerted chase investigates the noise position, not the player', () => {
+    const enemy = createEnemy({ state: 'chase', x: 100, y: 100, lastKnownX: 100, lastKnownY: 400 });
+    const player = { x: 900, y: 900 };
+
+    const updated = updateEnemyAI(enemy, player, [], 16);
+
+    expect(updated.state).toBe('search');
+    expect(updated.velocityY).toBeGreaterThan(0);
+    expect(Math.abs(updated.velocityX)).toBeLessThan(1);
   });
 
   it('in search state moves toward last known position', () => {
@@ -261,16 +331,16 @@ describe('updateEnemyAI', () => {
     expect(updated.state).toBe('idle');
   });
 
-  it('chasing enemy transitions to search when player hides', () => {
-    const enemy = createEnemy({ state: 'chase' });
+  it('chasing enemy transitions to search toward the pre-hide position when player hides', () => {
+    const enemy = createEnemy({ state: 'chase', lastKnownX: 150, lastKnownY: 130 });
     const player = { x: 200, y: 100 };
     const segments = [];
 
     const updated = updateEnemyAI(enemy, player, segments, 16, true);
 
     expect(updated.state).toBe('search');
-    expect(updated.lastKnownX).toBe(200);
-    expect(updated.lastKnownY).toBe(100);
+    expect(updated.lastKnownX).toBe(150);
+    expect(updated.lastKnownY).toBe(130);
   });
 
   it('searching enemy does not reacquire chase when player is hidden', () => {
@@ -323,54 +393,37 @@ describe('updateEnemyAI', () => {
   });
 });
 
-describe('generateRoomEnemies with extraCount', () => {
-  const ROOM_X = 0;
-  const ROOM_Y = 0;
-  const ROOM_WIDTH = 1200;
-  const ROOM_HEIGHT = 1000;
-  const WALL_THICKNESS = 16;
-
-  it('produces more enemies when extraCount is provided', () => {
-    const baseEnemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42, [], 1);
-    const extraEnemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42, [], 1, 3);
-    expect(extraEnemies.length).toBeGreaterThan(baseEnemies.length);
-  });
-
-  it('caps total enemies at 5', () => {
-    const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42, [], 1, 10);
-    expect(enemies.length).toBeLessThanOrEqual(5);
-  });
-
-});
-
 describe('getEnemyType', () => {
-  it('returns basic for all rolls at run 0', () => {
-    for (let i = 0; i < 100; i++) {
-      const roll = i / 100;
-      expect(getEnemyType(() => roll, 0)).toBe('basic');
+  it('returns basic for all rolls near the entrance (distance 0-3)', () => {
+    for (const distance of [0, 1, 2, 3]) {
+      for (let i = 0; i < 100; i++) {
+        const roll = i / 100;
+        expect(getEnemyType(() => roll, distance)).toBe('basic');
+      }
     }
   });
 
-  it('returns basic or crawler at run 1, never spitter', () => {
-    const types = new Set();
-    for (let i = 0; i < 100; i++) {
-      types.add(getEnemyType(() => i / 100, 1));
+  it('returns basic or crawler at mid distance, never spitter', () => {
+    for (const distance of [4, 7]) {
+      const types = new Set();
+      for (let i = 0; i < 100; i++) {
+        types.add(getEnemyType(() => i / 100, distance));
+      }
+      expect(types.has('basic')).toBe(true);
+      expect(types.has('crawler')).toBe(true);
+      expect(types.has('spitter')).toBe(false);
     }
-    expect(types.has('basic')).toBe(true);
-    expect(types.has('crawler')).toBe(true);
-    expect(types.has('spitter')).toBe(false);
   });
 
-  it('returns all three types at run 2+', () => {
+  it('returns all three types deep (distance 8+)', () => {
     const types = new Set();
     for (let i = 0; i < 100; i++) {
-      types.add(getEnemyType(() => i / 100, 2));
+      types.add(getEnemyType(() => i / 100, 8));
     }
     expect(types.has('basic')).toBe(true);
     expect(types.has('crawler')).toBe(true);
     expect(types.has('spitter')).toBe(true);
   });
-
 });
 
 describe('generateRoomEnemies with types', () => {
@@ -380,28 +433,22 @@ describe('generateRoomEnemies with types', () => {
   const ROOM_HEIGHT = 1000;
   const WALL_THICKNESS = 16;
 
-  it('returns spawn objects with a type field', () => {
-    const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, 42, [], 1, 0, 0);
-    expect(enemies.length).toBeGreaterThanOrEqual(1);
-    for (const e of enemies) {
-      expect(e).toHaveProperty('type');
-      expect(['basic', 'crawler', 'spitter']).toContain(e.type);
-    }
-  });
-
-  it('produces only basic type at run 0', () => {
+  it('produces only basic type near the entrance', () => {
+    let enemiesSeen = 0;
     for (let seed = 0; seed < 10; seed++) {
-      const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 0, 0);
+      const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 3);
+      enemiesSeen += enemies.length;
       for (const e of enemies) {
         expect(e.type).toBe('basic');
       }
     }
+    expect(enemiesSeen).toBeGreaterThan(0);
   });
 
-  it('can produce all three types at run 2+', () => {
+  it('can produce all three types in deep rooms', () => {
     const types = new Set();
     for (let seed = 0; seed < 50; seed++) {
-      const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 0, 2);
+      const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 8);
       for (const e of enemies) {
         types.add(e.type);
       }
@@ -486,13 +533,24 @@ describe('updateEnemyAI spitter behavior', () => {
     expect(updated.wantsToFire).toBe(true);
   });
 
-  it('spitter transitions from attack to search when LOS is lost', () => {
-    const enemy = createTypedEnemy({ type: 'spitter', state: 'attack', attackCooldown: 1000, x: 100, y: 100 });
+  it('spitter transitions from attack to search toward last-seen position when LOS is lost', () => {
+    const enemy = createTypedEnemy({ type: 'spitter', state: 'attack', attackCooldown: 1000, x: 100, y: 100, lastKnownX: 130, lastKnownY: 90 });
     const player = { x: 200, y: 100 };
     const wall = { x1: 150, y1: 0, x2: 150, y2: 200 };
     const updated = updateEnemyAI(enemy, player, [wall], 16);
 
     expect(updated.state).toBe('search');
+    expect(updated.lastKnownX).toBe(130);
+    expect(updated.lastKnownY).toBe(90);
+  });
+
+  it('spitter in attack with LOS records the player position as last seen', () => {
+    const enemy = createTypedEnemy({ type: 'spitter', state: 'attack', attackCooldown: 1000, x: 100, y: 100, lastKnownX: 0, lastKnownY: 0 });
+    const player = { x: 100 + SPITTER_ATTACK_RANGE - 10, y: 100 };
+    const updated = updateEnemyAI(enemy, player, [], 16);
+
+    expect(updated.lastKnownX).toBe(100 + SPITTER_ATTACK_RANGE - 10);
+    expect(updated.lastKnownY).toBe(100);
   });
 
   it('spitter transitions from attack to chase when player exits attack range', () => {
@@ -523,40 +581,18 @@ describe('updateEnemyAI spitter behavior', () => {
 });
 
 describe('updateEnemyAI with navContext', () => {
-  function makeNavRooms() {
-    return [
-      {
-        id: 0, gridX: 0, gridY: 0, x: 0, y: 0,
-        width: 1200, height: 1000,
-        doors: [{ wall: 'east', offset: 200, width: 80, targetRoomId: 1 }],
-        seed: 42,
-      },
-      {
-        id: 1, gridX: 1, gridY: 0, x: 1200, y: 0,
-        width: 1200, height: 1000,
-        doors: [{ wall: 'west', offset: 200, width: 80, targetRoomId: 0 }],
-        seed: 43,
-      },
-    ];
-  }
-
   function makeNavContext(overrides = {}) {
-    const rooms = makeNavRooms();
     return {
-      enemyRoomId: 1,
-      playerRoomId: 0,
-      spawnRoomId: 1,
       roomTransitionCooldown: 0,
       targetDoorway: null,
       doorway: { x: 1200, y: 240 },
-      maxRoomDistance: 2,
-      roomEnemyCounts: new Map([[0, 1], [1, 1]]),
+      seekDoorway: false,
       ...overrides,
     };
   }
 
-  it('enemy in chase state navigates to doorway when in different room from player and cannot see', () => {
-    const enemy = createTypedEnemy({ state: 'chase', x: 1800, y: 500 });
+  it('enemy in chase state stops following across rooms and searches its last-seen position when LOS is lost', () => {
+    const enemy = createTypedEnemy({ state: 'chase', x: 1800, y: 500, lastKnownX: 1600, lastKnownY: 500 });
     const player = { x: 600, y: 500 };
     const wall = { x1: 1200, y1: 0, x2: 1200, y2: 200 };
     const wall2 = { x1: 1200, y1: 280, x2: 1200, y2: 1000 };
@@ -564,9 +600,9 @@ describe('updateEnemyAI with navContext', () => {
 
     const updated = updateEnemyAI(enemy, player, [wall, wall2], 16, false, ENEMY_SPEED_CHASE, navContext);
 
+    expect(updated.state).toBe('search');
     expect(updated.velocityX).toBeLessThan(0);
-    const speed = Math.sqrt(updated.velocityX ** 2 + updated.velocityY ** 2);
-    expect(speed).toBeGreaterThan(0);
+    expect(Math.abs(updated.velocityY)).toBeLessThan(1);
   });
 
   it('enemy in chase state still chases directly when can see the player', () => {
@@ -580,11 +616,11 @@ describe('updateEnemyAI with navContext', () => {
     expect(updated.velocityX).toBeLessThan(0);
   });
 
-  it('enemy in chase state falls back to search when in same room and cannot see', () => {
+  it('enemy in chase state falls back to search when it cannot see the player', () => {
     const enemy = createTypedEnemy({ state: 'chase', x: 600, y: 100 });
     const player = { x: 600, y: 900 };
     const wall = { x1: 0, y1: 500, x2: 1200, y2: 500 };
-    const navContext = makeNavContext({ enemyRoomId: 0, playerRoomId: 0 });
+    const navContext = makeNavContext();
 
     const updated = updateEnemyAI(enemy, player, [wall], 16, false, ENEMY_SPEED_CHASE, navContext);
 
@@ -631,126 +667,5 @@ describe('updateEnemyAI with navContext', () => {
     const updated = updateEnemyAI(enemy, player, [], 100, false, ENEMY_SPEED_CHASE, navContext);
 
     expect(updated.roomTransitionCooldown).toBe(4900);
-  });
-});
-
-describe('crawler door-opening behavior', () => {
-  function makeNavContextWithDoor(overrides = {}) {
-    return {
-      enemyRoomId: 1,
-      playerRoomId: 0,
-      spawnRoomId: 1,
-      roomTransitionCooldown: 0,
-      targetDoorway: null,
-      doorway: { x: 1200, y: 240 },
-      maxRoomDistance: 2,
-      roomEnemyCounts: new Map(),
-      closedDoorOnPath: { doorId: 5, center: { x: 1200, y: 240 } },
-      ...overrides,
-    };
-  }
-
-  it('crawler in chase transitions to opening_door when near a closed door on path', () => {
-    const enemy = createTypedEnemy({ type: 'crawler', state: 'chase', x: 1200 + CRAWLER_DOOR_INTERACT_RANGE - 10, y: 240 });
-    const player = { x: 600, y: 240 };
-    const wall = { x1: 1200, y1: 0, x2: 1200, y2: 200 };
-    const wall2 = { x1: 1200, y1: 280, x2: 1200, y2: 1000 };
-    const navContext = makeNavContextWithDoor();
-
-    const updated = updateEnemyAI(enemy, player, [wall, wall2], 16, false, ENEMY_SPEED_CHASE, navContext);
-
-    expect(updated.state).toBe('opening_door');
-  });
-
-  it('crawler in opening_door state has zero velocity', () => {
-    const enemy = createTypedEnemy({ type: 'crawler', state: 'opening_door', doorOpenTimer: 800, targetDoorId: 5, x: 1210, y: 240 });
-    const player = { x: 600, y: 240 };
-    const wall = { x1: 1200, y1: 0, x2: 1200, y2: 200 };
-    const wall2 = { x1: 1200, y1: 280, x2: 1200, y2: 1000 };
-
-    const updated = updateEnemyAI(enemy, player, [wall, wall2], 16);
-
-    expect(updated.velocityX).toBe(0);
-    expect(updated.velocityY).toBe(0);
-  });
-
-  it('crawler in opening_door does not signal wantsToOpenDoor while timer is active', () => {
-    const enemy = createTypedEnemy({ type: 'crawler', state: 'opening_door', doorOpenTimer: 800, targetDoorId: 5, x: 1210, y: 240 });
-    const player = { x: 600, y: 240 };
-    const wall = { x1: 1200, y1: 0, x2: 1200, y2: 200 };
-    const wall2 = { x1: 1200, y1: 280, x2: 1200, y2: 1000 };
-
-    const updated = updateEnemyAI(enemy, player, [wall, wall2], 16);
-
-    expect(updated.wantsToOpenDoor).toBeFalsy();
-  });
-
-  it('crawler in opening_door sets wantsToOpenDoor when timer expires', () => {
-    const enemy = createTypedEnemy({ type: 'crawler', state: 'opening_door', doorOpenTimer: 10, targetDoorId: 5, x: 1210, y: 240 });
-    const player = { x: 600, y: 240 };
-    const wall = { x1: 1200, y1: 0, x2: 1200, y2: 200 };
-    const wall2 = { x1: 1200, y1: 280, x2: 1200, y2: 1000 };
-
-    const updated = updateEnemyAI(enemy, player, [wall, wall2], 16);
-
-    expect(updated.wantsToOpenDoor).toBe(true);
-    expect(updated.targetDoorId).toBe(5);
-  });
-
-  it('crawler transitions from opening_door to chase after signaling', () => {
-    const enemy = createTypedEnemy({ type: 'crawler', state: 'opening_door', doorOpenTimer: 10, targetDoorId: 5, x: 1210, y: 240 });
-    const player = { x: 600, y: 240 };
-    const wall = { x1: 1200, y1: 0, x2: 1200, y2: 200 };
-    const wall2 = { x1: 1200, y1: 280, x2: 1200, y2: 1000 };
-
-    const updated = updateEnemyAI(enemy, player, [wall, wall2], 16);
-
-    expect(updated.state).toBe('chase');
-  });
-
-  it('basic enemy does NOT transition to opening_door', () => {
-    const enemy = createTypedEnemy({ type: 'basic', state: 'chase', x: 1200 + CRAWLER_DOOR_INTERACT_RANGE - 10, y: 240 });
-    const player = { x: 600, y: 240 };
-    const wall = { x1: 1200, y1: 0, x2: 1200, y2: 200 };
-    const wall2 = { x1: 1200, y1: 280, x2: 1200, y2: 1000 };
-    const navContext = makeNavContextWithDoor();
-
-    const updated = updateEnemyAI(enemy, player, [wall, wall2], 16, false, ENEMY_SPEED_CHASE, navContext);
-
-    expect(updated.state).not.toBe('opening_door');
-  });
-
-  it('spitter does NOT transition to opening_door', () => {
-    const enemy = createTypedEnemy({ type: 'spitter', state: 'chase', x: 1200 + CRAWLER_DOOR_INTERACT_RANGE - 10, y: 240 });
-    const player = { x: 600, y: 240 };
-    const wall = { x1: 1200, y1: 0, x2: 1200, y2: 200 };
-    const wall2 = { x1: 1200, y1: 280, x2: 1200, y2: 1000 };
-    const navContext = makeNavContextWithDoor();
-
-    const updated = updateEnemyAI(enemy, player, [wall, wall2], 16, false, ENEMY_SPEED_CHASE, navContext);
-
-    expect(updated.state).not.toBe('opening_door');
-  });
-
-  it('crawler not within interact range continues navigating toward door', () => {
-    const enemy = createTypedEnemy({ type: 'crawler', state: 'chase', x: 1500, y: 240 });
-    const player = { x: 600, y: 240 };
-    const wall = { x1: 1200, y1: 0, x2: 1200, y2: 200 };
-    const wall2 = { x1: 1200, y1: 280, x2: 1200, y2: 1000 };
-    const navContext = makeNavContextWithDoor();
-
-    const updated = updateEnemyAI(enemy, player, [wall, wall2], 16, false, ENEMY_SPEED_CHASE, navContext);
-
-    expect(updated.state).toBe('chase');
-    expect(updated.velocityX).toBeLessThan(0);
-  });
-
-  it('crawler in opening_door transitions to chase if player becomes visible', () => {
-    const enemy = createTypedEnemy({ type: 'crawler', state: 'opening_door', doorOpenTimer: 800, targetDoorId: 5, x: 200, y: 100 });
-    const player = { x: 250, y: 100 };
-
-    const updated = updateEnemyAI(enemy, player, [], 16);
-
-    expect(updated.state).toBe('chase');
   });
 });

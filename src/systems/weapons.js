@@ -165,7 +165,7 @@ export function generateLevelWeapons(rooms, seed, furnitureByRoom) {
   return results;
 }
 
-export function generateRoomWeapon(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, furnitureItems, roomId) {
+export function generateRoomWeapon(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, furnitureItems, roomId, obstacles = []) {
   if (roomId === 0) return null;
 
   const rand = mulberry32(seed + 60000);
@@ -179,12 +179,13 @@ export function generateRoomWeapon(roomX, roomY, roomWidth, roomHeight, wallThic
   const weapon = WEAPON_TYPES[weaponIndex];
 
   const itemRadius = 12;
+  const blockers = obstacles.length ? furnitureItems.concat(obstacles) : furnitureItems;
   for (let attempt = 0; attempt < 40; attempt++) {
     const x = minX + rand() * (maxX - minX);
     const y = minY + rand() * (maxY - minY);
 
     let overlaps = false;
-    for (const f of furnitureItems) {
+    for (const f of blockers) {
       if (
         x >= f.x - itemRadius &&
         x <= f.x + f.width + itemRadius &&

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { getRoomType, generateMazeWalls, generateColumns } from '../maze.js';
+import { getRoomType, generateMazeWalls, generateColumns, doorEntryZones, wallRectOccluders } from '../maze.js';
+import { raySegmentIntersection } from '../visibility.js';
 
 const ALL_TYPES = ['open', 'maze', 'columns', 'corridor', 'storage', 'cubicles'];
 
@@ -54,15 +55,15 @@ describe('generateMazeWalls', () => {
   const WALL_THICKNESS = 16;
   const doors = [{ wall: 'east', offset: 400, width: 80, targetRoomId: 1 }];
 
-  it('returns non-zero-length wall segments for a maze-type room', () => {
+  it('returns wall rects with positive area for a maze-type room', () => {
     const mazeSeed = findSeedForType('maze');
     expect(mazeSeed).not.toBeNull();
 
-    const segments = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, mazeSeed, doors);
-    expect(segments.length).toBeGreaterThan(0);
-    for (const seg of segments) {
-      const length = Math.sqrt((seg.x2 - seg.x1) ** 2 + (seg.y2 - seg.y1) ** 2);
-      expect(length).toBeGreaterThan(0);
+    const rects = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, mazeSeed, doors);
+    expect(rects.length).toBeGreaterThan(0);
+    for (const rect of rects) {
+      expect(rect.width).toBeGreaterThan(0);
+      expect(rect.height).toBeGreaterThan(0);
     }
   });
 
@@ -70,36 +71,68 @@ describe('generateMazeWalls', () => {
     const openSeed = findSeedForType('open');
     expect(openSeed).not.toBeNull();
 
-    const segments = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, openSeed, doors);
-    expect(segments).toHaveLength(0);
+    const rects = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, openSeed, doors);
+    expect(rects).toHaveLength(0);
   });
 
-  it('all generated segments are within room interior bounds', () => {
+  it('subdivision walls are as thick as the drawn wall band', () => {
     const mazeSeed = findSeedForType('maze');
-    const segments = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, mazeSeed, doors);
-    const innerMinX = ROOM_X + WALL_THICKNESS;
-    const innerMinY = ROOM_Y + WALL_THICKNESS;
-    const innerMaxX = ROOM_X + ROOM_WIDTH - WALL_THICKNESS;
-    const innerMaxY = ROOM_Y + ROOM_HEIGHT - WALL_THICKNESS;
+    const rects = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, mazeSeed, doors);
+    for (const rect of rects) {
+      expect(Math.min(rect.width, rect.height)).toBe(WALL_THICKNESS);
+    }
+  });
 
-    for (const seg of segments) {
-      expect(seg.x1).toBeGreaterThanOrEqual(innerMinX);
-      expect(seg.x2).toBeLessThanOrEqual(innerMaxX);
-      expect(seg.y1).toBeGreaterThanOrEqual(innerMinY);
-      expect(seg.y2).toBeLessThanOrEqual(innerMaxY);
+  it('all wall rects stay within the room bounds', () => {
+    const mazeSeed = findSeedForType('maze');
+    const rects = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, mazeSeed, doors);
+    for (const rect of rects) {
+      expect(rect.x).toBeGreaterThanOrEqual(ROOM_X);
+      expect(rect.x + rect.width).toBeLessThanOrEqual(ROOM_X + ROOM_WIDTH);
+      expect(rect.y).toBeGreaterThanOrEqual(ROOM_Y);
+      expect(rect.y + rect.height).toBeLessThanOrEqual(ROOM_Y + ROOM_HEIGHT);
     }
   });
 
   it('no single wall spans the full room width or height (gaps exist)', () => {
     const mazeSeed = findSeedForType('maze');
-    const segments = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, mazeSeed, doors);
-    const innerWidth = ROOM_WIDTH - 2 * WALL_THICKNESS;
-    const innerHeight = ROOM_HEIGHT - 2 * WALL_THICKNESS;
-
-    for (const seg of segments) {
-      const segLength = Math.sqrt((seg.x2 - seg.x1) ** 2 + (seg.y2 - seg.y1) ** 2);
-      expect(segLength).toBeLessThan(Math.max(innerWidth, innerHeight));
+    const rects = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, mazeSeed, doors);
+    for (const rect of rects) {
+      expect(rect.width).toBeLessThan(ROOM_WIDTH);
+      expect(rect.height).toBeLessThan(ROOM_HEIGHT);
     }
+  });
+
+  it('walls never stop at the inner face of the perimeter band (no occluder-free junction slot)', () => {
+    // A wall that reaches the maze area edge must continue through the drawn
+    // perimeter band to the true room edge; otherwise light slips through the
+    // visually-solid 16px junction between the wall band and the perimeter.
+    const innerMinX = ROOM_X + WALL_THICKNESS;
+    const innerMinY = ROOM_Y + WALL_THICKNESS;
+    const innerMaxX = ROOM_X + ROOM_WIDTH - WALL_THICKNESS;
+    const innerMaxY = ROOM_Y + ROOM_HEIGHT - WALL_THICKNESS;
+
+    let extendedToEdge = 0;
+    for (let seed = 0; seed < 300; seed++) {
+      const type = getRoomType(seed);
+      if (type !== 'maze' && type !== 'corridor') continue;
+      const rects = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
+      for (const rect of rects) {
+        const vertical = rect.height > rect.width;
+        if (vertical) {
+          expect(rect.y === ROOM_Y || rect.y > innerMinY, `seed ${seed} rect top stops inside the perimeter band`).toBe(true);
+          const bottom = rect.y + rect.height;
+          expect(bottom === ROOM_Y + ROOM_HEIGHT || bottom < innerMaxY, `seed ${seed} rect bottom stops inside the perimeter band`).toBe(true);
+          if (rect.y === ROOM_Y || bottom === ROOM_Y + ROOM_HEIGHT) extendedToEdge++;
+        } else {
+          expect(rect.x === ROOM_X || rect.x > innerMinX, `seed ${seed} rect left end stops inside the perimeter band`).toBe(true);
+          const right = rect.x + rect.width;
+          expect(right === ROOM_X + ROOM_WIDTH || right < innerMaxX, `seed ${seed} rect right end stops inside the perimeter band`).toBe(true);
+          if (rect.x === ROOM_X || right === ROOM_X + ROOM_WIDTH) extendedToEdge++;
+        }
+      }
+    }
+    expect(extendedToEdge).toBeGreaterThan(0);
   });
 
   it('does not generate walls that block door zones', () => {
@@ -109,8 +142,8 @@ describe('generateMazeWalls', () => {
       { wall: 'south', offset: 300, width: 80, targetRoomId: 2 },
     ];
 
-    const segments = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, mazeSeed, testDoors);
-    assertNoDoorZoneCrossing(segments, testDoors, ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS);
+    const rects = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, mazeSeed, testDoors);
+    assertNoDoorZoneOverlap(rects, testDoors, ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS);
   });
 
   it('is deterministic for the same seed', () => {
@@ -172,47 +205,42 @@ describe('corridor room type', () => {
   const WALL_THICKNESS = 16;
   const doors = [{ wall: 'east', offset: 400, width: 80, targetRoomId: 1 }];
 
-  it('produces non-zero wall segments', () => {
+  it('produces non-zero wall rects', () => {
     const seed = findSeedForType('corridor');
     expect(seed).not.toBeNull();
 
-    const segments = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
-    expect(segments.length).toBeGreaterThan(0);
+    const rects = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
+    expect(rects.length).toBeGreaterThan(0);
   });
 
   it('produces more subdivisions than basic maze type', () => {
     const corridorSeed = findSeedForType('corridor');
     const mazeSeed = findSeedForType('maze');
 
-    const corridorSegs = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, corridorSeed, doors);
-    const mazeSegs = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, mazeSeed, doors);
-    expect(corridorSegs.length).toBeGreaterThan(mazeSegs.length);
+    const corridorRects = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, corridorSeed, doors);
+    const mazeRects = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, mazeSeed, doors);
+    expect(corridorRects.length).toBeGreaterThan(mazeRects.length);
   });
 
-  it('all segments are within room interior bounds', () => {
+  it('all wall rects stay within the room bounds', () => {
     const seed = findSeedForType('corridor');
-    const segments = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
-    const innerMinX = ROOM_X + WALL_THICKNESS;
-    const innerMinY = ROOM_Y + WALL_THICKNESS;
-    const innerMaxX = ROOM_X + ROOM_WIDTH - WALL_THICKNESS;
-    const innerMaxY = ROOM_Y + ROOM_HEIGHT - WALL_THICKNESS;
-
-    for (const seg of segments) {
-      expect(seg.x1).toBeGreaterThanOrEqual(innerMinX);
-      expect(seg.x2).toBeLessThanOrEqual(innerMaxX);
-      expect(seg.y1).toBeGreaterThanOrEqual(innerMinY);
-      expect(seg.y2).toBeLessThanOrEqual(innerMaxY);
+    const rects = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
+    for (const rect of rects) {
+      expect(rect.x).toBeGreaterThanOrEqual(ROOM_X);
+      expect(rect.x + rect.width).toBeLessThanOrEqual(ROOM_X + ROOM_WIDTH);
+      expect(rect.y).toBeGreaterThanOrEqual(ROOM_Y);
+      expect(rect.y + rect.height).toBeLessThanOrEqual(ROOM_Y + ROOM_HEIGHT);
     }
   });
 
-  it('does not generate segments that cross door zones', () => {
+  it('does not generate walls that overlap door zones', () => {
     const seed = findSeedForType('corridor');
     const testDoors = [
       { wall: 'north', offset: 500, width: 80, targetRoomId: 1 },
       { wall: 'west', offset: 300, width: 80, targetRoomId: 2 },
     ];
-    const segments = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, testDoors);
-    assertNoDoorZoneCrossing(segments, testDoors, ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS);
+    const rects = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, testDoors);
+    assertNoDoorZoneOverlap(rects, testDoors, ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS);
   });
 
   it('is deterministic for the same seed', () => {
@@ -231,58 +259,56 @@ describe('storage room type', () => {
   const WALL_THICKNESS = 16;
   const doors = [{ wall: 'east', offset: 400, width: 80, targetRoomId: 1 }];
 
-  it('produces non-zero wall segments', () => {
+  it('produces non-zero wall rects', () => {
     const seed = findSeedForType('storage');
     expect(seed).not.toBeNull();
 
-    const segments = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
-    expect(segments.length).toBeGreaterThan(0);
+    const rects = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
+    expect(rects.length).toBeGreaterThan(0);
   });
 
-  it('produces only short segments (individual crate sides)', () => {
+  it('produces crate-sized obstacles', () => {
     const seed = findSeedForType('storage');
-    const segments = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
+    const rects = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
 
-    for (const seg of segments) {
-      const length = Math.sqrt((seg.x2 - seg.x1) ** 2 + (seg.y2 - seg.y1) ** 2);
-      expect(length).toBeLessThanOrEqual(80);
+    for (const rect of rects) {
+      expect(rect.width).toBeGreaterThanOrEqual(40);
+      expect(rect.width).toBeLessThanOrEqual(80);
+      expect(rect.height).toBeGreaterThanOrEqual(40);
+      expect(rect.height).toBeLessThanOrEqual(60);
     }
   });
 
   it('generates obstacles spread across multiple positions in the room', () => {
     const seed = findSeedForType('storage');
-    const segments = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
-    const uniqueXPositions = new Set(segments.map(s => Math.round(s.x1 / 100)));
-    const uniqueYPositions = new Set(segments.map(s => Math.round(s.y1 / 100)));
+    const rects = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
+    const uniqueXPositions = new Set(rects.map(r => Math.round(r.x / 100)));
+    const uniqueYPositions = new Set(rects.map(r => Math.round(r.y / 100)));
     expect(uniqueXPositions.size).toBeGreaterThan(2);
     expect(uniqueYPositions.size).toBeGreaterThan(2);
   });
 
-  it('all segments are within room interior bounds with margin', () => {
+  it('all crates are within room interior bounds with margin', () => {
     const seed = findSeedForType('storage');
-    const segments = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
+    const rects = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
     const margin = WALL_THICKNESS + 40;
-    const innerMinX = ROOM_X + margin;
-    const innerMinY = ROOM_Y + margin;
-    const innerMaxX = ROOM_X + ROOM_WIDTH - margin;
-    const innerMaxY = ROOM_Y + ROOM_HEIGHT - margin;
 
-    for (const seg of segments) {
-      expect(Math.min(seg.x1, seg.x2)).toBeGreaterThanOrEqual(innerMinX);
-      expect(Math.max(seg.x1, seg.x2)).toBeLessThanOrEqual(innerMaxX);
-      expect(Math.min(seg.y1, seg.y2)).toBeGreaterThanOrEqual(innerMinY);
-      expect(Math.max(seg.y1, seg.y2)).toBeLessThanOrEqual(innerMaxY);
+    for (const rect of rects) {
+      expect(rect.x).toBeGreaterThanOrEqual(ROOM_X + margin);
+      expect(rect.x + rect.width).toBeLessThanOrEqual(ROOM_X + ROOM_WIDTH - margin);
+      expect(rect.y).toBeGreaterThanOrEqual(ROOM_Y + margin);
+      expect(rect.y + rect.height).toBeLessThanOrEqual(ROOM_Y + ROOM_HEIGHT - margin);
     }
   });
 
-  it('does not generate segments that cross door zones', () => {
+  it('does not generate crates that overlap door zones', () => {
     const seed = findSeedForType('storage');
     const testDoors = [
       { wall: 'south', offset: 600, width: 80, targetRoomId: 1 },
       { wall: 'east', offset: 200, width: 80, targetRoomId: 2 },
     ];
-    const segments = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, testDoors);
-    assertNoDoorZoneCrossing(segments, testDoors, ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS);
+    const rects = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, testDoors);
+    assertNoDoorZoneOverlap(rects, testDoors, ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS);
   });
 
   it('is deterministic for the same seed', () => {
@@ -301,48 +327,73 @@ describe('cubicles room type', () => {
   const WALL_THICKNESS = 16;
   const doors = [{ wall: 'east', offset: 400, width: 80, targetRoomId: 1 }];
 
-  it('produces non-zero wall segments', () => {
+  it('produces non-zero wall rects', () => {
     const seed = findSeedForType('cubicles');
     expect(seed).not.toBeNull();
 
-    const segments = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
-    expect(segments.length).toBeGreaterThan(0);
+    const rects = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
+    expect(rects.length).toBeGreaterThan(0);
   });
 
-  it('produces uniform-length segments (partition walls are all the same size)', () => {
+  it('produces partition walls as thick as the drawn band', () => {
     const seed = findSeedForType('cubicles');
-    const segments = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
-    const lengths = segments.map(s => Math.round(Math.sqrt((s.x2 - s.x1) ** 2 + (s.y2 - s.y1) ** 2)));
-    const uniqueLengths = new Set(lengths);
-    expect(uniqueLengths.size).toBe(1);
-  });
-
-  it('all segments are within room interior bounds with margin', () => {
-    const seed = findSeedForType('cubicles');
-    const segments = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
-    const margin = WALL_THICKNESS + 40;
-    const innerMinX = ROOM_X + margin;
-    const innerMinY = ROOM_Y + margin;
-    const innerMaxX = ROOM_X + ROOM_WIDTH - margin;
-    const innerMaxY = ROOM_Y + ROOM_HEIGHT - margin;
-
-    for (const seg of segments) {
-      expect(Math.min(seg.x1, seg.x2)).toBeGreaterThanOrEqual(innerMinX);
-      expect(Math.max(seg.x1, seg.x2)).toBeLessThanOrEqual(innerMaxX);
-      expect(Math.min(seg.y1, seg.y2)).toBeGreaterThanOrEqual(innerMinY);
-      expect(Math.max(seg.y1, seg.y2)).toBeLessThanOrEqual(innerMaxY);
+    const rects = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
+    for (const rect of rects) {
+      expect(Math.min(rect.width, rect.height)).toBe(WALL_THICKNESS);
+      expect(Math.max(rect.width, rect.height)).toBeGreaterThan(80);
+      expect(Math.max(rect.width, rect.height)).toBeLessThan(130);
     }
   });
 
-  it('does not generate segments that cross door zones', () => {
+  it('partition walls of the same cubicle overlap at their corners (no see-through corner gap)', () => {
+    const seed = findSeedForType('cubicles');
+    const rects = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
+    const overlaps = (a, b) =>
+      a.x < b.x + b.width && a.x + a.width > b.x &&
+      a.y < b.y + b.height && a.y + a.height > b.y;
+
+    // Every perpendicular pair that forms a corner must share covered area, so
+    // light cannot wrap a zero-width corner point inside the drawn walls.
+    let cornerPairs = 0;
+    for (let i = 0; i < rects.length; i++) {
+      for (let j = i + 1; j < rects.length; j++) {
+        const a = rects[i];
+        const b = rects[j];
+        const perpendicular = (a.width > a.height) !== (b.width > b.height);
+        if (!perpendicular) continue;
+        const touches =
+          a.x <= b.x + b.width && a.x + a.width >= b.x &&
+          a.y <= b.y + b.height && a.y + a.height >= b.y;
+        if (!touches) continue;
+        cornerPairs++;
+        expect(overlaps(a, b), `rects ${i} and ${j} touch but do not overlap`).toBe(true);
+      }
+    }
+    expect(cornerPairs).toBeGreaterThan(0);
+  });
+
+  it('all partitions are within room interior bounds with margin', () => {
+    const seed = findSeedForType('cubicles');
+    const rects = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
+    const margin = WALL_THICKNESS + 40;
+
+    for (const rect of rects) {
+      expect(rect.x).toBeGreaterThanOrEqual(ROOM_X + margin - WALL_THICKNESS / 2);
+      expect(rect.x + rect.width).toBeLessThanOrEqual(ROOM_X + ROOM_WIDTH - margin + WALL_THICKNESS / 2);
+      expect(rect.y).toBeGreaterThanOrEqual(ROOM_Y + margin - WALL_THICKNESS / 2);
+      expect(rect.y + rect.height).toBeLessThanOrEqual(ROOM_Y + ROOM_HEIGHT - margin + WALL_THICKNESS / 2);
+    }
+  });
+
+  it('does not generate partitions that overlap door zones', () => {
     const seed = findSeedForType('cubicles');
     const testDoors = [
       { wall: 'north', offset: 300, width: 80, targetRoomId: 1 },
       { wall: 'south', offset: 800, width: 80, targetRoomId: 2 },
       { wall: 'west', offset: 450, width: 80, targetRoomId: 3 },
     ];
-    const segments = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, testDoors);
-    assertNoDoorZoneCrossing(segments, testDoors, ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS);
+    const rects = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, testDoors);
+    assertNoDoorZoneOverlap(rects, testDoors, ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS);
   });
 
   it('is deterministic for the same seed', () => {
@@ -353,7 +404,111 @@ describe('cubicles room type', () => {
   });
 });
 
-function assertNoDoorZoneCrossing(segments, testDoors, roomX, roomY, roomWidth, roomHeight, wallThickness) {
+describe('columns room type wall rects', () => {
+  const ROOM_X = 0;
+  const ROOM_Y = 0;
+  const ROOM_WIDTH = 1200;
+  const ROOM_HEIGHT = 1000;
+  const WALL_THICKNESS = 16;
+  const doors = [{ wall: 'east', offset: 400, width: 80, targetRoomId: 1 }];
+
+  it('produces one square rect per column matching the column footprint', () => {
+    const seed = findSeedForType('columns');
+    const rects = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
+    const columns = generateColumns(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed);
+    expect(rects.length).toBeGreaterThan(0);
+    expect(rects.length).toBeLessThanOrEqual(columns.length);
+    for (const rect of rects) {
+      expect(rect.width).toBe(rect.height);
+      const match = columns.find(c => c.x === rect.x + rect.width / 2 && c.y === rect.y + rect.height / 2);
+      expect(match).toBeTruthy();
+      expect(rect.width).toBe(match.size);
+    }
+  });
+});
+
+describe('generateMazeWalls keep-out zones', () => {
+  const ROOM_X = 0;
+  const ROOM_Y = 0;
+  const ROOM_WIDTH = 1200;
+  const ROOM_HEIGHT = 1000;
+  const WALL_THICKNESS = 16;
+  const doors = [{ wall: 'east', offset: 400, width: 80, targetRoomId: 1 }];
+
+  const overlaps = (a, b) =>
+    a.x < b.x + b.width &&
+    a.x + a.width > b.x &&
+    a.y < b.y + b.height &&
+    a.y + a.height > b.y;
+
+  it('produces no wall rect overlapping a supplied keep-out zone', () => {
+    const keepOut = { x: 500, y: 400, width: 200, height: 200 };
+    for (let seed = 0; seed < 300; seed++) {
+      const rects = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors, [keepOut]);
+      for (const rect of rects) {
+        expect(overlaps(rect, keepOut), `seed ${seed}`).toBe(false);
+      }
+    }
+  });
+
+  it('produces the same walls whether keep-out is omitted or passed empty', () => {
+    for (let seed = 0; seed < 50; seed++) {
+      const omitted = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
+      const empty = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors, []);
+      expect(empty, `seed ${seed}`).toEqual(omitted);
+    }
+  });
+});
+
+describe('doorEntryZones', () => {
+  const WALL_THICKNESS = 16;
+  const room = {
+    x: 0,
+    y: 0,
+    width: 1200,
+    height: 1000,
+    doors: [
+      { wall: 'north', offset: 300, width: 80, targetRoomId: 1 },
+      { wall: 'south', offset: 500, width: 80, targetRoomId: 2 },
+      { wall: 'east', offset: 200, width: 80, targetRoomId: 3 },
+      { wall: 'west', offset: 600, width: 80, targetRoomId: 4 },
+    ],
+  };
+
+  it('returns one entry zone per door', () => {
+    expect(doorEntryZones(room, WALL_THICKNESS)).toHaveLength(4);
+  });
+
+  it('places each entry zone against its door wall and extends it into the room', () => {
+    const [north, south, east, west] = doorEntryZones(room, WALL_THICKNESS);
+
+    // North door: zone hugs the top edge, spans the door, extends downward.
+    expect(north.y).toBe(room.y);
+    expect(north.x).toBe(room.x + 300);
+    expect(north.width).toBe(80);
+    expect(north.height).toBeGreaterThan(WALL_THICKNESS);
+
+    // South door: zone reaches the bottom edge.
+    expect(south.y + south.height).toBe(room.y + room.height);
+    expect(south.x).toBe(room.x + 500);
+
+    // East door: zone reaches the right edge, spans the door vertically.
+    expect(east.x + east.width).toBe(room.x + room.width);
+    expect(east.y).toBe(room.y + 200);
+    expect(east.height).toBe(80);
+    expect(east.width).toBeGreaterThan(WALL_THICKNESS);
+
+    // West door: zone hugs the left edge.
+    expect(west.x).toBe(room.x);
+    expect(west.y).toBe(room.y + 600);
+  });
+
+  it('returns an empty array for a room with no doors', () => {
+    expect(doorEntryZones({ x: 0, y: 0, width: 100, height: 100, doors: [] }, WALL_THICKNESS)).toEqual([]);
+  });
+});
+
+function assertNoDoorZoneOverlap(rects, testDoors, roomX, roomY, roomWidth, roomHeight, wallThickness) {
   const doorZones = testDoors.map(d => {
     if (d.wall === 'north') return { x: roomX + d.offset, y: roomY, width: d.width, height: 80 + wallThickness };
     if (d.wall === 'south') return { x: roomX + d.offset, y: roomY + roomHeight - 80 - wallThickness, width: d.width, height: 80 + wallThickness };
@@ -361,21 +516,95 @@ function assertNoDoorZoneCrossing(segments, testDoors, roomX, roomY, roomWidth, 
     return { x: roomX, y: roomY + d.offset, width: 80 + wallThickness, height: d.width };
   });
 
-  for (const seg of segments) {
+  for (const rect of rects) {
     for (const zone of doorZones) {
-      const segIsHorizontal = Math.abs(seg.y2 - seg.y1) < 1;
-      const segIsVertical = Math.abs(seg.x2 - seg.x1) < 1;
-      if (segIsHorizontal) {
-        const minX = Math.min(seg.x1, seg.x2);
-        const maxX = Math.max(seg.x1, seg.x2);
-        const crossesZone = maxX > zone.x && minX < zone.x + zone.width && seg.y1 > zone.y && seg.y1 < zone.y + zone.height;
-        expect(crossesZone).toBe(false);
-      } else if (segIsVertical) {
-        const minY = Math.min(seg.y1, seg.y2);
-        const maxY = Math.max(seg.y1, seg.y2);
-        const crossesZone = maxY > zone.y && minY < zone.y + zone.height && seg.x1 > zone.x && seg.x1 < zone.x + zone.width;
-        expect(crossesZone).toBe(false);
-      }
+      const overlap =
+        rect.x < zone.x + zone.width && rect.x + rect.width > zone.x &&
+        rect.y < zone.y + zone.height && rect.y + rect.height > zone.y;
+      expect(overlap, `rect ${JSON.stringify(rect)} overlaps door zone ${JSON.stringify(zone)}`).toBe(false);
     }
   }
 }
+
+// Classify a returned occluder segment as one of the four edges of `rect`, so
+// tests can assert WHICH faces occlude without depending on endpoint ordering.
+function edgeKind(seg, rect) {
+  const left = rect.x;
+  const right = rect.x + rect.width;
+  const top = rect.y;
+  const bottom = rect.y + rect.height;
+  const horizontal = seg.y1 === seg.y2;
+  const vertical = seg.x1 === seg.x2;
+  if (horizontal && seg.y1 === top) return 'top';
+  if (horizontal && seg.y1 === bottom) return 'bottom';
+  if (vertical && seg.x1 === left) return 'left';
+  if (vertical && seg.x1 === right) return 'right';
+  return 'other';
+}
+
+function closestHit(origin, dx, dy, segments) {
+  const ray = { x: origin.x, y: origin.y, dx, dy };
+  let closest = null;
+  for (const seg of segments) {
+    const hit = raySegmentIntersection(ray, seg);
+    if (hit && (closest === null || hit.t < closest.t)) closest = hit;
+  }
+  return closest;
+}
+
+describe('wallRectOccluders (back-facing edges so a wall lights its near face)', () => {
+  const rect = { x: 100, y: 100, width: 60, height: 16 }; // left100 right160 top100 bottom116
+
+  it('a light below the wall occludes with the far (top) face and the sides, never the near (bottom) face', () => {
+    const kinds = new Set(wallRectOccluders(rect, { x: 130, y: 300 }).map(s => edgeKind(s, rect)));
+    expect(kinds).toEqual(new Set(['top', 'left', 'right']));
+  });
+
+  it('a light above the wall occludes with the far (bottom) face, never the near (top) face', () => {
+    const kinds = new Set(wallRectOccluders(rect, { x: 130, y: -50 }).map(s => edgeKind(s, rect)));
+    expect(kinds).toEqual(new Set(['bottom', 'left', 'right']));
+  });
+
+  it('a light left of the wall occludes with the far (right) face, never the near (left) face', () => {
+    const kinds = new Set(wallRectOccluders(rect, { x: 20, y: 108 }).map(s => edgeKind(s, rect)));
+    expect(kinds).toEqual(new Set(['top', 'bottom', 'right']));
+  });
+
+  it('a light right of the wall occludes with the far (left) face, never the near (right) face', () => {
+    const kinds = new Set(wallRectOccluders(rect, { x: 400, y: 108 }).map(s => edgeKind(s, rect)));
+    expect(kinds).toEqual(new Set(['top', 'bottom', 'left']));
+  });
+
+  it('a diagonal light occludes with exactly the two far faces', () => {
+    // below-left of the rect: near faces are bottom and left, so only the two
+    // far faces (top, right) remain.
+    const kinds = new Set(wallRectOccluders(rect, { x: 20, y: 300 }).map(s => edgeKind(s, rect)));
+    expect(kinds).toEqual(new Set(['top', 'right']));
+  });
+
+  it('only ever returns real edges of the rectangle', () => {
+    for (const origin of [{ x: 130, y: 300 }, { x: 20, y: 108 }, { x: 400, y: -50 }]) {
+      for (const seg of wallRectOccluders(rect, origin)) {
+        expect(edgeKind(seg, rect)).not.toBe('other');
+      }
+    }
+  });
+
+  it('lets the light reach across the wall band to the far face (near band lit) and stops it there (no leak)', () => {
+    // For a light on each side, a ray fired straight through the wall must pass
+    // the near face (so the near band is inside the lit region) and be stopped
+    // at the far face (so no light reaches the floor on the other side).
+    const cases = [
+      { origin: { x: 130, y: 300 }, dx: 0, dy: -1, nearDist: 300 - 116, farDist: 300 - 100 }, // below, aim up
+      { origin: { x: 130, y: -200 }, dx: 0, dy: 1, nearDist: 100 - (-200), farDist: 116 - (-200) }, // above, aim down
+      { origin: { x: -100, y: 108 }, dx: 1, dy: 0, nearDist: 100 - (-100), farDist: 160 - (-100) }, // left, aim right
+      { origin: { x: 400, y: 108 }, dx: -1, dy: 0, nearDist: 400 - 160, farDist: 400 - 100 }, // right, aim left
+    ];
+    for (const c of cases) {
+      const hit = closestHit(c.origin, c.dx, c.dy, wallRectOccluders(rect, c.origin));
+      expect(hit, `ray from ${JSON.stringify(c.origin)} should be stopped by the far face`).not.toBeNull();
+      expect(hit.t).toBeGreaterThan(c.nearDist + 1); // passed the near face -> near band is lit
+      expect(hit.t).toBeCloseTo(c.farDist, 5); // stopped exactly at the far face -> no leak through
+    }
+  });
+});

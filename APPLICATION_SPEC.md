@@ -10,7 +10,6 @@ The basic idea:
 - the only thing that is visible are areas that are lit by the players flashlight (where they are looking)
 - rooms are connected to each other in a variety of ways, including stairs
 - rooms may have weapons, enemies, powerups, batteries, lightswitches, lore, and treasure / valuables of various kinds
-  - for now, start with a single type of enemy, a zombie that will move towards the player if the player is visible but will stop once the player is out of line of sight of the zombie (at which point it will just move around randomly)
   - rooms can have areas where players can hide, including under tables and beds, inside vents, armoirs, and closets
   - some room connectios should have closable doors
   - some rooms should have light switches that will turn on the lights in that room and prevent enemies from spawning there (though enemies can still find their way in from other areas)
@@ -50,18 +49,27 @@ Other details (from playtesting):
   - Entering should feel like the user transitions to a new dimension. Right now it just looks like another room.
   - As the player approaches the edge, there should be a strange crackling sound that gets louder, and only when the player goes through does the backroom appear. This is not a 'door' like the other doors, it should behave differently (e.g. no light leakage, it shows up on screen as a sizzling light in the wall edge)
 - The player should be able to turn off the flashlight to conserve battery, and it should automatically turn off when they are hiding
+- zombies and other enemies should not follow the player once they lose line of sight. That includes walls and hiding state.
+- gunfire should go over tables and desks and low furniture, should be blocked by armoires and other furniture
+- difficulty should scale based on distance from the starting room
+
+# Dev notes
+
+To create pixel art, use gemini nano banana. There is a key in the .env file at repo root.
+
+# Things that still need to be implemented
 
 Feedback from me (DO NOT CHANGE):
-- I think the pixel art issue is currently the most urgent fix, please focus there first!
-
-- improve the pixel art representations of everything by using an AI generation tool, e.g. nano banana (API key in environment variable, see .env at repo root)
-- the rooms just feel totally uncoherent. It should feel _liminal_ in some way. Right now there is just think 'furniture' scattered around and thats it. Some of the rooms should feel like a furniture store, but others should feel like a library, and others should feel like a space ship, and others should feel like a forest. Each room should have a coherent, but different vibe. Some of those can be shared across rooms, but right now its too samey.
-- It is currently impossible to tell what is an enemy, what is a weapon, what is a pickup. All of these things need to be bigger, further cementing the idea that everything should be closer
-- the pixel art of the player character is totally wrong. It's a front facing view of a character instead of a top down view! Same is true of many of the enemies
-  - in general, i think the player character needs to be bigger on screen (cf also the room needs to be smaller). If the camera is closer to the player in smaller rooms it will emphasize a claustrophobic feeling
-  - most of the pixel art is not facing the right direction (e.g. the armoire is also front facing instead of top down)
-  - and it is all basically way too small. What kind of sprite is 18x18! that is so small the player cant really make it out at all
-  - I think the player character view should be top down -- we should see the top of the head, the shoulders, and the flashlight with arm stuck out. Similar for all the other sprites
+- most of the pixel art is not facing the right direction (e.g. the armoire is also front facing instead of top down)
+- and it is all basically way too small. What kind of sprite is 18x18! that is so small the player cant really make it out at all
+- I think the player character view should be top down -- we should see the top of the head, the shoulders, and the flashlight with arm stuck out. Similar for all the other sprites.
+- enemies should make sounds that get louder as they get closer and have attack sounds
+- the level should not change day to day, so the player can build a mental map over time
+- the rooms themselves should have sounds for various things in them. We should have more variety (and more detail) for the various kinds of things that can be in given rooms, and some of them should make sounds of their own
+- we should add lamps / lights to the game, areas that do provide light automatically in some rooms
 
 Known bugs:
-- Flash light light goes through walls, especially at the edges
+- Hiding places, stairs, and doors will often spawn inside walls
+- Some of the walls do not look like they have any width sometimes (just infinitely thin infinitely tall black walls). All walls should have 'thickness'
+- Getting shot makes the player character disappear
+- many of the sprite hitboxes for furniture do not match visually where they are

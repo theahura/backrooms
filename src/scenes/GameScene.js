@@ -1,20 +1,20 @@
 import Phaser from 'phaser';
 import { calculateVelocity } from '../systems/movement.js';
-import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES } from '../systems/furniture.js';
-import { generateMazeWalls } from '../systems/maze.js';
+import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES, blocksBullets } from '../systems/furniture.js';
+import { generateMazeWalls, wallRectSegments, wallRectOccluders, doorEntryZones } from '../systems/maze.js';
 import { getRoomVibe } from '../systems/roomVibes.js';
-import { getFlashlightPolygon, filterSegmentsNear, FLASHLIGHT_RANGE } from '../systems/visibility.js';
+import { getFlashlightPolygon, filterSegmentsNear, filterRectsNear, FLASHLIGHT_RANGE } from '../systems/visibility.js';
 import { createRoomWalls } from '../systems/room.js';
-import { STAIR_SIZE } from '../systems/stairs.js';
+import { STAIR_SIZE, STAIR_MARGIN, getStairTopLeft, stairKeepOut, getStairLandingPosition, stairLandingKeepOut } from '../systems/stairs.js';
 import { getRoomAt, roomsWithinRadius, hasStairDown, localDistance, isRiftDoor, ROOM_WIDTH, ROOM_HEIGHT } from '../systems/worldgen.js';
 import { mulberry32 } from '../systems/random.js';
-import { generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_CHASE, CRAWLER_CHASE_SPEED, SPITTER_CHASE_SPEED, DETECTION_RANGE } from '../systems/enemy.js';
+import { generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_CHASE, DETECTION_RANGE } from '../systems/enemy.js';
 import { createCombatState, applyDamage, applyHeal, updateCombat, getHealthFraction, isInvulnerable, applyEnemyDamage, isEnemyDead, getHurtFlash, ENEMY_CONTACT_DAMAGE, ENEMY_MAX_HP, CRAWLER_MAX_HP, SPITTER_MAX_HP, CRAWLER_CONTACT_DAMAGE, SPITTER_CONTACT_DAMAGE, SPITTER_PROJECTILE_DAMAGE, CORPSE_TINT, CORPSE_ALPHA, CORPSE_ANGLE, CORPSE_DEPTH, MEDKIT_HEAL_AMOUNT } from '../systems/combat.js';
 import { createFlashlightState, toggleFlashlight, setFlashlightHiding, isFlashlightLit, updateBatteryWithFlashlight } from '../systems/flashlight.js';
 import { calculateBulletVelocity, calculateShotgunSpread, canFire, updateFireCooldown, isBulletExpired, getBulletVelocityFromAngle, SPITTER_PROJECTILE_SPEED, SPITTER_PROJECTILE_RANGE } from '../systems/shooting.js';
 import { getMoveVelocity, resolveAimAngle, resolveFireIntent, resolveMoveVelocity, detectTouchPrimary, computeTouchLayout } from '../systems/touchControls.js';
 import { WEAPON_TYPES, createWeaponState, switchWeapon, pickupWeapon, getActiveWeapon, getEffectiveStats, generateRoomWeapon, hasAmmo, consumeAmmo, addAmmo, AMMO_PER_PICKUP } from '../systems/weapons.js';
-import { getEnemyHP, getEnemyCount, getEnemyChaseSpeed, getEnemyDamage } from '../systems/scaling.js';
+import { getEnemyHP, getEnemyDamage } from '../systems/scaling.js';
 import { createBatteryState, getBatteryFraction, getFlashlightConeAngle, shouldFlicker, rechargeBattery, getBatteryHint, BATTERY_RECHARGE_AMOUNT } from '../systems/battery.js';
 import { generateRoomItems, ITEM_TYPES } from '../systems/items.js';
 import { createInventoryState, pickupItem, useBattery, canPickupItem } from '../systems/inventory.js';
@@ -27,7 +27,7 @@ import { createExplorationState, updateExploration, getWindowedMinimapData, getC
 import { generateCrackPoints } from '../systems/startroom.js';
 import { getLocation, getLocationLayout, getLocationExitPosition } from '../systems/locations.js';
 import { generateRoomLore } from '../systems/lore.js';
-import { buildRoomGraph, buildFullRoomGraph, bfsFromRoom, getNextDoorway, getClosedDoorOnPath, getRoomDistance, getDoorwayCenter, DOORWAY_SEEK_CHANCE, ROOM_TRANSITION_COOLDOWN, MAX_ROOM_DISTANCE, MAX_ROOM_ENEMIES } from '../systems/pathfinding.js';
+import { buildRoomGraph, getRoomDistance, getDoorwayCenter, DOORWAY_SEEK_CHANCE, ROOM_TRANSITION_COOLDOWN, MAX_ROOM_DISTANCE, MAX_ROOM_ENEMIES } from '../systems/pathfinding.js';
 import { createDangerState, updateDangerTime, shouldSpawnWave, advanceWave, getWaveComposition, getSpawnRoom } from '../systems/danger.js';
 import { SOUND_CONFIGS, getFootstepInterval, getAmbientSoundDelay, getEnemySoundEvent, getEnemyDeathSound, getEnemyFireSound, getDistanceVolume, getRiftCrackleVolume, ENEMY_SOUND_RANGE } from '../systems/audio.js';
 import { generateAllSounds, createAmbientDrone, playAmbientSound, createRiftCrackle } from '../systems/audioEngine.js';
@@ -36,7 +36,6 @@ import { createRunStats, recordKill, updateTime, updateMaxFloor } from '../syste
 import { getEffectiveVolume, createDefaultSettings } from '../systems/settings.js';
 import { SPRITE_DEFS, getAllSpriteKeys, ANIM_DEFS, getAllAnimKeys, getEnemyTextureKey, getAnimKeyForState } from '../systems/sprites.js';
 import { getLightSpillZones } from '../systems/lightSpill.js';
-import { generateRoomTraps } from '../systems/traps.js';
 import { rollEnemyDrop } from '../systems/lootDrops.js';
 import { CAMERA_ZOOM, partitionSceneObjects } from '../systems/camera.js';
 
@@ -50,12 +49,15 @@ const SPRITE_PNGS = import.meta.glob('../assets/sprites/*.png', {
 });
 
 const WALL_THICKNESS = 16;
+// Breathing room carved out of maze walls around a room's centered stair, so
+// the stair square is never embedded in (or flush against) an internal wall.
+const STAIR_KEEPOUT_PAD = 16;
 
 // Floors are stacked as non-overlapping horizontal bands in one physics world.
 // The offset is enormous so unbounded floors never collide in world space.
 const FLOOR_Y_OFFSET = 5_000_000;
 // Depth contribution of descending one floor (added to in-floor Manhattan
-// distance) so scaling of items/traps/loot keeps increasing across floors.
+// distance) so scaling of items/loot keeps increasing across floors.
 const FLOOR_DEPTH = 6;
 // Fixed large world/camera bounds for the effectively-unbounded world.
 const WORLD_BOUND = 50_000_000;
@@ -106,16 +108,6 @@ export class GameScene extends Phaser.Scene {
     this.registry.set('runCount', runCount + 1);
     this.levelSeed = runCount + 1;
     this.runCount = runCount;
-    this.scaledEnemyHP = getEnemyHP(ENEMY_MAX_HP, runCount);
-    this.scaledCrawlerHP = getEnemyHP(CRAWLER_MAX_HP, runCount);
-    this.scaledSpitterHP = getEnemyHP(SPITTER_MAX_HP, runCount);
-    this.scaledEnemyChaseSpeed = getEnemyChaseSpeed(ENEMY_SPEED_CHASE, runCount);
-    this.scaledCrawlerChaseSpeed = getEnemyChaseSpeed(CRAWLER_CHASE_SPEED, runCount);
-    this.scaledSpitterChaseSpeed = getEnemyChaseSpeed(SPITTER_CHASE_SPEED, runCount);
-    this.scaledEnemyDamage = getEnemyDamage(ENEMY_CONTACT_DAMAGE, runCount);
-    this.scaledCrawlerDamage = getEnemyDamage(CRAWLER_CONTACT_DAMAGE, runCount);
-    this.scaledSpitterDamage = getEnemyDamage(SPITTER_CONTACT_DAMAGE, runCount);
-    this.extraEnemyCount = getEnemyCount(runCount);
     this.collectedLore = new Set(this.registry.get('collectedLore') ?? []);
     this.activeLocation = this.registry.get('activeLocation') ?? 'store';
     this.activeLocationData = getLocation(this.activeLocation) || getLocation('store');
@@ -153,6 +145,10 @@ export class GameScene extends Phaser.Scene {
     this.walls = this.physics.add.staticGroup();
     this.furnitureGroup = this.physics.add.staticGroup();
     this.wallSegments = [];
+    // Interior maze walls are kept as solid rects (not pre-expanded segments) so
+    // the flashlight can light their near face (visible thickness) via back-face
+    // culling, while enemy line-of-sight still expands them to full outlines.
+    this.mazeWallRects = [];
 
     this.roomFurniture = new Map();
     this.combatState = createCombatState(this.maxHp);
@@ -169,7 +165,6 @@ export class GameScene extends Phaser.Scene {
     this.explorationState = createExplorationState();
 
     this.roomGraph = null;
-    this.fullRoomGraph = null;
     this.roomGraphDirty = true;
     this.gunshotAlertCooldown = 0;
 
@@ -195,7 +190,6 @@ export class GameScene extends Phaser.Scene {
     this.createSwitchInfra();
     this.createItems();
     this.createLoreItems();
-    this.createTraps();
     this.createEnemies();
     this.createWeaponPickups();
     this.createStairInfra();
@@ -312,19 +306,33 @@ export class GameScene extends Phaser.Scene {
     const occluderDoors = room.doors.filter(d => !(room.floor === 0 && isRiftDoor(room, d)));
     this.wallSegments.push(...createRoomWalls(room.x, room.y, room.width, room.height, occluderDoors));
 
-    this.createRoomFurniture(this.furnitureGfx, room, theme);
+    // Generate the internal maze walls FIRST so furniture (placed next) and the
+    // stair can be kept clear of them. A room with a stair carves a keep-out
+    // square around both the centered stair AND the spot below it where the
+    // player materializes after a stair transition (see getStairLandingPosition)
+    // -- otherwise a wall or furniture piece can spawn on the landing.
+    const hasStair = this.roomStairDirection(room);
+    const stairKeep = hasStair
+      ? [stairKeepOut(room, STAIR_SIZE, STAIR_MARGIN, STAIR_KEEPOUT_PAD)]
+      : [];
+    const landingKeep = hasStair ? [stairLandingKeepOut(room)] : [];
+    const mazeRects = room.id !== 0
+      ? generateMazeWalls(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed, room.doors, [...stairKeep, ...landingKeep])
+      : [];
+    const furnitureObstacles = [...mazeRects, ...doorEntryZones(room, WALL_THICKNESS), ...landingKeep];
+
+    this.createRoomFurniture(this.furnitureGfx, room, theme, furnitureObstacles);
     if (room.id !== 0) {
-      this.createRoomMaze(this.roomGfx, room, theme);
+      this.renderRoomMaze(this.roomGfx, mazeRects, theme);
     }
     this.drawRoomDoorways(this.roomGfx, room, theme);
 
     this.activateRoomDoors(room);
     this.activateRoomSwitch(room);
-    this.activateRoomItems(room);
-    this.activateRoomLore(room);
-    this.activateRoomTraps(room);
+    this.activateRoomItems(room, mazeRects);
+    this.activateRoomLore(room, mazeRects);
     this.activateRoomEnemies(room);
-    this.activateRoomWeapon(room);
+    this.activateRoomWeapon(room, mazeRects);
     this.activateRoomStairs(room);
 
     this.roomGraphDirty = true;
@@ -545,10 +553,10 @@ export class GameScene extends Phaser.Scene {
     addVerticalWall(room.x + WALL_THICKNESS / 2, room.y, room.height, westDoors, WALL_THICKNESS);
   }
 
-  createRoomFurniture(gfx, room, vibe) {
+  createRoomFurniture(gfx, room, vibe, obstacles = []) {
     const furniture = room.id === 0
       ? getLocationLayout(this.activeLocation, room.x, room.y, room.width, room.height, WALL_THICKNESS)
-      : generateRoomFurniture(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed, vibe.furniture);
+      : generateRoomFurniture(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed, vibe.furniture, obstacles);
     this.roomFurniture.set(room.id, furniture);
 
     for (const item of furniture) {
@@ -572,6 +580,7 @@ export class GameScene extends Phaser.Scene {
         item.width,
         item.height
       );
+      zone.setData('blocksBullets', blocksBullets(item.type));
       this.furnitureGroup.add(zone);
 
       if (FURNITURE_TYPES[item.type] && FURNITURE_TYPES[item.type].blocksLight) {
@@ -581,29 +590,12 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  createRoomMaze(gfx, room, theme) {
-    const mazeSegments = generateMazeWalls(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed, room.doors);
-    for (const seg of mazeSegments) {
-      this.wallSegments.push(seg);
-
-      const isHorizontal = Math.abs(seg.y2 - seg.y1) < 1;
-      const length = Math.sqrt((seg.x2 - seg.x1) ** 2 + (seg.y2 - seg.y1) ** 2);
-      if (isHorizontal) {
-        const cx = (seg.x1 + seg.x2) / 2;
-        const cy = seg.y1;
-        this.walls.add(this.add.zone(cx, cy, length, WALL_THICKNESS));
-      } else {
-        const cx = seg.x1;
-        const cy = (seg.y1 + seg.y2) / 2;
-        this.walls.add(this.add.zone(cx, cy, WALL_THICKNESS, length));
-      }
-
+  renderRoomMaze(gfx, mazeRects, theme) {
+    for (const rect of mazeRects) {
+      this.mazeWallRects.push(rect);
+      this.walls.add(this.add.zone(rect.x + rect.width / 2, rect.y + rect.height / 2, rect.width, rect.height));
       gfx.fillStyle(theme.wallColor, 1);
-      if (isHorizontal) {
-        gfx.fillRect(Math.min(seg.x1, seg.x2), seg.y1 - WALL_THICKNESS / 2, length, WALL_THICKNESS);
-      } else {
-        gfx.fillRect(seg.x1 - WALL_THICKNESS / 2, Math.min(seg.y1, seg.y2), WALL_THICKNESS, length);
-      }
+      gfx.fillRect(rect.x, rect.y, rect.width, rect.height);
     }
   }
 
@@ -879,12 +871,12 @@ export class GameScene extends Phaser.Scene {
     this.itemGroup = this.physics.add.staticGroup();
   }
 
-  activateRoomItems(room) {
+  activateRoomItems(room, mazeRects = []) {
     const furniture = this.roomFurniture.get(room.id) || [];
     const items = generateRoomItems(
       room.x, room.y, room.width, room.height,
       WALL_THICKNESS, room.seed, furniture, room.id,
-      room.distance
+      room.distance, mazeRects
     );
 
     for (const item of items) {
@@ -935,11 +927,11 @@ export class GameScene extends Phaser.Scene {
     this.lorePopup = null;
   }
 
-  activateRoomLore(room) {
+  activateRoomLore(room, mazeRects = []) {
     const furniture = this.roomFurniture.get(room.id) || [];
     const loreItems = generateRoomLore(
       room.x, room.y, room.width, room.height,
-      WALL_THICKNESS, room.seed, furniture, room.id, this.collectedLore
+      WALL_THICKNESS, room.seed, furniture, room.id, this.collectedLore, mazeRects
     );
 
     for (const item of loreItems) {
@@ -1016,81 +1008,6 @@ export class GameScene extends Phaser.Scene {
     this.lorePopup = { bg, text: loreText, timer };
   }
 
-  createTraps() {
-    this.trapGroup = this.physics.add.staticGroup();
-  }
-
-  activateRoomTraps(room) {
-    const furniture = this.roomFurniture.get(room.id) || [];
-    const traps = generateRoomTraps(
-      room.x, room.y, room.width, room.height,
-      WALL_THICKNESS, room.seed, furniture, room.id,
-      room.distance
-    );
-
-    for (const trap of traps) {
-      const textureKey = `trap_${trap.type}`;
-      const sprite = this.trapGroup.create(trap.x, trap.y, textureKey);
-      sprite.setDepth(5);
-      sprite.setData('trapType', trap.type);
-      sprite.setData('trapDamage', trap.damage);
-      sprite.setData('trapCooldown', trap.cooldown);
-      sprite.setData('trapSingleUse', trap.singleUse);
-      sprite.setData('lastTriggeredAt', 0);
-      sprite.setData('roomId', room.id);
-    }
-  }
-
-  onTrapOverlap(player, trapSprite) {
-    if (this.combatState.isDead) return;
-    if (this.dayEnding || this.isTeleporting) return;
-
-    const trapType = trapSprite.getData('trapType');
-
-    if (trapType === 'spike') {
-      const now = this.time.now;
-      const lastTriggered = trapSprite.getData('lastTriggeredAt') || 0;
-      const cooldown = trapSprite.getData('trapCooldown');
-
-      if (now - lastTriggered < cooldown) return;
-
-      trapSprite.setData('lastTriggeredAt', now);
-      const damage = trapSprite.getData('trapDamage');
-      const before = this.combatState;
-      this.combatState = applyDamage(before, damage);
-
-      if (this.combatState.hp < before.hp) {
-        this.playSound('spike_trap');
-        this.cameras.main.shake(100, 0.008);
-        this.cameras.main.flash(100, 255, 50, 0);
-
-        if (this.combatState.isDead) {
-          this.onPlayerDeath();
-        }
-      }
-    } else if (trapType === 'noise') {
-      if (!trapSprite.body.enable) return;
-
-      this.playSound('noise_trap_alarm');
-
-      const trapRoomId = trapSprite.getData('roomId');
-      if (this.roomGraph) {
-        for (const es of this.enemyStates) {
-          const roomDist = getRoomDistance(this.roomGraph, trapRoomId, es.currentRoomId);
-          if (roomDist >= 0 && roomDist <= 1) {
-            es.state = 'chase';
-            es.lastKnownX = this.player.x;
-            es.lastKnownY = this.player.y;
-          }
-        }
-      }
-
-      trapSprite.body.enable = false;
-      trapSprite.setAlpha(0.3);
-      trapSprite.setTint(0x666666);
-    }
-  }
-
   createPlayer() {
     const spawnRoom = this.entranceRoom;
     const playerX = spawnRoom.x + spawnRoom.width / 2;
@@ -1110,16 +1027,15 @@ export class GameScene extends Phaser.Scene {
 
     this.physics.add.overlap(this.player, this.itemGroup, this.onItemPickup, null, this);
     this.physics.add.overlap(this.player, this.loreGroup, this.onLorePickup, null, this);
-    this.physics.add.overlap(this.player, this.trapGroup, this.onTrapOverlap, null, this);
     this.physics.add.overlap(this.player, this.enemyGroup, this.onEnemyContact, null, this);
   }
 
-  getEnemyStats(type) {
+  getEnemyStats(type, distance) {
     // bodySize is in texture pixels and gets multiplied by the display scale
     // (display/texture), so these stay close to the pre-scale-up hitboxes.
-    if (type === 'crawler') return { hp: this.scaledCrawlerHP, contactDamage: this.scaledCrawlerDamage, textureKey: getEnemyTextureKey('crawler'), bodySize: 7, displaySize: 34 };
-    if (type === 'spitter') return { hp: this.scaledSpitterHP, contactDamage: this.scaledSpitterDamage, textureKey: getEnemyTextureKey('spitter'), bodySize: 10, displaySize: 44 };
-    return { hp: this.scaledEnemyHP, contactDamage: this.scaledEnemyDamage, textureKey: getEnemyTextureKey('basic'), bodySize: 10, displaySize: 44 };
+    if (type === 'crawler') return { hp: getEnemyHP(CRAWLER_MAX_HP, distance), contactDamage: getEnemyDamage(CRAWLER_CONTACT_DAMAGE, distance), textureKey: getEnemyTextureKey('crawler'), bodySize: 7, displaySize: 34 };
+    if (type === 'spitter') return { hp: getEnemyHP(SPITTER_MAX_HP, distance), contactDamage: getEnemyDamage(SPITTER_CONTACT_DAMAGE, distance), textureKey: getEnemyTextureKey('spitter'), bodySize: 10, displaySize: 44 };
+    return { hp: getEnemyHP(ENEMY_MAX_HP, distance), contactDamage: getEnemyDamage(ENEMY_CONTACT_DAMAGE, distance), textureKey: getEnemyTextureKey('basic'), bodySize: 10, displaySize: 44 };
   }
 
   spawnDangerWave(playerRoomId, litRoomIds) {
@@ -1137,7 +1053,7 @@ export class GameScene extends Phaser.Scene {
     for (const type of types) {
       const x = minX + Math.random() * (maxX - minX);
       const y = minY + Math.random() * (maxY - minY);
-      const stats = this.getEnemyStats(type);
+      const stats = this.getEnemyStats(type, room.distance);
       const enemy = this.enemyGroup.create(x, y, stats.textureKey);
       enemy.setDisplaySize(stats.displaySize, stats.displaySize);
       enemy.body.setSize(stats.bodySize, stats.bodySize, true);
@@ -1155,8 +1071,8 @@ export class GameScene extends Phaser.Scene {
         velocityY: 0,
         wanderTimer: 0,
         wanderAngle: Math.random() * Math.PI * 2,
-        lastKnownX: 0,
-        lastKnownY: 0,
+        lastKnownX: x,
+        lastKnownY: y,
         searchTimer: 0,
         attackCooldown: 0,
         health: stats.hp,
@@ -1165,8 +1081,6 @@ export class GameScene extends Phaser.Scene {
         currentRoomId: room.id,
         roomTransitionCooldown: 0,
         targetDoorway: null,
-        doorOpenTimer: 0,
-        targetDoorId: null,
         soundCooldown: 1000 + Math.random() * 3000,
       });
     }
@@ -1186,11 +1100,11 @@ export class GameScene extends Phaser.Scene {
     const furniture = this.roomFurniture.get(room.id) || [];
     const spawnPoints = generateRoomEnemies(
       room.x, room.y, room.width, room.height,
-      WALL_THICKNESS, room.seed, furniture, room.id, this.extraEnemyCount, this.runCount
+      WALL_THICKNESS, room.seed, furniture, room.id, room.distance
     );
 
     for (const spawn of spawnPoints) {
-      const stats = this.getEnemyStats(spawn.type);
+      const stats = this.getEnemyStats(spawn.type, room.distance);
       const enemy = this.enemyGroup.create(spawn.x, spawn.y, stats.textureKey);
       enemy.setDisplaySize(stats.displaySize, stats.displaySize);
       enemy.body.setSize(stats.bodySize, stats.bodySize, true);
@@ -1208,8 +1122,8 @@ export class GameScene extends Phaser.Scene {
         velocityY: 0,
         wanderTimer: 0,
         wanderAngle: spawn.wanderAngle,
-        lastKnownX: 0,
-        lastKnownY: 0,
+        lastKnownX: spawn.x,
+        lastKnownY: spawn.y,
         searchTimer: 0,
         attackCooldown: 0,
         health: stats.hp,
@@ -1218,8 +1132,6 @@ export class GameScene extends Phaser.Scene {
         currentRoomId: room.id,
         roomTransitionCooldown: 0,
         targetDoorway: null,
-        doorOpenTimer: 0,
-        targetDoorId: null,
         soundCooldown: 1000 + Math.random() * 3000,
       });
     }
@@ -1229,7 +1141,7 @@ export class GameScene extends Phaser.Scene {
     this.bulletGroup = this.physics.add.group({ maxSize: 30 });
 
     this.physics.add.collider(this.bulletGroup, this.walls, this.onBulletHitWall, null, this);
-    this.physics.add.collider(this.bulletGroup, this.furnitureGroup, this.onBulletHitWall, null, this);
+    this.physics.add.collider(this.bulletGroup, this.furnitureGroup, this.onBulletHitWall, this.bulletHitsFurniture, this);
     this.physics.add.collider(this.bulletGroup, this.doorGroup, this.onBulletHitWall, null, this);
     this.physics.add.overlap(this.bulletGroup, this.enemyGroup, this.onBulletHitEnemy, null, this);
   }
@@ -1238,7 +1150,7 @@ export class GameScene extends Phaser.Scene {
     this.enemyBulletGroup = this.physics.add.group({ maxSize: 30 });
 
     this.physics.add.collider(this.enemyBulletGroup, this.walls, this.onBulletHitWall, null, this);
-    this.physics.add.collider(this.enemyBulletGroup, this.furnitureGroup, this.onBulletHitWall, null, this);
+    this.physics.add.collider(this.enemyBulletGroup, this.furnitureGroup, this.onBulletHitWall, this.bulletHitsFurniture, this);
     this.physics.add.collider(this.enemyBulletGroup, this.doorGroup, this.onBulletHitWall, null, this);
     this.physics.add.overlap(this.enemyBulletGroup, this.player, this.onEnemyBulletHitPlayer, null, this);
   }
@@ -1249,14 +1161,14 @@ export class GameScene extends Phaser.Scene {
 
   // One ground weapon spawns per floor, in the first non-entrance room on that
   // floor (in activation order) where a valid placement is found.
-  activateRoomWeapon(room) {
+  activateRoomWeapon(room, mazeRects = []) {
     if (room.id === 0) return;
     if (this.weaponedFloors.has(room.floor)) return;
 
     const furniture = this.roomFurniture.get(room.id) || [];
     const wpnData = generateRoomWeapon(
       room.x, room.y, room.width, room.height,
-      WALL_THICKNESS, this.levelSeed + room.floor * 100, furniture, room.id
+      WALL_THICKNESS, this.levelSeed + room.floor * 100, furniture, room.id, mazeRects
     );
     if (!wpnData) return;
 
@@ -1591,28 +1503,24 @@ export class GameScene extends Phaser.Scene {
     this.stairZones = [];
   }
 
-  stairTopLeft(room) {
-    const margin = 100;
-    const innerW = room.width - 2 * margin;
-    const x = room.x + margin + (innerW - STAIR_SIZE) / 2;
-    const y = room.y + margin + (room.height - 2 * margin - STAIR_SIZE) / 2;
-    return { x, y };
+  // Whether this room has a stair, and which way it goes. Shared by activateRoom
+  // (to carve a maze keep-out around the stair) and activateRoomStairs (to build
+  // it), so the two never disagree about which rooms get a stair.
+  roomStairDirection(room) {
+    const isEntranceCell = room.gridX === 0 && room.gridY === 0;
+    if (room.floor > 0 && isEntranceCell) return 'up';
+    if (!isEntranceCell && hasStairDown(this.floorSeed(room.floor), room.gridX, room.gridY)) return 'down';
+    return null;
   }
 
   // Stairs are deep-links discovered as rooms activate. A non-entrance room with
   // hasStairDown gets a DOWN stair; a non-entrance floor's (0,0) cell gets an UP
   // stair. Direction/target is resolved against the return stack on entry.
   activateRoomStairs(room) {
-    const isEntranceCell = room.gridX === 0 && room.gridY === 0;
-    let direction = null;
-    if (room.floor > 0 && isEntranceCell) {
-      direction = 'up';
-    } else if (!isEntranceCell && hasStairDown(this.floorSeed(room.floor), room.gridX, room.gridY)) {
-      direction = 'down';
-    }
+    const direction = this.roomStairDirection(room);
     if (!direction) return;
 
-    const { x, y } = this.stairTopLeft(room);
+    const { x, y } = getStairTopLeft(room);
     const stairGfx = this.add.graphics();
     stairGfx.setDepth(2);
     this.drawStairVisual(stairGfx, x, y, direction);
@@ -1707,10 +1615,10 @@ export class GameScene extends Phaser.Scene {
 
       // Land the player below the destination room's centered stair, not on
       // top of it -- otherwise the overlap re-fires the instant isTeleporting
-      // clears and the player bounces between floors forever.
+      // clears and the player bounces between floors forever. activateRoom keeps
+      // this spot clear of walls/furniture via stairLandingKeepOut.
       const destRoom = this.roomsById.get(this.idForCell(destFloor, destGx, destGy));
-      const destX = destRoom.x + destRoom.width / 2;
-      const destY = destRoom.y + destRoom.height / 2 + STAIR_SIZE + 80;
+      const { x: destX, y: destY } = getStairLandingPosition(destRoom);
 
       player.body.reset(destX, destY);
       player.body.enable = true;
@@ -1798,6 +1706,13 @@ export class GameScene extends Phaser.Scene {
     bullet.setData('originY', this.player.y);
     bullet.setData('damage', this.bulletDamage);
     bullet.setData('range', this.bulletRange);
+  }
+
+  // Arcade physics process callback: gunfire is stopped only by tall, solid
+  // furniture. Returning false lets the bullet fly over low furniture (tables,
+  // desks, beds) without separation or the collide callback firing.
+  bulletHitsFurniture(bullet, furnitureZone) {
+    return furnitureZone.getData('blocksBullets');
   }
 
   onBulletHitWall(bullet) {
@@ -1907,31 +1822,27 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  getScaledChaseSpeed(type) {
-    if (type === 'crawler') return this.scaledCrawlerChaseSpeed;
-    if (type === 'spitter') return this.scaledSpitterChaseSpeed;
-    return this.scaledEnemyChaseSpeed;
-  }
-
   updateEnemies(delta) {
     const playerPos = { x: this.player.x, y: this.player.y };
     // Enemy line-of-sight only matters within DETECTION_RANGE of the player,
-    // so prefilter the (ever-growing) occluder set once per frame.
-    const losSegments = filterSegmentsNear(playerPos, DETECTION_RANGE + 60, this.wallSegments);
+    // so prefilter the (ever-growing) occluder set once per frame. Maze walls
+    // block sight from BOTH sides, so LOS expands them to their full outlines
+    // (unlike the flashlight, which only uses their far faces).
+    const losSegments = [
+      ...filterSegmentsNear(playerPos, DETECTION_RANGE + 60, this.wallSegments),
+      ...filterRectsNear(playerPos, DETECTION_RANGE + 60, this.mazeWallRects).flatMap(wallRectSegments),
+    ];
     const litRoomIds = getLitRoomIds(this.switchStates);
     if (!litRoomIds.includes(0)) litRoomIds.push(0);
     const litRooms = litRoomIds.map(id => this.level.rooms.find(r => r.id === id)).filter(Boolean);
 
     if (this.roomGraphDirty || !this.roomGraph) {
       this.roomGraph = buildRoomGraph(this.level.rooms, this.doorStates);
-      this.fullRoomGraph = buildFullRoomGraph(this.level.rooms, this.doorStates);
       this.roomGraphDirty = false;
     }
 
     const playerRoom = getCurrentRoom(playerPos.x, playerPos.y, this.level.rooms);
     const playerRoomId = playerRoom ? playerRoom.id : -1;
-    const cameFrom = bfsFromRoom(this.roomGraph, playerRoomId);
-    const cameFromFull = bfsFromRoom(this.fullRoomGraph, playerRoomId);
 
     const isInSafeRoom = litRoomIds.includes(playerRoomId);
     this.dangerState = updateDangerTime(this.dangerState, delta, isInSafeRoom);
@@ -1965,13 +1876,9 @@ export class GameScene extends Phaser.Scene {
       }
 
       const enemyRoomId = es.currentRoomId;
-      const isCrawler = es.type === 'crawler';
-      const doorway = isCrawler
-        ? getNextDoorway(this.fullRoomGraph, cameFromFull, enemyRoomId, playerRoomId)
-        : getNextDoorway(this.roomGraph, cameFrom, enemyRoomId, playerRoomId);
 
       let seekDoorway = false;
-      let wanderDoorway = doorway;
+      let wanderDoorway = null;
       if (es.roomTransitionCooldown <= 0 && es.state === 'idle') {
         const wanderRand = Math.random();
         if (wanderRand < DOORWAY_SEEK_CHANCE) {
@@ -1994,26 +1901,15 @@ export class GameScene extends Phaser.Scene {
         }
       }
 
-      const closedDoorOnPath = isCrawler
-        ? getClosedDoorOnPath(this.fullRoomGraph, cameFromFull, enemyRoomId, playerRoomId, this.doorStates, this.level.rooms)
-        : null;
-
       const navContext = {
-        enemyRoomId,
-        playerRoomId,
-        spawnRoomId: es.spawnRoomId,
         roomTransitionCooldown: es.roomTransitionCooldown,
         targetDoorway: es.targetDoorway,
-        doorway: seekDoorway ? wanderDoorway : doorway,
-        maxRoomDistance: MAX_ROOM_DISTANCE,
-        roomEnemyCounts,
+        doorway: wanderDoorway,
         seekDoorway,
-        closedDoorOnPath,
       };
 
-      const chaseSpeed = this.getScaledChaseSpeed(es.type);
       const oldState = es.state;
-      const updated = updateEnemyAI(es, playerPos, losSegments, delta, this.hidingState.isHiding, chaseSpeed, navContext);
+      const updated = updateEnemyAI(es, playerPos, losSegments, delta, this.hidingState.isHiding, ENEMY_SPEED_CHASE, navContext);
 
       const soundResult = getEnemySoundEvent(oldState, updated.state, es.type, es.soundCooldown || 0, delta);
       es.soundCooldown = soundResult.newCooldown;
@@ -2035,16 +1931,6 @@ export class GameScene extends Phaser.Scene {
       es.attackCooldown = updated.attackCooldown;
       es.roomTransitionCooldown = updated.roomTransitionCooldown;
       es.targetDoorway = updated.targetDoorway;
-      es.doorOpenTimer = updated.doorOpenTimer;
-      es.targetDoorId = updated.targetDoorId;
-
-      if (updated.wantsToOpenDoor) {
-        const door = this.doorStates.find(d => d.id === updated.targetDoorId);
-        if (door && door.isClosed) {
-          this.onToggleDoor(updated.targetDoorId);
-        }
-        es.wantsToOpenDoor = false;
-      }
 
       if (updated.wantsToFire) {
         this.fireEnemyBullet(es.x, es.y, playerPos.x, playerPos.y);
@@ -2597,11 +2483,18 @@ export class GameScene extends Phaser.Scene {
     if (coneAngle <= 0 || shouldFlicker(this.batteryState, time)) return;
 
     const origin = { x: this.player.x, y: this.player.y };
+    // Maze walls only contribute their far faces (back-face culling), so the
+    // cone reaches across each wall band to light its near face -- walls read
+    // as solid bands of thickness instead of infinitely-thin shadow lines.
+    const occluders = [
+      ...filterSegmentsNear(origin, FLASHLIGHT_RANGE, this.wallSegments),
+      ...filterRectsNear(origin, FLASHLIGHT_RANGE, this.mazeWallRects).flatMap(r => wallRectOccluders(r, origin)),
+    ];
     const polygon = getFlashlightPolygon(
       origin,
       this.playerAngle || 0,
       coneAngle,
-      filterSegmentsNear(origin, FLASHLIGHT_RANGE, this.wallSegments),
+      occluders,
       FLASHLIGHT_RANGE
     );
 

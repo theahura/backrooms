@@ -154,11 +154,6 @@ describe('getEnemySoundEvent', () => {
     expect(result.soundKey).toBeNull();
   });
 
-  it('does not play alert on opening_door-to-chase transition', () => {
-    const result = getEnemySoundEvent('opening_door', 'chase', 'crawler', 5000, 16);
-    expect(result.soundKey).toBeNull();
-  });
-
   it('produces different cooldowns for crawler and spitter', () => {
     const crawlerResult = getEnemySoundEvent('idle', 'idle', 'crawler', 0, 16);
     const spitterResult = getEnemySoundEvent('idle', 'idle', 'spitter', 0, 16);

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES } from '../furniture.js';
+import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES, blocksBullets } from '../furniture.js';
+import { generateMazeWalls } from '../maze.js';
 import { getFlashlightPolygon } from '../visibility.js';
 import { createRoomWalls } from '../room.js';
 import { findNearestHideable } from '../hiding.js';
@@ -82,6 +83,59 @@ describe('generateRoomFurniture', () => {
     expect(first).not.toEqual(second);
   });
 
+});
+
+describe('generateRoomFurniture obstacle avoidance', () => {
+  const ROOM_X = 0;
+  const ROOM_Y = 0;
+  const ROOM_WIDTH = 1200;
+  const ROOM_HEIGHT = 1000;
+  const WALL_THICKNESS = 16;
+
+  const overlaps = (a, b) =>
+    a.x < b.x + b.width &&
+    a.x + a.width > b.x &&
+    a.y < b.y + b.height &&
+    a.y + a.height > b.y;
+
+  it('does not place furniture overlapping a supplied obstacle rect', () => {
+    const obstacle = { x: 400, y: 300, width: 400, height: 400 };
+    for (let seed = 0; seed < 120; seed++) {
+      const furniture = generateRoomFurniture(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, undefined, [obstacle]);
+      for (const item of furniture) {
+        expect(overlaps(item, obstacle), `seed ${seed}`).toBe(false);
+      }
+    }
+  });
+
+  it('does not place furniture overlapping the real maze walls of the same room', () => {
+    const doors = [{ wall: 'east', offset: 400, width: 80, targetRoomId: 1 }];
+    for (let seed = 0; seed < 150; seed++) {
+      const walls = generateMazeWalls(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, doors);
+      const furniture = generateRoomFurniture(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, undefined, walls);
+      for (const item of furniture) {
+        for (const wall of walls) {
+          expect(overlaps(item, wall), `seed ${seed}`).toBe(false);
+        }
+      }
+    }
+  });
+
+  it('produces the same furniture whether obstacles is omitted or passed empty', () => {
+    for (const seed of [3, 11, 42, 99, 123]) {
+      const omitted = generateRoomFurniture(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed);
+      const empty = generateRoomFurniture(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, undefined, []);
+      expect(empty, `seed ${seed}`).toEqual(omitted);
+    }
+  });
+
+  it('still furnishes rooms when an obstacle leaves ample free space', () => {
+    const obstacle = { x: 0, y: 0, width: 200, height: 200 };
+    for (let seed = 0; seed < 30; seed++) {
+      const furniture = generateRoomFurniture(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, undefined, [obstacle]);
+      expect(furniture.length, `seed ${seed}`).toBeGreaterThanOrEqual(8);
+    }
+  });
 });
 
 describe('furniture light blocking behavior', () => {
@@ -274,5 +328,38 @@ describe('new vibe furniture types', () => {
       expect(def.height, type).toBeGreaterThan(0);
       expect(typeof def.color, type).toBe('number');
     }
+  });
+});
+
+describe('blocksBullets', () => {
+  // Low furniture you shoot across -- the spec's "tables and desks and low
+  // furniture" that gunfire goes over.
+  const LOW = ['table', 'desk', 'bed', 'vent', 'couch', 'bush', 'pod'];
+  // Tall/solid cover -- the spec's "armoires and other furniture" that stops
+  // gunfire.
+  const TALL = ['armoire', 'closet', 'bookcase', 'shelf', 'counter', 'tree', 'rock', 'console'];
+
+  it('lets gunfire pass over low furniture', () => {
+    for (const type of LOW) {
+      expect(blocksBullets(type), type).toBe(false);
+    }
+  });
+
+  it('stops gunfire at tall, solid furniture', () => {
+    for (const type of TALL) {
+      expect(blocksBullets(type), type).toBe(true);
+    }
+  });
+
+  it('does not stop gunfire on an unrecognised furniture type', () => {
+    expect(blocksBullets('not_a_real_type')).toBe(false);
+    expect(blocksBullets(undefined)).toBe(false);
+  });
+
+  it('classifies every furniture type as either low or tall', () => {
+    // Guards against a new furniture type being added without deciding whether
+    // gunfire passes over it -- the hand-authored LOW/TALL lists above are the
+    // ground truth and must cover the whole catalogue.
+    expect([...LOW, ...TALL].sort()).toEqual(Object.keys(FURNITURE_TYPES).sort());
   });
 });

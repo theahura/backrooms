@@ -1,84 +1,62 @@
 import { describe, it, expect } from 'vitest';
-import { getEnemyHP, getEnemyCount, getEnemyChaseSpeed, getEnemyDamage } from '../scaling.js';
+import { getEnemyHP, getEnemyCount, getEnemyDamage, SAFE_DISTANCE } from '../scaling.js';
 
 describe('getEnemyHP', () => {
-  it('returns base HP at run 0', () => {
+  it('returns base HP within the safe band near the entrance', () => {
     expect(getEnemyHP(50, 0)).toBe(50);
+    expect(getEnemyHP(50, 1)).toBe(50);
+    expect(getEnemyHP(50, SAFE_DISTANCE)).toBe(50);
   });
 
-  it('increases HP with run count', () => {
-    const hp4 = getEnemyHP(50, 4);
-    expect(hp4).toBeGreaterThan(50);
-    expect(hp4).toBe(100);
+  it('increases HP with distance from the start', () => {
+    expect(getEnemyHP(50, 7)).toBe(75);
+    expect(getEnemyHP(50, 12)).toBe(100);
   });
 
-  it('caps HP at 3x base', () => {
-    const hp20 = getEnemyHP(50, 20);
-    expect(hp20).toBeLessThanOrEqual(150);
+  it('caps HP at 2.5x base in the deepest rooms', () => {
+    expect(getEnemyHP(50, 100)).toBe(125);
+    expect(getEnemyHP(50, 17)).toBe(getEnemyHP(50, 100));
   });
 
   it('works with different base HP values', () => {
-    expect(getEnemyHP(100, 0)).toBe(100);
-    expect(getEnemyHP(100, 4)).toBe(200);
+    expect(getEnemyHP(30, 1)).toBe(30);
+    expect(getEnemyHP(40, 7)).toBe(60);
+    expect(getEnemyHP(30, 100)).toBe(75);
   });
 });
 
 describe('getEnemyCount', () => {
-  it('returns base range at run 0', () => {
-    const extra = getEnemyCount(0);
-    expect(extra).toBe(0);
+  it('adds no extra enemies near the entrance', () => {
+    expect(getEnemyCount(0)).toBe(0);
+    expect(getEnemyCount(1)).toBe(0);
+    expect(getEnemyCount(6)).toBe(0);
   });
 
-  it('adds extra enemies at higher runs', () => {
-    const extra4 = getEnemyCount(4);
-    expect(extra4).toBeGreaterThan(0);
+  it('adds extra enemies as distance grows', () => {
+    expect(getEnemyCount(7)).toBe(1);
+    expect(getEnemyCount(11)).toBe(2);
   });
 
   it('caps extra enemies at 3', () => {
-    const extra20 = getEnemyCount(20);
-    expect(extra20).toBe(3);
-  });
-
-  it('scales at expected rate', () => {
-    expect(getEnemyCount(0)).toBe(0);
-    expect(getEnemyCount(1)).toBe(0);
-    expect(getEnemyCount(2)).toBe(1);
-    expect(getEnemyCount(3)).toBe(1);
-    expect(getEnemyCount(4)).toBe(2);
-    expect(getEnemyCount(6)).toBe(3);
-  });
-});
-
-describe('getEnemyChaseSpeed', () => {
-  it('returns base speed at run 0', () => {
-    expect(getEnemyChaseSpeed(80, 0)).toBe(80);
-  });
-
-  it('increases speed with run count', () => {
-    expect(getEnemyChaseSpeed(80, 3)).toBeGreaterThan(80);
-  });
-
-  it('caps at 30% increase', () => {
-    const speed6 = getEnemyChaseSpeed(80, 6);
-    const speed20 = getEnemyChaseSpeed(80, 20);
-    expect(speed6).toBeCloseTo(104);
-    expect(speed20).toBe(speed6);
+    expect(getEnemyCount(15)).toBe(3);
+    expect(getEnemyCount(100)).toBe(3);
   });
 });
 
 describe('getEnemyDamage', () => {
-  it('returns base damage at run 0', () => {
+  it('returns base damage within the safe band near the entrance', () => {
     expect(getEnemyDamage(20, 0)).toBe(20);
+    expect(getEnemyDamage(20, SAFE_DISTANCE)).toBe(20);
   });
 
-  it('increases damage with run count', () => {
-    expect(getEnemyDamage(20, 2)).toBe(30);
+  it('increases damage in steps as distance grows', () => {
+    expect(getEnemyDamage(20, 5)).toBe(20);
+    expect(getEnemyDamage(20, 6)).toBe(25);
+    expect(getEnemyDamage(20, 10)).toBe(30);
   });
 
   it('caps at base + 20', () => {
-    const dmg4 = getEnemyDamage(20, 4);
-    const dmg20 = getEnemyDamage(20, 20);
-    expect(dmg4).toBe(40);
-    expect(dmg20).toBe(40);
+    expect(getEnemyDamage(20, 18)).toBe(40);
+    expect(getEnemyDamage(20, 100)).toBe(40);
   });
 });

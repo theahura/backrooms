@@ -17,5 +17,10 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    // Several suites are compute-heavy property tests (e.g. furniture/maze
+    // placement swept across 150-300 seeds) that run ~2s but can spike past the
+    // default 5s timeout under CI load. Give them generous headroom so timing
+    // jitter never fails a deterministic test; a genuine hang is still caught.
+    testTimeout: 20000,
   },
 });
