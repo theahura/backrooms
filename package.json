@@ -7,7 +7,9 @@
     "build": "vite build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "generate-art": "node scripts/generate-art.mjs"
+    "generate-art": "node scripts/generate-art.mjs",
+    "gen-characters": "node scripts/gen-character-sprites.mjs",
+    "preview-sprites": "node scripts/preview-sprites.mjs"
   },
   "dependencies": {
     "phaser": "^3.90.0",

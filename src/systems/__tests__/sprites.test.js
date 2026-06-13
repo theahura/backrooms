@@ -121,43 +121,16 @@ describe('sprites', () => {
       expect(getSpriteConfig('player_walk_1')).toBeDefined();
     });
 
-    it('player sprites are 20x20', () => {
-      const playerKeys = ['player_idle_0', 'player_idle_1', 'player_walk_0', 'player_walk_1'];
-      for (const key of playerKeys) {
-        const size = getRenderedSize(getSpriteConfig(key));
-        expect(size.width).toBe(20);
-        expect(size.height).toBe(20);
-      }
-    });
-
     it('has all basic enemy animation frames', () => {
       expect(getSpriteConfig('enemy_idle_0')).toBeDefined();
       expect(getSpriteConfig('enemy_walk_0')).toBeDefined();
       expect(getSpriteConfig('enemy_walk_1')).toBeDefined();
     });
 
-    it('basic enemy sprites are 20x20', () => {
-      const keys = ['enemy_idle_0', 'enemy_walk_0', 'enemy_walk_1'];
-      for (const key of keys) {
-        const size = getRenderedSize(getSpriteConfig(key));
-        expect(size.width).toBe(20);
-        expect(size.height).toBe(20);
-      }
-    });
-
     it('has all crawler animation frames', () => {
       expect(getSpriteConfig('crawler_idle_0')).toBeDefined();
       expect(getSpriteConfig('crawler_walk_0')).toBeDefined();
       expect(getSpriteConfig('crawler_walk_1')).toBeDefined();
-    });
-
-    it('crawler sprites are 14x14', () => {
-      const keys = ['crawler_idle_0', 'crawler_walk_0', 'crawler_walk_1'];
-      for (const key of keys) {
-        const size = getRenderedSize(getSpriteConfig(key));
-        expect(size.width).toBe(14);
-        expect(size.height).toBe(14);
-      }
     });
 
     it('has all spitter animation frames', () => {
@@ -168,12 +141,51 @@ describe('sprites', () => {
       expect(getSpriteConfig('spitter_attack_0')).toBeDefined();
     });
 
-    it('spitter sprites are 20x20', () => {
-      const keys = ['spitter_idle_0', 'spitter_idle_1', 'spitter_walk_0', 'spitter_walk_1', 'spitter_attack_0'];
-      for (const key of keys) {
+    const CHARACTER_KEYS = [
+      'player_idle_0', 'player_idle_1', 'player_walk_0', 'player_walk_1',
+      'enemy_idle_0', 'enemy_walk_0', 'enemy_walk_1',
+      'crawler_idle_0', 'crawler_walk_0', 'crawler_walk_1',
+      'spitter_idle_0', 'spitter_idle_1', 'spitter_walk_0', 'spitter_walk_1', 'spitter_attack_0',
+    ];
+
+    it('character sprites are large enough to read (at least 24px per axis)', () => {
+      for (const key of CHARACTER_KEYS) {
         const size = getRenderedSize(getSpriteConfig(key));
-        expect(size.width).toBe(20);
-        expect(size.height).toBe(20);
+        expect(size.width, `${key} width`).toBeGreaterThanOrEqual(24);
+        expect(size.height, `${key} height`).toBeGreaterThanOrEqual(24);
+      }
+    });
+
+    it('the player aims its flashlight toward the facing (east) edge', () => {
+      // The sprite is authored facing east and rotated in-engine to the aim
+      // vector, so the brightest element (the flashlight beam) must sit on the
+      // east half of the grid for the facing direction to read after rotation.
+      // We identify the beam by luminance, not by a specific palette char, so
+      // the test survives re-encoding of the art.
+      const luminance = (hex) => {
+        const n = parseInt(hex.replace('#', ''), 16);
+        const r = (n >> 16) & 0xff;
+        const g = (n >> 8) & 0xff;
+        const b = n & 0xff;
+        return 0.299 * r + 0.587 * g + 0.114 * b;
+      };
+      const playerKeys = ['player_idle_0', 'player_idle_1', 'player_walk_0', 'player_walk_1'];
+      for (const key of playerKeys) {
+        const def = getSpriteConfig(key);
+        const cols = def.data[0].length;
+        const center = (cols - 1) / 2;
+        const brightChars = new Set(
+          Object.entries(def.palette).filter(([, hex]) => luminance(hex) > 200).map(([ch]) => ch)
+        );
+        const beamCols = [];
+        for (const row of def.data) {
+          for (let c = 0; c < row.length; c++) {
+            if (brightChars.has(row[c])) beamCols.push(c);
+          }
+        }
+        expect(beamCols.length, `${key} has a bright flashlight beam`).toBeGreaterThan(0);
+        const meanCol = beamCols.reduce((a, b) => a + b, 0) / beamCols.length;
+        expect(meanCol, `${key} flashlight is on the east half`).toBeGreaterThan(center);
       }
     });
   });

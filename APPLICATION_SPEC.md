@@ -67,9 +67,14 @@ Feedback from me (DO NOT CHANGE):
 - the level should not change day to day, so the player can build a mental map over time
 - the rooms themselves should have sounds for various things in them. We should have more variety (and more detail) for the various kinds of things that can be in given rooms, and some of them should make sounds of their own
 - we should add lamps / lights to the game, areas that do provide light automatically in some rooms
+- add a rechargeable battery to the game store (it should be very expensive)
+- in rooms with lights, the light switch shouldnt always be on the outer wall. It can sometimes be on the inner wall
 
 Known bugs:
 - Hiding places, stairs, and doors will often spawn inside walls
 - Some of the walls do not look like they have any width sometimes (just infinitely thin infinitely tall black walls). All walls should have 'thickness'
 - Getting shot makes the player character disappear
 - many of the sprite hitboxes for furniture do not match visually where they are
+- stairs do not work as expected -- the player is often dropped in a random place nowhere near the stairs themselves, and they become vulnerable to attack immediately after spawning even when the player cannot see the character yet. I think there should be a limitation on enemies spawning or being near stairs, especially when the player goes up / down them
+- there seems to be some furniture that blocks light fully. Naively it looks like a table maybe? The player can hide in it, but it looks pitch black, so it is quite confusing
+- light switches can spawn on doors, which should not happen

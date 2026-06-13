@@ -5,6 +5,7 @@ import {
   shopIconKey,
   getArtSpriteKeys,
 } from '../art.js';
+import { getSpriteConfig } from '../sprites.js';
 import { UPGRADES } from '../shop.js';
 
 describe('getTextureSource', () => {
@@ -64,11 +65,11 @@ describe('shopIconKey', () => {
 });
 
 describe('art generation scope', () => {
-  it('includes the visually important sprites', () => {
+  it('includes the AI-rendered flat objects that read correctly top-down', () => {
     const keys = getArtSpriteKeys();
-    expect(keys).toContain('player_idle_0');
-    expect(keys).toContain('enemy_idle_0');
     expect(keys).toContain('furniture_table');
+    expect(keys).toContain('item_battery');
+    expect(keys).toContain('shop_bg');
   });
 
   it('excludes micro-sprites that are intentionally kept procedural', () => {
@@ -76,5 +77,23 @@ describe('art generation scope', () => {
     expect(keys).not.toContain('bullet_pistol');
     expect(keys).not.toContain('item_copper_coin');
     expect(keys).not.toContain('enemyBullet');
+  });
+
+  it('excludes characters and vertical furniture that the model cannot draw top-down', () => {
+    // The image model reverts to front/3-4 views for anything with vertical
+    // structure (people, wardrobes, couches), so these are hand-authored
+    // top-down pixel art instead of AI-generated PNGs.
+    const keys = getArtSpriteKeys();
+    const handAuthored = [
+      'player_idle_0', 'player_idle_1', 'player_walk_0', 'player_walk_1',
+      'enemy_idle_0', 'enemy_walk_0', 'enemy_walk_1',
+      'crawler_idle_0', 'crawler_walk_0', 'crawler_walk_1',
+      'spitter_idle_0', 'spitter_idle_1', 'spitter_walk_0', 'spitter_walk_1', 'spitter_attack_0',
+      'furniture_armoire', 'furniture_couch', 'furniture_counter',
+    ];
+    for (const key of handAuthored) {
+      expect(getSpriteConfig(key), `${key} must still exist as a sprite`).toBeDefined();
+      expect(keys, `${key} should be procedural, not AI-generated`).not.toContain(key);
+    }
   });
 });
