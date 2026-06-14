@@ -69,59 +69,12 @@ function icon(subject) {
 }
 
 export const ART_MANIFEST = [
-  // Characters (one sprite fanned out across animation frames). Drawn facing
-  // RIGHT (east) because the game rotates them to face aim/movement.
-  {
-    id: 'player',
-    prompt: sprite(
-      'An explorer adventurer person viewed from directly overhead so that ONLY ' +
-        'the top of the head, the shoulders and the tips of the boots are ' +
-        'visible, no face visible, wearing a jacket, arms extended forward ' +
-        'holding a flashlight, the body axis pointing to the right'
-    ),
-    width: 24,
-    height: 24,
-    keys: ['player_idle_0', 'player_idle_1', 'player_walk_0', 'player_walk_1'],
-  },
-  {
-    id: 'enemy',
-    prompt: sprite(
-      'A rotting humanoid zombie monster seen from directly straight above, ' +
-        'decayed greenish-brown skin and torn clothes, shambling, the front of ' +
-        'the body pointing to the right'
-    ),
-    width: 24,
-    height: 24,
-    keys: ['enemy_idle_0', 'enemy_walk_0', 'enemy_walk_1'],
-  },
-  {
-    id: 'crawler',
-    prompt: sprite(
-      'A small fast crawling zombie creature seen from directly straight above, ' +
-        'sickly purple skin, low to the ground with splayed limbs, the front ' +
-        'pointing to the right'
-    ),
-    width: 18,
-    height: 18,
-    keys: ['crawler_idle_0', 'crawler_walk_0', 'crawler_walk_1'],
-  },
-  {
-    id: 'spitter',
-    prompt: sprite(
-      'A bloated mutant creature seen from directly straight above, sickly ' +
-        'cyan-blue glistening skin, swollen body that spits acid, the front ' +
-        'pointing to the right'
-    ),
-    width: 24,
-    height: 24,
-    keys: [
-      'spitter_idle_0',
-      'spitter_idle_1',
-      'spitter_walk_0',
-      'spitter_walk_1',
-      'spitter_attack_0',
-    ],
-  },
+  // NOTE: characters (player/enemy/crawler/spitter) are intentionally NOT here.
+  // The image model reverts to front/3-4 views for anything with vertical
+  // structure, so a person/creature seen from directly overhead comes out
+  // wrong, and at sprite sizes the downscale destroys detail. They are
+  // hand-authored top-down pixel art in sprites.js instead (see SPRITE_DEFS /
+  // scripts/gen-character-sprites.mjs).
 
   // Furniture (stretched to logical size in-game, so generated at higher res).
   { id: 'furniture_table', prompt: sprite('The flat rectangular top surface of a wooden table, only the tabletop visible, no legs visible'), width: 160, height: 100, keys: ['furniture_table'] },
@@ -129,11 +82,11 @@ export const ART_MANIFEST = [
   { id: 'furniture_desk', prompt: sprite('The flat rectangular top surface of a grey office desk with papers on it, only the desktop visible, no drawers visible'), width: 120, height: 80, keys: ['furniture_desk'] },
   { id: 'furniture_bookcase', prompt: sprite('The top panel of a tall wooden bookcase, a flat rectangular wooden slab, no shelves or books visible'), width: 60, height: 160, keys: ['furniture_bookcase'] },
   { id: 'furniture_bed', prompt: sprite('A bed with a mattress and pillow and blanket seen from directly straight above'), width: 180, height: 120, keys: ['furniture_bed'] },
-  { id: 'furniture_armoire', prompt: sprite('The flat rectangular wooden top panel of a tall wardrobe armoire, only the top slab visible, no doors or handles visible'), width: 80, height: 140, keys: ['furniture_armoire'] },
   { id: 'furniture_closet', prompt: sprite('The flat rectangular top panel of a grey metal storage cabinet, only the top surface visible, no doors visible'), width: 100, height: 120, keys: ['furniture_closet'] },
   { id: 'furniture_vent', prompt: sprite('A square metal floor air vent grate seen from directly straight above'), width: 60, height: 60, keys: ['furniture_vent'] },
-  { id: 'furniture_couch', prompt: sprite('A couch sofa viewed from directly overhead: the top of the backrest along one long edge, two armrests at the ends, and worn seat cushions filling the middle'), width: 160, height: 100, keys: ['furniture_couch'] },
-  { id: 'furniture_counter', prompt: sprite('The flat top surface of a long store checkout counter, only the countertop visible'), width: 200, height: 70, keys: ['furniture_counter'] },
+  // armoire, couch and counter are hand-authored procedural top-down art
+  // (sprites.js): the model draws them as front-facing furniture with visible
+  // doors / backrests / a checkout till despite "top surface only" prompts.
   { id: 'furniture_tree', prompt: sprite('The leafy round canopy of a tree seen from directly straight above, dense green foliage filling the frame'), width: 128, height: 128, keys: ['furniture_tree'] },
   { id: 'furniture_rock', prompt: sprite('A large grey boulder rock seen from directly straight above'), width: 112, height: 96, keys: ['furniture_rock'] },
   { id: 'furniture_bush', prompt: sprite('A low leafy green shrub bush seen from directly straight above'), width: 112, height: 88, keys: ['furniture_bush'] },
