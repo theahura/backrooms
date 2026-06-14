@@ -32,7 +32,8 @@ const MAX_RETRIES = 5;
 // game without the mushy look of a hard downscale to sprite size.
 const CANVAS = 64;
 const CONTENT_H = 58; // character height within the canvas (a little headroom)
-const BOB = 2;        // walk-bob vertical shift for the _step frame
+const BOB = 2;        // walk bounce: body lifts this many px on each step pose
+const LEG_SHEAR = 3;  // walk step: lower body slides up to this many px to one side
 const CHROMA = 'magenta, exact hex #FF00FF (RGB 255,0,255)'; // both characters are greenish, so key on magenta
 
 const BASES = ['down', 'down_right', 'right', 'up_right', 'up'];
@@ -167,16 +168,51 @@ async function normalise(buffer) {
   return canvas;
 }
 
-function stepFrame(canvas) {
+// Lift the whole sprite up by `dy` px (the walk bounce).
+function bob(canvas, dy) {
   const out = new Jimp({ width: CANVAS, height: CANVAS, color: 0x00000000 });
-  out.composite(canvas, 0, -BOB);
+  out.composite(canvas, 0, -dy);
   return out;
 }
 
+// Horizontal shear of the lower body: rows below ~the waist slide sideways,
+// ramping from 0 at the waist to `shift` px at the feet (top half untouched), so
+// the legs swing to one side for a stepping pose. Positive/negative `shift` give
+// the two opposite steps.
+function shearLegs(canvas, shift) {
+  const { width, height, data } = canvas.bitmap;
+  const out = new Jimp({ width, height, color: 0x00000000 });
+  const od = out.bitmap.data;
+  const waist = Math.round(height * 0.55);
+  for (let y = waist; y < height; y++) {
+    const dx = Math.round(shift * ((y - waist) / (height - waist)));
+    for (let x = 0; x < width; x++) {
+      const sx = x - dx;
+      if (sx < 0 || sx >= width) continue;
+      const di = (y * width + x) * 4;
+      const si = (y * width + sx) * 4;
+      od[di] = data[si]; od[di + 1] = data[si + 1]; od[di + 2] = data[si + 2]; od[di + 3] = data[si + 3];
+    }
+  }
+  // rows above the waist are unchanged
+  for (let y = 0; y < waist; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      od[i] = data[i]; od[i + 1] = data[i + 1]; od[i + 2] = data[i + 2]; od[i + 3] = data[i + 3];
+    }
+  }
+  return out;
+}
+
+const stepPose = (canvas, shift) => shearLegs(bob(canvas, BOB), shift);
+
 async function writeFrame(prefix, base, canvas) {
   if (FLIP_OUTPUT.has(`${prefix}_${base}`)) canvas.flip({ horizontal: true, vertical: false });
-  fs.writeFileSync(new URL(`${prefix}_${base}.png`, OUT_DIR), await canvas.getBuffer('image/png'));
-  fs.writeFileSync(new URL(`${prefix}_${base}_step.png`, OUT_DIR), await stepFrame(canvas).getBuffer('image/png'));
+  const write = async (suffix, img) =>
+    fs.writeFileSync(new URL(`${prefix}_${base}${suffix}.png`, OUT_DIR), await img.getBuffer('image/png'));
+  await write('', canvas);
+  await write('_walk0', stepPose(canvas, LEG_SHEAR));
+  await write('_walk1', stepPose(canvas, -LEG_SHEAR));
 }
 
 async function buildPreview() {

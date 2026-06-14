@@ -66,10 +66,15 @@ const TOUCH_STICK_RADIUS = 90;
 const TOUCH_STICK_DEADZONE_PX = 12;
 const TOUCH_UI_DEPTH = 1500;
 
-// Half-step cadence for the directional walk bob: the body alternates between
-// the base frame and its 2px-raised "_step" frame every this-many ms while
-// moving (a full bob cycle is twice this).
-const CHARACTER_STEP_MS = 160;
+// Per-frame duration of the directional walk cycle. While moving, the sprite
+// cycles base -> _walk0 -> base -> _walk1 (contact, left step, contact, right
+// step) every this-many ms, so one full stride is 4x this.
+const CHARACTER_STEP_MS = 130;
+
+// The flashlight cone starts this far ahead of the player's body center, along
+// the aim vector, so the beam appears to emanate from the held flashlight (which
+// sticks out in front of the character) rather than from the middle of the body.
+const FLASHLIGHT_MUZZLE_OFFSET = 16;
 
 export class GameScene extends Phaser.Scene {
   constructor() {
@@ -1968,12 +1973,18 @@ export class GameScene extends Phaser.Scene {
   }
 
   // Set a character sprite to the directional frame for `angle` (8-way snap with
-  // left-side facings mirrored), bobbing between the base and raised "_step"
-  // frame while moving. Replaces the old single-sprite rotation.
+  // left-side facings mirrored). While moving, cycle the walk: base -> _walk0 ->
+  // base -> _walk1 (each step pose bobs the body and swings the legs). Replaces
+  // the old single-sprite rotation.
   applyDirectionalFrame(sprite, prefix, angle, moving) {
     const { textureKey, flipX } = getDirectionalFrame(prefix, angle);
-    const stepping = moving && Math.floor(this.time.now / CHARACTER_STEP_MS) % 2 === 1;
-    sprite.setTexture(stepping ? `${textureKey}_step` : textureKey);
+    let key = textureKey;
+    if (moving) {
+      const phase = Math.floor(this.time.now / CHARACTER_STEP_MS) % 4;
+      if (phase === 1) key = `${textureKey}_walk0`;
+      else if (phase === 3) key = `${textureKey}_walk1`;
+    }
+    sprite.setTexture(key);
     sprite.setFlipX(flipX);
   }
 
@@ -2504,7 +2515,11 @@ export class GameScene extends Phaser.Scene {
     const coneAngle = getFlashlightConeAngle(this.batteryState, this.flashlightAngle);
     if (coneAngle <= 0 || shouldFlicker(this.batteryState, time)) return;
 
-    const origin = { x: this.player.x, y: this.player.y };
+    const aim = this.playerAngle || 0;
+    const origin = {
+      x: this.player.x + Math.cos(aim) * FLASHLIGHT_MUZZLE_OFFSET,
+      y: this.player.y + Math.sin(aim) * FLASHLIGHT_MUZZLE_OFFSET,
+    };
     // Maze walls only contribute their far faces (back-face culling), so the
     // cone reaches across each wall band to light its near face -- walls read
     // as solid bands of thickness instead of infinitely-thin shadow lines.
@@ -2514,7 +2529,7 @@ export class GameScene extends Phaser.Scene {
     ];
     const polygon = getFlashlightPolygon(
       origin,
-      this.playerAngle || 0,
+      aim,
       coneAngle,
       occluders,
       FLASHLIGHT_RANGE
