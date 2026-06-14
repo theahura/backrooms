@@ -1,16 +1,22 @@
 // Build-time dev tool (not shipped): generates the 8-direction character sprites
-// (player + basic zombie) in the GBA-Pokemon 3/4 top-down style with a flashlight.
+// (player + basic zombie) in the GBA-Pokemon 3/4 top-down style with a flashlight,
+// each with a 2-pose walk cycle.
 //
-// Pipeline: text-to-image a front ("down") "hero" frame, then image-to-image the
-// other four base facings (down_right, right, up_right, up) FROM that hero so the
-// character stays consistent. Each frame is chroma-keyed, auto-cropped, scaled to
-// a uniform height and centred on a fixed canvas (so facings don't jitter in size
-// or position), then a "_step" copy shifted up 2px is emitted for the walk bob.
-// The three left-side facings are NOT generated -- the engine mirrors the
-// right-side textures with flipX.
+// Pipeline per character:
+//   1. text-to-image a front ("down") "hero" frame, then image-to-image the other
+//      four base facings (down_right, right, up_right, up) FROM that hero so the
+//      character stays consistent.
+//   2. for each facing, image-to-image two WALK step poses (left leg forward /
+//      right leg forward) FROM that facing's frame.
+// Frames are chroma-keyed (magenta hue key), the base frames are auto-cropped and
+// scaled to a uniform height/centre, and each walk frame is registered to its base
+// by the HEAD (top y, centroid x, width) so the upper body stays locked while the
+// legs articulate. The three left-side facings are NOT generated -- the engine
+// mirrors the right-side textures with flipX (so e.g. player_down_right is also
+// horizontally flipped here, see FLIP_OUTPUT).
 //
 //   node scripts/gen-character-directional.mjs              # generate missing
-//   node scripts/gen-character-directional.mjs --force      # regenerate all
+//   node scripts/gen-character-directional.mjs --force      # regenerate all (API)
 //   node scripts/gen-character-directional.mjs player       # only this character
 //   node scripts/gen-character-directional.mjs --reprocess  # rebuild PNGs from cached raws (no API)
 //   node scripts/gen-character-directional.mjs --preview    # rebuild preview only
@@ -31,12 +37,12 @@ const MAX_RETRIES = 5;
 // Final sprite canvas. Native 64px keeps enough detail to display ~48-56px in
 // game without the mushy look of a hard downscale to sprite size.
 const CANVAS = 64;
-const CONTENT_H = 58; // character height within the canvas (a little headroom)
-const BOB = 2;        // walk bounce: body lifts this many px on each step pose
-const LEG_SHEAR = 3;  // walk step: lower body slides up to this many px to one side
+const CONTENT_H = 58; // base-frame character height within the canvas
+const HEAD_BAND = 0.30; // top fraction of the silhouette treated as the head for registration
 const CHROMA = 'magenta, exact hex #FF00FF (RGB 255,0,255)'; // both characters are greenish, so key on magenta
 
 const BASES = ['down', 'down_right', 'right', 'up_right', 'up'];
+const WALK_SUFFIXES = ['_walk0', '_walk1'];
 
 // Frames the model draws facing the wrong way. The player hero holds the
 // flashlight in its (screen-left) hand, and image-to-image keeps it there for
@@ -72,6 +78,12 @@ const FACING = {
   up_right: 'facing diagonally up-and-to-the-right (three-quarter back), turned away to the upper-right',
   up: 'facing directly AWAY from the camera (back view): we see the back of the head/hood, the face is hidden',
 };
+
+// The two walk legs poses (image-to-image from each base facing).
+const WALK_LEGS = [
+  'the LEFT leg steps forward and bent at the knee while the RIGHT leg trails back',
+  'the RIGHT leg steps forward and bent at the knee while the LEFT leg trails back',
+];
 
 function loadKey() {
   const envText = fs.readFileSync(new URL('../.env', import.meta.url), 'utf8');
@@ -110,14 +122,21 @@ async function callModel(key, parts) {
   throw new Error('exhausted retries');
 }
 
+const textPart = (text) => ({ text });
+const imagePart = (buf) => ({ inlineData: { mimeType: 'image/png', data: buf.toString('base64') } });
+
 const heroPrompt = (subject) =>
-  `A single video-game character sprite, front view. The character is ${subject}, ` +
-  `${FACING.down}. ${STYLE}`;
+  `A single video-game character sprite, front view. The character is ${subject}, ${FACING.down}. ${STYLE}`;
 
 const turnPrompt = (subject, facing) =>
-  `Here is a reference sprite of a character. Redraw the EXACT SAME character ` +
-  `(${subject}) -- same colors, same proportions, same outfit, same flashlight, ` +
-  `same art style, same size -- but now ${facing}. ${STYLE}`;
+  `Here is a reference sprite of a character. Redraw the EXACT SAME character (${subject}) -- same colors, ` +
+  `same proportions, same outfit, same flashlight, same art style, same size -- but now ${facing}. ${STYLE}`;
+
+const walkPrompt = (subject, facing, legs) =>
+  `Here is a reference sprite of this character standing (${facing}). Redraw the EXACT SAME character ` +
+  `(${subject}) -- same colours, proportions, outfit, art style, size and viewing angle -- but mid-stride ` +
+  `WALKING: ${legs}, with a subtle step bounce. Keep the head, torso and arms in the SAME position and size ` +
+  `as the reference; ONLY the legs change. ${STYLE}`;
 
 // --- image post-processing -------------------------------------------------
 // Global magenta hue key: drop any pixel where green is strongly suppressed
@@ -151,9 +170,26 @@ function contentBBox(img) {
   return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
 }
 
-// raw model PNG -> normalised CANVASxCANVAS transparent sprite (uniform size and
-// centre across all facings).
-async function normalise(buffer) {
+// Head anchor for registration: the top HEAD_BAND of the silhouette, returned as
+// { top y, centroid x, width }. The head barely moves during a walk, so locking
+// it keeps the upper body steady while the legs swing.
+function measureHead(img) {
+  const box = contentBBox(img);
+  if (!box) throw new Error('frame is empty after background removal');
+  const top = box.y;
+  const headBottom = top + Math.round(HEAD_BAND * box.h);
+  const { data, width } = img.bitmap;
+  let minX = width, maxX = -1;
+  for (let y = top; y <= headBottom; y++) {
+    for (let x = 0; x < width; x++) {
+      if (data[(y * width + x) * 4 + 3] > 16) { if (x < minX) minX = x; if (x > maxX) maxX = x; }
+    }
+  }
+  return { top, cx: (minX + maxX) / 2, w: maxX - minX + 1 };
+}
+
+// raw base PNG -> normalised CANVASxCANVAS sprite (uniform size and centre).
+async function normaliseBase(buffer) {
   const img = await Jimp.fromBuffer(buffer);
   img.resize({ w: 256, h: 256, mode: ResizeStrategy.BILINEAR });
   keyChroma(img);
@@ -162,57 +198,49 @@ async function normalise(buffer) {
   img.crop({ x: box.x, y: box.y, w: box.w, h: box.h });
   const scale = CONTENT_H / box.h;
   img.resize({ w: Math.max(1, Math.round(box.w * scale)), h: CONTENT_H, mode: ResizeStrategy.BILINEAR });
-  keyChroma(img); // clean fringe introduced by the second resize
+  keyChroma(img);
   const canvas = new Jimp({ width: CANVAS, height: CANVAS, color: 0x00000000 });
   canvas.composite(img, Math.round((CANVAS - img.bitmap.width) / 2), CANVAS - CONTENT_H - 2);
   return canvas;
 }
 
-// Lift the whole sprite up by `dy` px (the walk bounce).
-function bob(canvas, dy) {
-  const out = new Jimp({ width: CANVAS, height: CANVAS, color: 0x00000000 });
-  out.composite(canvas, 0, -dy);
-  return out;
+// raw walk PNG -> CANVASxCANVAS frame whose head matches `target` (so it
+// registers to the base frame; legs fall wherever the model drew them).
+async function normaliseWalk(buffer, target) {
+  const img = await Jimp.fromBuffer(buffer);
+  img.resize({ w: 256, h: 256, mode: ResizeStrategy.BILINEAR });
+  keyChroma(img);
+  const h = measureHead(img);
+  const s = target.w / h.w;
+  img.resize({ w: Math.round(256 * s), h: Math.round(256 * s), mode: ResizeStrategy.BILINEAR });
+  keyChroma(img);
+  const dx = Math.round(target.cx - h.cx * s);
+  const dy = Math.round(target.top - h.top * s);
+  const canvas = new Jimp({ width: CANVAS, height: CANVAS, color: 0x00000000 });
+  canvas.composite(img, dx, dy);
+  return canvas;
 }
 
-// Horizontal shear of the lower body: rows below ~the waist slide sideways,
-// ramping from 0 at the waist to `shift` px at the feet (top half untouched), so
-// the legs swing to one side for a stepping pose. Positive/negative `shift` give
-// the two opposite steps.
-function shearLegs(canvas, shift) {
-  const { width, height, data } = canvas.bitmap;
-  const out = new Jimp({ width, height, color: 0x00000000 });
-  const od = out.bitmap.data;
-  const waist = Math.round(height * 0.55);
-  for (let y = waist; y < height; y++) {
-    const dx = Math.round(shift * ((y - waist) / (height - waist)));
-    for (let x = 0; x < width; x++) {
-      const sx = x - dx;
-      if (sx < 0 || sx >= width) continue;
-      const di = (y * width + x) * 4;
-      const si = (y * width + sx) * 4;
-      od[di] = data[si]; od[di + 1] = data[si + 1]; od[di + 2] = data[si + 2]; od[di + 3] = data[si + 3];
-    }
-  }
-  // rows above the waist are unchanged
-  for (let y = 0; y < waist; y++) {
-    for (let x = 0; x < width; x++) {
-      const i = (y * width + x) * 4;
-      od[i] = data[i]; od[i + 1] = data[i + 1]; od[i + 2] = data[i + 2]; od[i + 3] = data[i + 3];
-    }
-  }
-  return out;
-}
+const writePng = async (name, img) =>
+  fs.writeFileSync(new URL(`${name}.png`, OUT_DIR), await img.getBuffer('image/png'));
 
-const stepPose = (canvas, shift) => shearLegs(bob(canvas, BOB), shift);
+// Process one facing's cached raws into committed PNGs: the base, and its two
+// walk frames registered to the base head. Honors FLIP_OUTPUT by mirroring the
+// head target so the (unflipped) walk raws anchor correctly before the flip.
+async function processFacing(prefix, base, baseRaw, walkRaws) {
+  const flip = FLIP_OUTPUT.has(`${prefix}_${base}`);
+  const baseCanvas = await normaliseBase(baseRaw);
+  if (flip) baseCanvas.flip({ horizontal: true, vertical: false });
+  await writePng(`${prefix}_${base}`, baseCanvas);
 
-async function writeFrame(prefix, base, canvas) {
-  if (FLIP_OUTPUT.has(`${prefix}_${base}`)) canvas.flip({ horizontal: true, vertical: false });
-  const write = async (suffix, img) =>
-    fs.writeFileSync(new URL(`${prefix}_${base}${suffix}.png`, OUT_DIR), await img.getBuffer('image/png'));
-  await write('', canvas);
-  await write('_walk0', stepPose(canvas, LEG_SHEAR));
-  await write('_walk1', stepPose(canvas, -LEG_SHEAR));
+  const head = measureHead(baseCanvas);
+  const target = flip ? { ...head, cx: CANVAS - 1 - head.cx } : head;
+  for (let i = 0; i < WALK_SUFFIXES.length; i++) {
+    if (!walkRaws[i]) continue;
+    const wc = await normaliseWalk(walkRaws[i], target);
+    if (flip) wc.flip({ horizontal: true, vertical: false });
+    await writePng(`${prefix}_${base}${WALK_SUFFIXES[i]}`, wc);
+  }
 }
 
 async function buildPreview() {
@@ -234,15 +262,29 @@ async function buildPreview() {
   console.log(`preview -> ${PREVIEW.pathname}`);
 }
 
+const rawPath = (name) => new URL(`${name}.png`, RAW_DIR);
+const readRaw = (name) => (fs.existsSync(rawPath(name)) ? fs.readFileSync(rawPath(name)) : null);
+
+// Return the cached raw for `name`, or generate it via genParts() (an array of
+// prompt parts), cache it, and throttle.
+async function ensureRaw(key, name, force, genParts) {
+  if (!force) { const cached = readRaw(name); if (cached) return cached; }
+  const buf = await callModel(key, genParts());
+  fs.writeFileSync(rawPath(name), buf);
+  await sleep(THROTTLE_MS);
+  return buf;
+}
+
 // Re-run post-processing over cached raw model outputs (no API calls), so the
-// chroma key / normalisation can be tuned cheaply after generation.
+// chroma key / registration can be tuned cheaply after generation.
 async function reprocess(only) {
   for (const prefix of Object.keys(CHARACTERS)) {
     if (only.length && !only.includes(prefix)) continue;
     for (const base of BASES) {
-      const raw = new URL(`${prefix}_${base}.png`, RAW_DIR);
-      if (!fs.existsSync(raw)) { console.log(`${prefix} ${base}: no cached raw, skip`); continue; }
-      await writeFrame(prefix, base, await normalise(fs.readFileSync(raw)));
+      const baseRaw = readRaw(`${prefix}_${base}`);
+      if (!baseRaw) { console.log(`${prefix} ${base}: no cached raw, skip`); continue; }
+      const walkRaws = WALK_SUFFIXES.map((suf) => readRaw(`${prefix}_${base}${suf}`));
+      await processFacing(prefix, base, baseRaw, walkRaws);
       console.log(`${prefix} ${base}: reprocessed`);
     }
   }
@@ -261,27 +303,25 @@ async function main() {
   const key = loadKey();
   for (const [prefix, subject] of Object.entries(CHARACTERS)) {
     if (only.length && !only.includes(prefix)) continue;
-    const heroPath = new URL(`${prefix}_down.png`, OUT_DIR);
-    if (!force && fs.existsSync(heroPath)) { console.log(`${prefix}: exists, skip (use --force)`); continue; }
 
-    process.stdout.write(`${prefix} hero (down) ... `);
-    const heroRaw = await callModel(key, [{ text: heroPrompt(subject) }]);
-    fs.writeFileSync(new URL(`${prefix}_down.png`, RAW_DIR), heroRaw);
-    await writeFrame(prefix, 'down', await normalise(heroRaw));
-    console.log('ok');
-    await sleep(THROTTLE_MS);
-
+    // 1) base facings (hero front, then image-to-image turns).
+    const baseRaws = {};
+    baseRaws.down = await ensureRaw(key, `${prefix}_down`, force, () => [textPart(heroPrompt(subject))]);
     for (const base of BASES) {
       if (base === 'down') continue;
-      process.stdout.write(`${prefix} ${base} ... `);
-      const raw = await callModel(key, [
-        { text: turnPrompt(subject, FACING[base]) },
-        { inlineData: { mimeType: 'image/png', data: heroRaw.toString('base64') } },
-      ]);
-      fs.writeFileSync(new URL(`${prefix}_${base}.png`, RAW_DIR), raw);
-      await writeFrame(prefix, base, await normalise(raw));
-      console.log('ok');
-      await sleep(THROTTLE_MS);
+      baseRaws[base] = await ensureRaw(key, `${prefix}_${base}`, force,
+        () => [textPart(turnPrompt(subject, FACING[base])), imagePart(baseRaws.down)]);
+    }
+
+    // 2) two walk step poses per facing, image-to-image from that facing's frame.
+    for (const base of BASES) {
+      const walkRaws = [];
+      for (let i = 0; i < WALK_LEGS.length; i++) {
+        walkRaws[i] = await ensureRaw(key, `${prefix}_${base}${WALK_SUFFIXES[i]}`, force,
+          () => [textPart(walkPrompt(subject, FACING[base], WALK_LEGS[i])), imagePart(baseRaws[base])]);
+      }
+      await processFacing(prefix, base, baseRaws[base], walkRaws);
+      console.log(`${prefix} ${base}: base + walk`);
     }
   }
   await buildPreview();
