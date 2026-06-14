@@ -37,6 +37,13 @@ const CHROMA = 'magenta, exact hex #FF00FF (RGB 255,0,255)'; // both characters 
 
 const BASES = ['down', 'down_right', 'right', 'up_right', 'up'];
 
+// Frames the model draws facing the wrong way. The player hero holds the
+// flashlight in its (screen-left) hand, and image-to-image keeps it there for
+// the down-right turn -- so `player_down_right` comes out facing down-LEFT.
+// Flip it horizontally so the authored down-right frame actually points
+// down-right (and its mirror, used for down-left aim, then points down-left).
+const FLIP_OUTPUT = new Set(['player_down_right']);
+
 const STYLE =
   'GBA Pokemon overworld pixel-art style: a 3/4 top-down view seen slightly from ' +
   'above and in front, chunky readable pixels, a bold dark outline around the ' +
@@ -167,6 +174,7 @@ function stepFrame(canvas) {
 }
 
 async function writeFrame(prefix, base, canvas) {
+  if (FLIP_OUTPUT.has(`${prefix}_${base}`)) canvas.flip({ horizontal: true, vertical: false });
   fs.writeFileSync(new URL(`${prefix}_${base}.png`, OUT_DIR), await canvas.getBuffer('image/png'));
   fs.writeFileSync(new URL(`${prefix}_${base}_step.png`, OUT_DIR), await stepFrame(canvas).getBuffer('image/png'));
 }
