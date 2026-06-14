@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { getRoomAt, hasStairDown } from '../worldgen.js';
 import { generateMazeWalls, doorEntryZones } from '../maze.js';
 import { generateRoomFurniture } from '../furniture.js';
+import { generateRoomEnemies } from '../enemy.js';
 import { getRoomVibe } from '../roomVibes.js';
 import { stairKeepOut, stairLandingKeepOut, STAIR_SIZE, STAIR_MARGIN } from '../stairs.js';
 
@@ -32,8 +33,12 @@ function placeRoom(seed, gx, gy) {
   const furniture = entrance
     ? []
     : generateRoomFurniture(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed, vibe.furniture, furnitureObstacles);
-  return { room, mazeRects, furniture, hasStair, stairKeep };
+  return { room, mazeRects, furniture, hasStair, stairKeep, landingKeep };
 }
+
+const containsPoint = (rect, px, py) =>
+  px >= rect.x && px <= rect.x + rect.width &&
+  py >= rect.y && py <= rect.y + rect.height;
 
 function forEachRoom(maxSeed, maxCell, fn) {
   for (let seed = 1; seed <= maxSeed; seed++) {
@@ -97,5 +102,33 @@ describe('intra-room placement clearance (Bug 1)', () => {
       }
     });
     expect(stairs).toBeGreaterThan(0);
+  });
+
+  // Bug 5: "they become vulnerable to attack immediately after spawning [on a
+  // stair]". An enemy generated on top of the stair or on the spot where the
+  // player materializes after a transition hits them before they can react.
+  // GameScene.activateRoom passes [stairKeepOut, stairLandingKeepOut] to the
+  // enemy spawner; this drives the real spawner with those same rects across the
+  // generated world and asserts no enemy lands in either zone.
+  it('no enemy spawns on the stair footprint or the player landing spot (Bug 5)', () => {
+    let stairs = 0;
+    let enemiesSeen = 0;
+    forEachRoom(8, 8, ({ room, furniture, hasStair, stairKeep, landingKeep }, seed, gx, gy) => {
+      if (!hasStair) return;
+      stairs++;
+      const keepOut = [...stairKeep, ...landingKeep];
+      const enemies = generateRoomEnemies(
+        room.x, room.y, room.width, room.height,
+        WALL_THICKNESS, room.seed, furniture, room.id, 8, keepOut
+      );
+      enemiesSeen += enemies.length;
+      for (const enemy of enemies) {
+        for (const zone of keepOut) {
+          expect(containsPoint(zone, enemy.x, enemy.y), `seed ${seed} cell ${gx},${gy}`).toBe(false);
+        }
+      }
+    });
+    expect(stairs).toBeGreaterThan(0);
+    expect(enemiesSeen).toBeGreaterThan(0);
   });
 });
