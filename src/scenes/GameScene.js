@@ -76,6 +76,12 @@ const CHARACTER_STEP_MS = 130;
 // sticks out in front of the character) rather than from the middle of the body.
 const FLASHLIGHT_MUZZLE_OFFSET = 16;
 
+// Soft pool of light around the player (drawn as stacked fading circles) so the
+// character sits in diffuse near-field light and the cone blends out of it,
+// instead of the beam stabbing from a single hard apex point.
+const FLASHLIGHT_NEARFIELD_RADIUS = 50;
+const FLASHLIGHT_NEARFIELD_STEPS = 26;
+
 export class GameScene extends Phaser.Scene {
   constructor() {
     super('GameScene');
@@ -2473,6 +2479,16 @@ export class GameScene extends Phaser.Scene {
     gfx.fillPath();
   }
 
+  // Stacked concentric circles of fixed per-ring alpha approximate a radial
+  // gradient: every ring covers the centre and fewer cover the rim, so alpha
+  // accumulates to a bright core that fades smoothly to the edge.
+  drawRadialGlow(gfx, x, y, radius, steps, color, ringAlpha) {
+    for (let i = steps; i >= 1; i--) {
+      gfx.fillStyle(color, ringAlpha);
+      gfx.fillCircle(x, y, (radius * i) / steps);
+    }
+  }
+
   updateDarkness(time) {
     this.darkGraphics.clear();
     this.lightGraphics.clear();
@@ -2542,6 +2558,14 @@ export class GameScene extends Phaser.Scene {
       this.lightGraphics.fillStyle(0xffffcc, 0.05);
       this.drawPolygon(this.lightGraphics, polygon);
     }
+
+    // Diffuse near-field pool centred on the player so the beam doesn't read as a
+    // hard point at the cone apex. Drawn unoccluded (small radius), on top of the
+    // cone, in both the reveal mask and the warm light tint.
+    this.drawRadialGlow(this.maskGraphics, this.player.x, this.player.y,
+      FLASHLIGHT_NEARFIELD_RADIUS, FLASHLIGHT_NEARFIELD_STEPS, 0xffffff, 0.09);
+    this.drawRadialGlow(this.lightGraphics, this.player.x, this.player.y,
+      FLASHLIGHT_NEARFIELD_RADIUS, FLASHLIGHT_NEARFIELD_STEPS, 0xffffcc, 0.003);
   }
 
   updateBullets() {
