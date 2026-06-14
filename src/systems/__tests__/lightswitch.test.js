@@ -5,6 +5,7 @@ import {
   findNearestSwitch,
   getLitRoomIds,
   isPointInRoom,
+  computeSwitchPosition,
   SWITCH_INTERACT_RANGE,
 } from '../lightswitch.js';
 
@@ -78,6 +79,100 @@ describe('createSwitchStates', () => {
       expect(s.x).toBeLessThanOrEqual(room.x + room.width);
       expect(s.y).toBeGreaterThanOrEqual(room.y);
       expect(s.y).toBeLessThanOrEqual(room.y + room.height);
+    }
+  });
+});
+
+describe('computeSwitchPosition (door-aware)', () => {
+  const W = WALL_THICKNESS;
+  // A door occupies [door.offset, door.offset + door.width] along its wall.
+  function inDoorGap(coord, room, wall) {
+    return (room.doors || [])
+      .filter(d => d.wall === wall)
+      .some(d => coord >= room.x + d.offset && coord <= room.x + d.offset + d.width
+        || coord >= room.y + d.offset && coord <= room.y + d.offset + d.width);
+  }
+
+  it('does not place a north-wall switch inside a centered north doorway', () => {
+    const room = makeRoom(1, 0, 0, { doors: [{ wall: 'north', offset: 560, width: 80 }] });
+    const pos = computeSwitchPosition(room, 'north', W);
+    // switch x must be clear of the door gap [560, 640]
+    expect(pos.x >= 560 && pos.x <= 640).toBe(false);
+  });
+
+  it('does not place an east-wall switch inside a centered east doorway', () => {
+    const room = makeRoom(1, 0, 0, { doors: [{ wall: 'east', offset: 460, width: 80 }] });
+    const pos = computeSwitchPosition(room, 'east', W);
+    // switch y must be clear of the door gap [460, 540]
+    expect(pos.y >= 460 && pos.y <= 540).toBe(false);
+  });
+
+  it('avoids every door gap when a wall has multiple doors', () => {
+    const room = makeRoom(1, 0, 0, {
+      doors: [
+        { wall: 'south', offset: 200, width: 80 },
+        { wall: 'south', offset: 700, width: 80 },
+      ],
+    });
+    const pos = computeSwitchPosition(room, 'south', W);
+    expect(pos.x >= 200 && pos.x <= 280).toBe(false);
+    expect(pos.x >= 700 && pos.x <= 780).toBe(false);
+  });
+
+  it('keeps the switch flush against the chosen wall', () => {
+    const room = makeRoom(1, 0, 0, { doors: [{ wall: 'north', offset: 560, width: 80 }] });
+    const north = computeSwitchPosition(room, 'north', W);
+    expect(north.y).toBeLessThan(room.y + 4 * W); // pinned near the north wall
+    const west = computeSwitchPosition(room, 'west', W);
+    expect(west.x).toBeLessThan(room.x + 4 * W); // pinned near the west wall
+  });
+
+  it('stays within the room bounds', () => {
+    const room = makeRoom(1, 0, 0, { doors: [{ wall: 'north', offset: 560, width: 80 }] });
+    const pos = computeSwitchPosition(room, 'north', W);
+    expect(pos.x).toBeGreaterThanOrEqual(room.x);
+    expect(pos.x).toBeLessThanOrEqual(room.x + room.width);
+  });
+});
+
+describe('createSwitchStates door avoidance', () => {
+  it('never places a switch inside a door gap across many seeds', () => {
+    const rooms = [];
+    for (let i = 1; i <= 60; i++) {
+      // Each room has a door centered on every wall -- the worst case for the
+      // old midpoint placement.
+      rooms.push({
+        id: i, gridX: 0, gridY: 0, x: i * 1200, y: 0, width: 1200, height: 1000, seed: i,
+        doors: [
+          { wall: 'north', offset: 560, width: 80 },
+          { wall: 'south', offset: 560, width: 80 },
+          { wall: 'east', offset: 460, width: 80 },
+          { wall: 'west', offset: 460, width: 80 },
+        ],
+      });
+    }
+    for (let seed = 1; seed <= 8; seed++) {
+      const states = createSwitchStates(rooms, seed, WALL_THICKNESS);
+      for (const s of states) {
+        const room = rooms.find(r => r.id === s.roomId);
+        for (const d of room.doors) {
+          if (d.wall === 'north' || d.wall === 'south') {
+            const onWall = d.wall === 'north'
+              ? s.y < room.y + 40
+              : s.y > room.y + room.height - 40;
+            if (onWall) {
+              expect(s.x >= room.x + d.offset && s.x <= room.x + d.offset + d.width).toBe(false);
+            }
+          } else {
+            const onWall = d.wall === 'east'
+              ? s.x > room.x + room.width - 40
+              : s.x < room.x + 40;
+            if (onWall) {
+              expect(s.y >= room.y + d.offset && s.y <= room.y + d.offset + d.width).toBe(false);
+            }
+          }
+        }
+      }
     }
   });
 });

@@ -67,6 +67,16 @@ export function generateCrackPoints(startX, startY, length, segments, vertical =
   return points;
 }
 
+// True only when the player is past the rift's east edge AND within the rift
+// opening's vertical band. The band check is essential: without it, ANY eastward
+// crossing of the store's east-edge x triggers the rift transition, including a
+// door one room north or south that happens to share that x (the "rift fires on
+// an unrelated door crossing" bug).
+export function isThroughRift(playerX, playerY, edgeX, riftRect) {
+  const inBand = playerY >= riftRect.y && playerY <= riftRect.y + riftRect.height;
+  return playerX > edgeX && inBand;
+}
+
 export function getExitPosition(room, wallThickness) {
   return {
     x: room.x + wallThickness + 40,

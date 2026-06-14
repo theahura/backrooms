@@ -3,6 +3,7 @@ import {
   generateStoreLayout,
   generateCrackPoints,
   getExitPosition,
+  isThroughRift,
 } from '../startroom.js';
 
 const WALL_THICKNESS = 16;
@@ -97,6 +98,35 @@ describe('startroom', () => {
       expect(allSame).toBe(false);
     });
 
+  });
+
+  describe('isThroughRift', () => {
+    // The rift opening sits in the store's east wall. edgeX is the store's east
+    // edge; riftRect is the opening's world rect (a band on the east wall).
+    const edgeX = 720;
+    const riftRect = { x: 700, y: 240, width: 40, height: 120 }; // opening spans y 240..360
+
+    it('is true when the player is east of the edge AND within the rift band', () => {
+      expect(isThroughRift(740, 300, edgeX, riftRect)).toBe(true);
+    });
+
+    it('is false east of the edge but OUTSIDE the rift band (an aligned door one room away)', () => {
+      // Same eastward crossing X, but a full room south of the rift opening.
+      expect(isThroughRift(740, 900, edgeX, riftRect)).toBe(false);
+      // And one room north.
+      expect(isThroughRift(740, 60, edgeX, riftRect)).toBe(false);
+    });
+
+    it('is false when the player is still west of the edge (inside the store)', () => {
+      expect(isThroughRift(700, 300, edgeX, riftRect)).toBe(false);
+    });
+
+    it('is true exactly at the band edges, false just outside them', () => {
+      expect(isThroughRift(740, 240, edgeX, riftRect)).toBe(true);
+      expect(isThroughRift(740, 360, edgeX, riftRect)).toBe(true);
+      expect(isThroughRift(740, 239, edgeX, riftRect)).toBe(false);
+      expect(isThroughRift(740, 361, edgeX, riftRect)).toBe(false);
+    });
   });
 
   describe('getExitPosition', () => {

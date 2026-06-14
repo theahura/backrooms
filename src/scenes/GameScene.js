@@ -20,11 +20,11 @@ import { generateRoomItems, ITEM_TYPES } from '../systems/items.js';
 import { createInventoryState, pickupItem, useBattery, canPickupItem } from '../systems/inventory.js';
 import { getUpgradeValue, createShopState } from '../systems/shop.js';
 import { toggleDoor, getDoorCenter, findNearestDoor, DOOR_INTERACT_RANGE } from '../systems/doors.js';
-import { toggleSwitch, findNearestSwitch, getLitRoomIds, isPointInRoom, SWITCH_INTERACT_RANGE } from '../systems/lightswitch.js';
+import { toggleSwitch, findNearestSwitch, getLitRoomIds, isPointInRoom, computeSwitchPosition, SWITCH_INTERACT_RANGE } from '../systems/lightswitch.js';
 import { createHidingState, enterHiding, exitHiding, findNearestHideable, HIDE_INTERACT_RANGE, HIDING_SPEED_MULTIPLIER } from '../systems/hiding.js';
 import { saveGame } from '../systems/persistence.js';
 import { createExplorationState, updateExploration, getWindowedMinimapData, getCurrentRoom, MINIMAP_COLORS, MINIMAP_WINDOW_CELLS } from '../systems/exploration.js';
-import { generateCrackPoints } from '../systems/startroom.js';
+import { generateCrackPoints, isThroughRift } from '../systems/startroom.js';
 import { getLocation, getLocationLayout, getLocationExitPosition } from '../systems/locations.js';
 import { generateRoomLore } from '../systems/lore.js';
 import { buildRoomGraph, getRoomDistance, getDoorwayCenter, DOORWAY_SEEK_CHANCE, ROOM_TRANSITION_COOLDOWN, MAX_ROOM_DISTANCE, MAX_ROOM_ENEMIES } from '../systems/pathfinding.js';
@@ -731,12 +731,9 @@ export class GameScene extends Phaser.Scene {
     if (rand() >= SWITCH_CHANCE) return;
 
     const wall = WALLS[Math.floor(rand() * WALLS.length)];
-    const inset = WALL_THICKNESS + 4;
-    let x, y;
-    if (wall === 'north') { x = room.x + room.width / 2; y = room.y + inset; }
-    else if (wall === 'south') { x = room.x + room.width / 2; y = room.y + room.height - inset; }
-    else if (wall === 'east') { x = room.x + room.width - inset; y = room.y + room.height / 2; }
-    else { x = room.x + inset; y = room.y + room.height / 2; }
+    // Place the switch flush to the wall but clear of any doorway on it (the
+    // door-aware free-span search lives in lightswitch.js).
+    const { x, y } = computeSwitchPosition(room, wall, WALL_THICKNESS);
 
     const sw = { id: this.nextSwitchId++, roomId: room.id, x, y, isOn: false };
     this.switchStates.push(sw);
@@ -1507,13 +1504,17 @@ export class GameScene extends Phaser.Scene {
   updateRiftCrossing() {
     if (this.currentFloor !== 0) return;
     const room = this.entranceRoom;
-    const inBackrooms = this.player.x > room.x + room.width + 4;
+    const edge = room.x + room.width;
+    // Only a crossing THROUGH the rift opening (east of the edge AND within the
+    // rift's vertical band) counts -- otherwise any eastward door crossing that
+    // shares the store's east-edge x would spuriously replay the transition.
+    const inBackrooms = isThroughRift(this.player.x, this.player.y, edge + 4, this.riftRect);
     if (inBackrooms && !this.riftCrossed) {
       this.riftCrossed = true;
       this.cameras.main.flash(500, 235, 225, 190);
       this.cameras.main.shake(250, 0.006);
       this.playSound('stair_transition');
-    } else if (!inBackrooms && this.riftCrossed && this.player.x < room.x + room.width - 40) {
+    } else if (!inBackrooms && this.riftCrossed && this.player.x < edge - 40) {
       this.riftCrossed = false;
     }
   }
