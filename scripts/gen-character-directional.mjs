@@ -79,10 +79,16 @@ const FACING = {
   up: 'facing directly AWAY from the camera (back view): we see the back of the head/hood, the face is hidden',
 };
 
-// The two walk legs poses (image-to-image from each base facing).
+// The two walk legs poses (image-to-image from each base facing). Phrased as an
+// EXAGGERATED stride with one foot clearly lifted -- a subtle shift reads as a
+// wiggle rather than a step, especially for the foreshortened front/back views.
 const WALK_LEGS = [
-  'the LEFT leg steps forward and bent at the knee while the RIGHT leg trails back',
-  'the RIGHT leg steps forward and bent at the knee while the LEFT leg trails back',
+  'the LEFT leg is clearly lifted and striding forward, knee bent and foot raised well off the ground, ' +
+    'while the RIGHT leg is planted straight back and extended -- an obvious, exaggerated mid-walk step ' +
+    'with the legs FAR apart (not a subtle shift)',
+  'the RIGHT leg is clearly lifted and striding forward, knee bent and foot raised well off the ground, ' +
+    'while the LEFT leg is planted straight back and extended -- an obvious, exaggerated mid-walk step ' +
+    'with the legs FAR apart (not a subtle shift)',
 ];
 
 function loadKey() {
