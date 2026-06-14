@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { SPRITE_DEFS, getSpriteConfig, getAllSpriteKeys, ANIM_DEFS, getAllAnimKeys, getEnemyTextureKey, getAnimKeyForState } from '../sprites.js';
+import { SPRITE_DEFS, getSpriteConfig, getAllSpriteKeys, ANIM_DEFS, getAllAnimKeys, getEnemyTextureKey, getAnimKeyForState, directionFromAngle, getDirectionalFrame } from '../sprites.js';
 import { FURNITURE_TYPES } from '../furniture.js';
 import { ITEM_TYPES } from '../items.js';
 import { WEAPON_TYPES } from '../weapons.js';
@@ -114,19 +114,6 @@ describe('sprites', () => {
   });
 
   describe('character sprite coverage', () => {
-    it('has all player animation frames', () => {
-      expect(getSpriteConfig('player_idle_0')).toBeDefined();
-      expect(getSpriteConfig('player_idle_1')).toBeDefined();
-      expect(getSpriteConfig('player_walk_0')).toBeDefined();
-      expect(getSpriteConfig('player_walk_1')).toBeDefined();
-    });
-
-    it('has all basic enemy animation frames', () => {
-      expect(getSpriteConfig('enemy_idle_0')).toBeDefined();
-      expect(getSpriteConfig('enemy_walk_0')).toBeDefined();
-      expect(getSpriteConfig('enemy_walk_1')).toBeDefined();
-    });
-
     it('has all crawler animation frames', () => {
       expect(getSpriteConfig('crawler_idle_0')).toBeDefined();
       expect(getSpriteConfig('crawler_walk_0')).toBeDefined();
@@ -142,8 +129,6 @@ describe('sprites', () => {
     });
 
     const CHARACTER_KEYS = [
-      'player_idle_0', 'player_idle_1', 'player_walk_0', 'player_walk_1',
-      'enemy_idle_0', 'enemy_walk_0', 'enemy_walk_1',
       'crawler_idle_0', 'crawler_walk_0', 'crawler_walk_1',
       'spitter_idle_0', 'spitter_idle_1', 'spitter_walk_0', 'spitter_walk_1', 'spitter_attack_0',
     ];
@@ -155,38 +140,51 @@ describe('sprites', () => {
         expect(size.height, `${key} height`).toBeGreaterThanOrEqual(24);
       }
     });
+  });
 
-    it('the player aims its flashlight toward the facing (east) edge', () => {
-      // The sprite is authored facing east and rotated in-engine to the aim
-      // vector, so the brightest element (the flashlight beam) must sit on the
-      // east half of the grid for the facing direction to read after rotation.
-      // We identify the beam by luminance, not by a specific palette char, so
-      // the test survives re-encoding of the art.
-      const luminance = (hex) => {
-        const n = parseInt(hex.replace('#', ''), 16);
-        const r = (n >> 16) & 0xff;
-        const g = (n >> 8) & 0xff;
-        const b = n & 0xff;
-        return 0.299 * r + 0.587 * g + 0.114 * b;
-      };
-      const playerKeys = ['player_idle_0', 'player_idle_1', 'player_walk_0', 'player_walk_1'];
-      for (const key of playerKeys) {
-        const def = getSpriteConfig(key);
-        const cols = def.data[0].length;
-        const center = (cols - 1) / 2;
-        const brightChars = new Set(
-          Object.entries(def.palette).filter(([, hex]) => luminance(hex) > 200).map(([ch]) => ch)
-        );
-        const beamCols = [];
-        for (const row of def.data) {
-          for (let c = 0; c < row.length; c++) {
-            if (brightChars.has(row[c])) beamCols.push(c);
-          }
-        }
-        expect(beamCols.length, `${key} has a bright flashlight beam`).toBeGreaterThan(0);
-        const meanCol = beamCols.reduce((a, b) => a + b, 0) / beamCols.length;
-        expect(meanCol, `${key} flashlight is on the east half`).toBeGreaterThan(center);
-      }
+  describe('directional facing', () => {
+    const PI = Math.PI;
+
+    it('maps the eight cardinal/diagonal aim angles to the right facing', () => {
+      // Screen space: +x is right, +y is DOWN (so atan2(vy, vx)).
+      expect(directionFromAngle(0)).toBe('right');
+      expect(directionFromAngle(PI / 4)).toBe('down_right');
+      expect(directionFromAngle(PI / 2)).toBe('down');
+      expect(directionFromAngle((3 * PI) / 4)).toBe('down_left');
+      expect(directionFromAngle(PI)).toBe('left');
+      expect(directionFromAngle(-(3 * PI) / 4)).toBe('up_left');
+      expect(directionFromAngle(-PI / 2)).toBe('up');
+      expect(directionFromAngle(-PI / 4)).toBe('up_right');
+    });
+
+    it('wraps angles outside [-PI, PI]', () => {
+      expect(directionFromAngle(2 * PI)).toBe('right');
+      expect(directionFromAngle(-PI)).toBe('left');
+      expect(directionFromAngle(PI / 2 + 2 * PI)).toBe('down');
+    });
+
+    it('snaps at the 22.5-degree midpoints between two facings', () => {
+      // Midpoint between right (0) and down_right (45deg) is 22.5deg.
+      expect(directionFromAngle(PI / 8 - 0.05)).toBe('right');
+      expect(directionFromAngle(PI / 8 + 0.05)).toBe('down_right');
+    });
+
+    it('resolves non-mirrored facings to their own texture', () => {
+      expect(getDirectionalFrame('player', PI / 2)).toMatchObject({ textureKey: 'player_down', flipX: false });
+      expect(getDirectionalFrame('player', 0)).toMatchObject({ textureKey: 'player_right', flipX: false });
+      expect(getDirectionalFrame('player', -PI / 2)).toMatchObject({ textureKey: 'player_up', flipX: false });
+      expect(getDirectionalFrame('player', -PI / 4)).toMatchObject({ textureKey: 'player_up_right', flipX: false });
+    });
+
+    it('mirrors the three left-side facings onto the right-side textures', () => {
+      expect(getDirectionalFrame('player', PI)).toMatchObject({ textureKey: 'player_right', flipX: true });
+      expect(getDirectionalFrame('player', (3 * PI) / 4)).toMatchObject({ textureKey: 'player_down_right', flipX: true });
+      expect(getDirectionalFrame('player', -(3 * PI) / 4)).toMatchObject({ textureKey: 'player_up_right', flipX: true });
+    });
+
+    it('applies the prefix so enemies and players resolve to distinct textures', () => {
+      expect(getDirectionalFrame('enemy', PI / 2).textureKey).toBe('enemy_down');
+      expect(getDirectionalFrame('enemy', PI)).toMatchObject({ textureKey: 'enemy_right', flipX: true });
     });
   });
 
@@ -201,10 +199,6 @@ describe('sprites', () => {
 
     it('getAllAnimKeys returns all animation keys', () => {
       const keys = getAllAnimKeys();
-      expect(keys).toContain('player_idle');
-      expect(keys).toContain('player_walk');
-      expect(keys).toContain('enemy_idle');
-      expect(keys).toContain('enemy_walk');
       expect(keys).toContain('crawler_idle');
       expect(keys).toContain('crawler_walk');
       expect(keys).toContain('spitter_idle');
@@ -214,10 +208,13 @@ describe('sprites', () => {
   });
 
   describe('getEnemyTextureKey', () => {
-    it('returns the idle frame texture for each enemy type', () => {
-      expect(getSpriteConfig(getEnemyTextureKey('basic'))).toBeDefined();
+    it('returns a defined initial texture for procedural enemy types', () => {
       expect(getSpriteConfig(getEnemyTextureKey('crawler'))).toBeDefined();
       expect(getSpriteConfig(getEnemyTextureKey('spitter'))).toBeDefined();
+    });
+
+    it('returns a directional facing key for basic enemies', () => {
+      expect(getEnemyTextureKey('basic')).toBe('enemy_down');
     });
 
     it('returns different texture keys for different enemy types', () => {
@@ -232,19 +229,17 @@ describe('sprites', () => {
 
   describe('getAnimKeyForState', () => {
     it('returns walk animation for chase state', () => {
-      expect(ANIM_DEFS[getAnimKeyForState('basic', 'chase')]).toBeDefined();
       expect(ANIM_DEFS[getAnimKeyForState('crawler', 'chase')]).toBeDefined();
       expect(ANIM_DEFS[getAnimKeyForState('spitter', 'chase')]).toBeDefined();
     });
 
     it('returns idle animation for idle state', () => {
-      expect(ANIM_DEFS[getAnimKeyForState('basic', 'idle')]).toBeDefined();
       expect(ANIM_DEFS[getAnimKeyForState('crawler', 'idle')]).toBeDefined();
       expect(ANIM_DEFS[getAnimKeyForState('spitter', 'idle')]).toBeDefined();
     });
 
     it('returns walk animation for search state', () => {
-      expect(ANIM_DEFS[getAnimKeyForState('basic', 'search')]).toBeDefined();
+      expect(ANIM_DEFS[getAnimKeyForState('crawler', 'search')]).toBeDefined();
     });
 
     it('returns attack animation for spitter in attack state', () => {

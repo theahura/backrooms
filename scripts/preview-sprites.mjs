@@ -4,8 +4,8 @@
 //
 // Usage:
 //   node scripts/preview-sprites.mjs                       # all sprites
-//   node scripts/preview-sprites.mjs player_idle_0 enemy_idle_0
-//   node scripts/preview-sprites.mjs --scale 12 player_idle_0
+//   node scripts/preview-sprites.mjs crawler_idle_0 spitter_idle_0
+//   node scripts/preview-sprites.mjs --scale 12 crawler_idle_0
 //
 // Output goes to screenshots/sprite-preview/ (gitignored).
 import fs from 'node:fs';

@@ -9,6 +9,7 @@
     "test:watch": "vitest",
     "generate-art": "node scripts/generate-art.mjs",
     "gen-characters": "node scripts/gen-character-sprites.mjs",
+    "gen-characters-directional": "node scripts/gen-character-directional.mjs",
     "preview-sprites": "node scripts/preview-sprites.mjs"
   },
   "dependencies": {

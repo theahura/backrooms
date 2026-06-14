@@ -34,7 +34,7 @@ import { generateAllSounds, createAmbientDrone, playAmbientSound, createRiftCrac
 import { getAlertedEnemies, GUNSHOT_ALERT_COOLDOWN } from '../systems/gunfireNoise.js';
 import { createRunStats, recordKill, updateTime, updateMaxFloor } from '../systems/runStats.js';
 import { getEffectiveVolume, createDefaultSettings } from '../systems/settings.js';
-import { SPRITE_DEFS, getAllSpriteKeys, ANIM_DEFS, getAllAnimKeys, getEnemyTextureKey, getAnimKeyForState } from '../systems/sprites.js';
+import { SPRITE_DEFS, getAllSpriteKeys, ANIM_DEFS, getAllAnimKeys, getEnemyTextureKey, getAnimKeyForState, getDirectionalFrame } from '../systems/sprites.js';
 import { getLightSpillZones } from '../systems/lightSpill.js';
 import { rollEnemyDrop } from '../systems/lootDrops.js';
 import { CAMERA_ZOOM, partitionSceneObjects } from '../systems/camera.js';
@@ -65,6 +65,11 @@ const WORLD_BOUND = 50_000_000;
 const TOUCH_STICK_RADIUS = 90;
 const TOUCH_STICK_DEADZONE_PX = 12;
 const TOUCH_UI_DEPTH = 1500;
+
+// Half-step cadence for the directional walk bob: the body alternates between
+// the base frame and its 2px-raised "_step" frame every this-many ms while
+// moving (a full bob cycle is twice this).
+const CHARACTER_STEP_MS = 160;
 
 export class GameScene extends Phaser.Scene {
   constructor() {
@@ -1013,14 +1018,13 @@ export class GameScene extends Phaser.Scene {
     const playerX = spawnRoom.x + spawnRoom.width / 2;
     const playerY = spawnRoom.y + spawnRoom.height / 2;
 
-    this.player = this.physics.add.sprite(playerX, playerY, 'player_idle_0');
+    this.player = this.physics.add.sprite(playerX, playerY, 'player_down');
     this.player.setDepth(200);
-    this.player.play('player_idle');
-    // Arcade bodies are multiplied by the sprite's display scale. The texture
-    // is 32px displayed at 40px (scale 1.25), so 19 yields a ~24px effective
-    // hitbox -- unchanged from the pre-redraw 20px texture.
-    this.player.setDisplaySize(40, 40);
-    this.player.body.setSize(19, 19, true);
+    // Directional 64px PNG displayed at 48px (scale 0.75). Arcade bodies are
+    // multiplied by the sprite's display scale, so 32 yields a ~24px effective
+    // hitbox -- unchanged from the pre-directional 40px/19 player.
+    this.player.setDisplaySize(48, 48);
+    this.player.body.setSize(32, 32, true);
 
     this.physics.add.collider(this.player, this.walls);
     this.playerFurnitureCollider = this.physics.add.collider(this.player, this.furnitureGroup);
@@ -1034,11 +1038,12 @@ export class GameScene extends Phaser.Scene {
   getEnemyStats(type, distance) {
     // bodySize is in texture pixels and gets multiplied by the display scale
     // (display/texture), so these stay close to the pre-scale-up hitboxes.
-    // Sized for the redrawn 24px (crawler) / 32px (basic, spitter) textures so
-    // the effective world hitboxes match the pre-redraw 14px/20px textures.
+    // crawler/spitter are the 24px/32px procedural textures; basic is the 64px
+    // directional PNG, so its bodySize is sized against 64 to keep the same ~22px
+    // effective world hitbox.
     if (type === 'crawler') return { hp: getEnemyHP(CRAWLER_MAX_HP, distance), contactDamage: getEnemyDamage(CRAWLER_CONTACT_DAMAGE, distance), textureKey: getEnemyTextureKey('crawler'), bodySize: 12, displaySize: 34 };
     if (type === 'spitter') return { hp: getEnemyHP(SPITTER_MAX_HP, distance), contactDamage: getEnemyDamage(SPITTER_CONTACT_DAMAGE, distance), textureKey: getEnemyTextureKey('spitter'), bodySize: 16, displaySize: 44 };
-    return { hp: getEnemyHP(ENEMY_MAX_HP, distance), contactDamage: getEnemyDamage(ENEMY_CONTACT_DAMAGE, distance), textureKey: getEnemyTextureKey('basic'), bodySize: 16, displaySize: 44 };
+    return { hp: getEnemyHP(ENEMY_MAX_HP, distance), contactDamage: getEnemyDamage(ENEMY_CONTACT_DAMAGE, distance), textureKey: getEnemyTextureKey('basic'), bodySize: 28, displaySize: 50 };
   }
 
   spawnDangerWave(playerRoomId, litRoomIds) {
@@ -1062,7 +1067,7 @@ export class GameScene extends Phaser.Scene {
       enemy.body.setSize(stats.bodySize, stats.bodySize, true);
       enemy.body.setCollideWorldBounds(true);
       enemy.setDepth(60);
-      enemy.play(getAnimKeyForState(type, 'idle'), true);
+      if (type !== 'basic') enemy.play(getAnimKeyForState(type, 'idle'), true);
 
       this.enemyStates.push({
         sprite: enemy,
@@ -1070,6 +1075,7 @@ export class GameScene extends Phaser.Scene {
         y,
         type,
         state: 'idle',
+        facingAngle: Math.PI / 2,
         velocityX: 0,
         velocityY: 0,
         wanderTimer: 0,
@@ -1113,7 +1119,7 @@ export class GameScene extends Phaser.Scene {
       enemy.body.setSize(stats.bodySize, stats.bodySize, true);
       enemy.body.setCollideWorldBounds(true);
       enemy.setDepth(60);
-      enemy.play(getAnimKeyForState(spawn.type, 'idle'), true);
+      if (spawn.type !== 'basic') enemy.play(getAnimKeyForState(spawn.type, 'idle'), true);
 
       this.enemyStates.push({
         sprite: enemy,
@@ -1121,6 +1127,7 @@ export class GameScene extends Phaser.Scene {
         y: spawn.y,
         type: spawn.type,
         state: 'idle',
+        facingAngle: Math.PI / 2,
         velocityX: 0,
         velocityY: 0,
         wanderTimer: 0,
@@ -1874,7 +1881,8 @@ export class GameScene extends Phaser.Scene {
       const inLitRoom = litRooms.some(room => isPointInRoom(room, es.x, es.y));
       if (inLitRoom) {
         es.sprite.setVelocity(0, 0);
-        es.sprite.play(getAnimKeyForState(es.type, 'idle'), true);
+        if (es.type === 'basic') this.applyDirectionalFrame(es.sprite, 'enemy', es.facingAngle, false);
+        else es.sprite.play(getAnimKeyForState(es.type, 'idle'), true);
         continue;
       }
 
@@ -1948,16 +1956,28 @@ export class GameScene extends Phaser.Scene {
 
       es.sprite.setVelocity(updated.velocityX, updated.velocityY);
 
-      if (updated.velocityX !== 0 || updated.velocityY !== 0) {
-        es.sprite.setRotation(Math.atan2(updated.velocityY, updated.velocityX));
+      const enemyMoving = updated.velocityX !== 0 || updated.velocityY !== 0;
+      if (es.type === 'basic') {
+        if (enemyMoving) es.facingAngle = Math.atan2(updated.velocityY, updated.velocityX);
+        this.applyDirectionalFrame(es.sprite, 'enemy', es.facingAngle, enemyMoving);
+      } else {
+        if (enemyMoving) es.sprite.setRotation(Math.atan2(updated.velocityY, updated.velocityX));
+        es.sprite.play(getAnimKeyForState(es.type, es.state), true);
       }
-      es.sprite.play(getAnimKeyForState(es.type, es.state), true);
     }
   }
 
-  drawPlayer() {
-    this.player.setRotation(this.playerAngle || 0);
+  // Set a character sprite to the directional frame for `angle` (8-way snap with
+  // left-side facings mirrored), bobbing between the base and raised "_step"
+  // frame while moving. Replaces the old single-sprite rotation.
+  applyDirectionalFrame(sprite, prefix, angle, moving) {
+    const { textureKey, flipX } = getDirectionalFrame(prefix, angle);
+    const stepping = moving && Math.floor(this.time.now / CHARACTER_STEP_MS) % 2 === 1;
+    sprite.setTexture(stepping ? `${textureKey}_step` : textureKey);
+    sprite.setFlipX(flipX);
+  }
 
+  drawPlayer() {
     const hurt = isInvulnerable(this.combatState);
     const hiding = this.hidingState.isHiding;
 
@@ -1978,8 +1998,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     const isMoving = this.player.body.velocity.x !== 0 || this.player.body.velocity.y !== 0;
-    const animKey = isMoving ? 'player_walk' : 'player_idle';
-    this.player.play(animKey, true);
+    this.applyDirectionalFrame(this.player, 'player', this.playerAngle || 0, isMoving);
   }
 
   drawHUD() {
