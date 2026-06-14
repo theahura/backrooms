@@ -114,6 +114,25 @@ describe('generateRoomEnemies', () => {
     expect(first).toEqual(second);
   });
 
+  it('does not spawn enemies inside a stair/landing keep-out zone', () => {
+    // The square where the player materializes after a stair transition; an
+    // enemy here would hit the player before they can react.
+    const keepOut = [{ x: 500, y: 350, width: 200, height: 200 }];
+
+    let enemiesSeen = 0;
+    for (let seed = 0; seed < 40; seed++) {
+      const enemies = generateRoomEnemies(ROOM_X, ROOM_Y, ROOM_WIDTH, ROOM_HEIGHT, WALL_THICKNESS, seed, [], 1, 8, keepOut);
+      enemiesSeen += enemies.length;
+      for (const e of enemies) {
+        for (const k of keepOut) {
+          const inside = e.x >= k.x && e.x <= k.x + k.width && e.y >= k.y && e.y <= k.y + k.height;
+          expect(inside).toBe(false);
+        }
+      }
+    }
+    expect(enemiesSeen).toBeGreaterThan(0);
+  });
+
   it('does not place enemies overlapping furniture', () => {
     const furniture = [
       { x: 500, y: 400, width: 200, height: 200 },

@@ -75,6 +75,14 @@ export function isInvulnerable(state) {
   return state.damageCooldown > 0;
 }
 
+// Grants a temporary invulnerability window (e.g. spawn protection after a stair
+// transition) by extending the damage cooldown. Never shortens an existing
+// longer cooldown, and never revives a dead player.
+export function grantInvulnerability(state, ms) {
+  if (state.isDead) return state;
+  return { ...state, damageCooldown: Math.max(state.damageCooldown, ms) };
+}
+
 export function applyEnemyDamage(health, damage) {
   return Math.max(0, health - damage);
 }

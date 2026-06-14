@@ -9,8 +9,34 @@ import {
   applyEnemyDamage,
   isEnemyDead,
   getHurtFlash,
+  grantInvulnerability,
   MEDKIT_HEAL_AMOUNT,
 } from '../combat.js';
+
+describe('grantInvulnerability (post-stair spawn protection)', () => {
+  it('makes the player invulnerable for the granted window', () => {
+    const s = grantInvulnerability(createCombatState(100), 1200);
+    expect(isInvulnerable(s)).toBe(true);
+  });
+
+  it('prevents damage taken during the protection window', () => {
+    const s = grantInvulnerability(createCombatState(100), 1200);
+    const after = applyDamage(s, 30);
+    expect(after.hp).toBe(100);
+  });
+
+  it('does not shorten an already-longer cooldown', () => {
+    const s = { ...createCombatState(100), damageCooldown: 5000 };
+    const after = grantInvulnerability(s, 1200);
+    expect(after.damageCooldown).toBe(5000);
+  });
+
+  it('does nothing to a dead player', () => {
+    const dead = { ...createCombatState(100), hp: 0, isDead: true };
+    const after = grantInvulnerability(dead, 1200);
+    expect(after.isDead).toBe(true);
+  });
+});
 
 describe('createCombatState', () => {
   it('starts with full health and alive', () => {

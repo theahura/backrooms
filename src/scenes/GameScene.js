@@ -9,7 +9,7 @@ import { STAIR_SIZE, STAIR_MARGIN, getStairTopLeft, stairKeepOut, getStairLandin
 import { getRoomAt, roomsWithinRadius, hasStairDown, localDistance, isRiftDoor, ROOM_WIDTH, ROOM_HEIGHT } from '../systems/worldgen.js';
 import { mulberry32 } from '../systems/random.js';
 import { generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_CHASE, DETECTION_RANGE } from '../systems/enemy.js';
-import { createCombatState, applyDamage, applyHeal, updateCombat, getHealthFraction, isInvulnerable, applyEnemyDamage, isEnemyDead, getHurtFlash, ENEMY_CONTACT_DAMAGE, ENEMY_MAX_HP, CRAWLER_MAX_HP, SPITTER_MAX_HP, CRAWLER_CONTACT_DAMAGE, SPITTER_CONTACT_DAMAGE, SPITTER_PROJECTILE_DAMAGE, CORPSE_TINT, CORPSE_ALPHA, CORPSE_ANGLE, CORPSE_DEPTH, MEDKIT_HEAL_AMOUNT } from '../systems/combat.js';
+import { createCombatState, applyDamage, applyHeal, updateCombat, getHealthFraction, isInvulnerable, grantInvulnerability, applyEnemyDamage, isEnemyDead, getHurtFlash, ENEMY_CONTACT_DAMAGE, ENEMY_MAX_HP, CRAWLER_MAX_HP, SPITTER_MAX_HP, CRAWLER_CONTACT_DAMAGE, SPITTER_CONTACT_DAMAGE, SPITTER_PROJECTILE_DAMAGE, CORPSE_TINT, CORPSE_ALPHA, CORPSE_ANGLE, CORPSE_DEPTH, MEDKIT_HEAL_AMOUNT } from '../systems/combat.js';
 import { createFlashlightState, toggleFlashlight, setFlashlightHiding, isFlashlightLit, updateBatteryWithFlashlight } from '../systems/flashlight.js';
 import { calculateBulletVelocity, calculateShotgunSpread, canFire, updateFireCooldown, isBulletExpired, getBulletVelocityFromAngle, SPITTER_PROJECTILE_SPEED, SPITTER_PROJECTILE_RANGE } from '../systems/shooting.js';
 import { getMoveVelocity, resolveAimAngle, resolveFireIntent, resolveMoveVelocity, detectTouchPrimary, computeTouchLayout } from '../systems/touchControls.js';
@@ -52,6 +52,10 @@ const WALL_THICKNESS = 16;
 // Breathing room carved out of maze walls around a room's centered stair, so
 // the stair square is never embedded in (or flush against) an internal wall.
 const STAIR_KEEPOUT_PAD = 16;
+// Invulnerability granted the moment the player materializes after a stair
+// transition, so an enemy that wandered near the landing cannot hit them before
+// they can see and react (paired with the enemy stair/landing keep-out).
+const STAIR_SPAWN_PROTECTION_MS = 1200;
 
 // Floors are stacked as non-overlapping horizontal bands in one physics world.
 // The offset is enormous so unbounded floors never collide in world space.
@@ -347,7 +351,7 @@ export class GameScene extends Phaser.Scene {
     this.activateRoomSwitch(room);
     this.activateRoomItems(room, mazeRects);
     this.activateRoomLore(room, mazeRects);
-    this.activateRoomEnemies(room);
+    this.activateRoomEnemies(room, [...stairKeep, ...landingKeep]);
     this.activateRoomWeapon(room, mazeRects);
     this.activateRoomStairs(room);
 
@@ -1113,11 +1117,11 @@ export class GameScene extends Phaser.Scene {
     this.physics.add.collider(this.enemyGroup, this.enemyGroup);
   }
 
-  activateRoomEnemies(room) {
+  activateRoomEnemies(room, keepOut = []) {
     const furniture = this.roomFurniture.get(room.id) || [];
     const spawnPoints = generateRoomEnemies(
       room.x, room.y, room.width, room.height,
-      WALL_THICKNESS, room.seed, furniture, room.id, room.distance
+      WALL_THICKNESS, room.seed, furniture, room.id, room.distance, keepOut
     );
 
     for (const spawn of spawnPoints) {
@@ -1644,6 +1648,7 @@ export class GameScene extends Phaser.Scene {
 
       player.body.reset(destX, destY);
       player.body.enable = true;
+      this.combatState = grantInvulnerability(this.combatState, STAIR_SPAWN_PROTECTION_MS);
       this.runStats = updateMaxFloor(this.runStats, destFloor);
 
       this.cameras.main.fadeIn(300, 0, 0, 0);
