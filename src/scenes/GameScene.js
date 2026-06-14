@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { calculateVelocity } from '../systems/movement.js';
-import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES, blocksBullets } from '../systems/furniture.js';
+import { generateRoomFurniture, FURNITURE_TYPES, blocksBullets, opaqueBounds, visibleFurnitureRect } from '../systems/furniture.js';
 import { generateMazeWalls, wallRectSegments, wallRectOccluders, doorEntryZones } from '../systems/maze.js';
 import { getRoomVibe } from '../systems/roomVibes.js';
 import { getFlashlightPolygon, filterSegmentsNear, filterRectsNear, FLASHLIGHT_RANGE } from '../systems/visibility.js';
@@ -169,6 +169,14 @@ export class GameScene extends Phaser.Scene {
     // the flashlight can light their near face (visible thickness) via back-face
     // culling, while enemy line-of-sight still expands them to full outlines.
     this.mazeWallRects = [];
+    // Light-blocking furniture occludes the SAME way as maze walls: as solid
+    // rects expanded to far faces only for the flashlight (back-face culling, so
+    // the lit cone reaches the piece's near face instead of leaving it pitch
+    // black) and to full outlines for enemy line-of-sight. Sized to the visible
+    // art, not the padded logical rect.
+    this.furnitureOccluderRects = [];
+    // Per-furniture-texture normalized opaque-art box, computed once and cached.
+    this.furnitureArtFrac = new Map();
 
     this.roomFurniture = new Map();
     this.combatState = createCombatState(this.maxHp);
@@ -581,6 +589,11 @@ export class GameScene extends Phaser.Scene {
 
     for (const item of furniture) {
       const spriteKey = `furniture_${item.type}`;
+      // The collision body and light occluder track the VISIBLE art, not the
+      // padded logical rect. For a PNG the visible art fills only part of the
+      // texture (transparent margins); the procedural fallback fills the whole
+      // rect, so its visible rect is the full rect.
+      let visible = { x: item.x, y: item.y, width: item.width, height: item.height };
       if (this.textures.exists(spriteKey)) {
         const sprite = this.add.sprite(
           item.x + item.width / 2,
@@ -589,25 +602,53 @@ export class GameScene extends Phaser.Scene {
         );
         sprite.setDisplaySize(item.width, item.height);
         sprite.setDepth(50);
+        visible = visibleFurnitureRect(item, this.getFurnitureArtFrac(spriteKey));
       } else {
         gfx.fillStyle(item.color, 1);
         gfx.fillRect(item.x, item.y, item.width, item.height);
       }
 
       const zone = this.add.zone(
-        item.x + item.width / 2,
-        item.y + item.height / 2,
-        item.width,
-        item.height
+        visible.x + visible.width / 2,
+        visible.y + visible.height / 2,
+        visible.width,
+        visible.height
       );
       zone.setData('blocksBullets', blocksBullets(item.type));
       this.furnitureGroup.add(zone);
 
+      // Light-blocking furniture occludes as a back-face-culled rect (like maze
+      // walls) sized to the visible art, so the cone lights its near face
+      // (visible thickness) instead of leaving the footprint pitch black.
       if (FURNITURE_TYPES[item.type] && FURNITURE_TYPES[item.type].blocksLight) {
-        const segments = createFurnitureSegments(item.x, item.y, item.width, item.height);
-        this.wallSegments.push(...segments);
+        this.furnitureOccluderRects.push(visible);
       }
     }
+  }
+
+  // Normalized opaque-art bounding box for a furniture texture (fractions of the
+  // texture, 0..1), computed once via an offscreen scan and cached. Falls back
+  // to the full rect if the texture cannot be inspected.
+  getFurnitureArtFrac(key) {
+    if (this.furnitureArtFrac.has(key)) return this.furnitureArtFrac.get(key);
+    let frac = { x: 0, y: 0, width: 1, height: 1 };
+    const tex = this.textures.get(key);
+    const src = tex && tex.getSourceImage && tex.getSourceImage();
+    if (src && src.width && src.height && typeof document !== 'undefined') {
+      const w = src.width;
+      const h = src.height;
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(src, 0, 0);
+      const bounds = opaqueBounds(ctx.getImageData(0, 0, w, h).data, w, h);
+      if (bounds) {
+        frac = { x: bounds.x / w, y: bounds.y / h, width: bounds.width / w, height: bounds.height / h };
+      }
+    }
+    this.furnitureArtFrac.set(key, frac);
+    return frac;
   }
 
   renderRoomMaze(gfx, mazeRects, theme) {
@@ -1858,6 +1899,7 @@ export class GameScene extends Phaser.Scene {
     const losSegments = [
       ...filterSegmentsNear(playerPos, DETECTION_RANGE + 60, this.wallSegments),
       ...filterRectsNear(playerPos, DETECTION_RANGE + 60, this.mazeWallRects).flatMap(wallRectSegments),
+      ...filterRectsNear(playerPos, DETECTION_RANGE + 60, this.furnitureOccluderRects).flatMap(wallRectSegments),
     ];
     const litRoomIds = getLitRoomIds(this.switchStates);
     if (!litRoomIds.includes(0)) litRoomIds.push(0);
@@ -2548,6 +2590,7 @@ export class GameScene extends Phaser.Scene {
     const occluders = [
       ...filterSegmentsNear(origin, FLASHLIGHT_RANGE, this.wallSegments),
       ...filterRectsNear(origin, FLASHLIGHT_RANGE, this.mazeWallRects).flatMap(r => wallRectOccluders(r, origin)),
+      ...filterRectsNear(origin, FLASHLIGHT_RANGE, this.furnitureOccluderRects).flatMap(r => wallRectOccluders(r, origin)),
     ];
     const polygon = getFlashlightPolygon(
       origin,

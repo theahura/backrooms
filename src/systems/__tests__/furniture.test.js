@@ -1,9 +1,99 @@
 import { describe, it, expect } from 'vitest';
-import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES, blocksBullets } from '../furniture.js';
-import { generateMazeWalls } from '../maze.js';
+import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES, blocksBullets, opaqueBounds, visibleFurnitureRect } from '../furniture.js';
+import { generateMazeWalls, wallRectSegments, wallRectOccluders } from '../maze.js';
 import { getFlashlightPolygon } from '../visibility.js';
 import { createRoomWalls } from '../room.js';
 import { findNearestHideable } from '../hiding.js';
+
+describe('opaqueBounds', () => {
+  // Build a flat RGBA buffer where a sub-rectangle is opaque and the rest is
+  // transparent, mirroring an AI furniture PNG with transparent padding.
+  function buildImage(width, height, opaque) {
+    const data = new Uint8Array(width * height * 4);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const inside = x >= opaque.x && x < opaque.x + opaque.width &&
+          y >= opaque.y && y < opaque.y + opaque.height;
+        data[(y * width + x) * 4 + 3] = inside ? 255 : 0;
+      }
+    }
+    return data;
+  }
+
+  it('finds the bounding box of the opaque pixels (transparent padding ignored)', () => {
+    const data = buildImage(10, 10, { x: 3, y: 2, width: 4, height: 5 });
+    expect(opaqueBounds(data, 10, 10)).toEqual({ x: 3, y: 2, width: 4, height: 5 });
+  });
+
+  it('returns the full image when every pixel is opaque', () => {
+    const data = buildImage(8, 6, { x: 0, y: 0, width: 8, height: 6 });
+    expect(opaqueBounds(data, 8, 6)).toEqual({ x: 0, y: 0, width: 8, height: 6 });
+  });
+
+  it('returns null when the image is fully transparent', () => {
+    const data = new Uint8Array(4 * 4 * 4); // all zero alpha
+    expect(opaqueBounds(data, 4, 4)).toBeNull();
+  });
+});
+
+describe('light-blocking furniture illumination (Bug 6 / Bug 2)', () => {
+  // Standard even-odd point-in-polygon test.
+  function pointInPolygon(px, py, poly) {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const xi = poly[i].x, yi = poly[i].y;
+      const xj = poly[j].x, yj = poly[j].y;
+      const intersect = (yi > py) !== (yj > py) &&
+        px < ((xj - xi) * (py - yi)) / (yj - yi) + xi;
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+
+  it('lights the near face of a light-blocking piece instead of leaving it pitch black', () => {
+    // A tall, thin bookcase-like blocker; the player stands to its left and
+    // shines right at it.
+    const furniture = { x: 200, y: 100, width: 30, height: 120 };
+    const origin = { x: 100, y: 160 };
+    const aim = 0; // pointing +x toward the piece
+    const cone = Math.PI / 4;
+    const nearFace = { x: furniture.x + 2, y: 160 }; // just inside the near (left) face
+
+    // Old behavior: the full outline blocks the ray at the near face, so the
+    // footprint falls OUTSIDE the lit polygon (renders black).
+    const polyFull = getFlashlightPolygon(origin, aim, cone, wallRectSegments(furniture), 300);
+    expect(pointInPolygon(nearFace.x, nearFace.y, polyFull)).toBe(false);
+
+    // New behavior: back-face culling drops the near face, so the cone reaches
+    // across to the far face and the near surface is lit.
+    const polyCulled = getFlashlightPolygon(origin, aim, cone, wallRectOccluders(furniture, origin), 300);
+    expect(pointInPolygon(nearFace.x, nearFace.y, polyCulled)).toBe(true);
+  });
+});
+
+describe('visibleFurnitureRect', () => {
+  it('maps a normalized opaque box onto the furniture world rect', () => {
+    const item = { x: 100, y: 200, width: 80, height: 40 };
+    const frac = { x: 0.25, y: 0.25, width: 0.5, height: 0.5 };
+    expect(visibleFurnitureRect(item, frac)).toEqual({ x: 120, y: 210, width: 40, height: 20 });
+  });
+
+  it('returns the full furniture rect when the art fills its texture', () => {
+    const item = { x: 0, y: 0, width: 60, height: 160 };
+    const frac = { x: 0, y: 0, width: 1, height: 1 };
+    expect(visibleFurnitureRect(item, frac)).toEqual({ x: 0, y: 0, width: 60, height: 160 });
+  });
+
+  it('keeps the visible rect strictly inside the furniture rect for padded art', () => {
+    const item = { x: 500, y: 300, width: 100, height: 120 };
+    const frac = { x: 0.22, y: 0.175, width: 0.58, height: 0.667 };
+    const r = visibleFurnitureRect(item, frac);
+    expect(r.x).toBeGreaterThan(item.x);
+    expect(r.y).toBeGreaterThan(item.y);
+    expect(r.x + r.width).toBeLessThan(item.x + item.width);
+    expect(r.y + r.height).toBeLessThan(item.y + item.height);
+  });
+});
 
 describe('createFurnitureSegments', () => {
   it('returns 4 segments forming a closed boundary', () => {

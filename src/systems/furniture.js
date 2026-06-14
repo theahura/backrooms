@@ -95,6 +95,44 @@ export function blocksBullets(type) {
   return !!(def && def.blocksLight);
 }
 
+// The AI-generated furniture PNGs carry transparent padding, so the visible art
+// fills only part of the texture. opaqueBounds scans an RGBA pixel buffer and
+// returns the bounding box of the non-transparent pixels (or null if fully
+// transparent). Used to shrink a furniture piece's collision body and light
+// occluder to where the art actually is, so the hitbox matches the visuals.
+export function opaqueBounds(data, width, height, threshold = 16) {
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (data[(y * width + x) * 4 + 3] > threshold) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) return null;
+  return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+}
+
+// Maps a furniture piece's NORMALIZED opaque-art box (fractions of the texture,
+// 0..1) onto its world rect, yielding the rectangle the art actually occupies on
+// screen. The sprite is still drawn stretched to the full logical rect; this is
+// the sub-rect used for the collision body and the light occluder so they line
+// up with the visible art instead of the transparent padding.
+export function visibleFurnitureRect(item, frac) {
+  return {
+    x: item.x + frac.x * item.width,
+    y: item.y + frac.y * item.height,
+    width: frac.width * item.width,
+    height: frac.height * item.height,
+  };
+}
+
 export function createFurnitureSegments(x, y, width, height) {
   return [
     { x1: x, y1: y, x2: x + width, y2: y },
