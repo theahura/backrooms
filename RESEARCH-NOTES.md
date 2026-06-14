@@ -3648,3 +3648,78 @@ Re-read the spec's 8 Known bugs and independently VERIFIED all 8 hold in the rea
 - **Coverage gap found:** Bug 5 (stairs) was the only fix without a FULL-PIPELINE invariant test. `placement.test.js` mirrors `GameScene.activateRoom` for furniture-vs-stair (Bug 1); `enemy.test.js` tests the enemy keep-out with a SYNTHETIC rect (`{x:500,y:350,200,200}`, room 1200×1000, every seed treated as having a stair). Neither asserts that the REAL `[stairKeepOut(room,…,STAIR_KEEPOUT_PAD), stairLandingKeepOut(room)]` rects — assembled exactly as `activateRoomEnemies(room, [...stairKeep, ...landingKeep])` does (GameScene L362) — keep enemies off the stair/landing across the procedural world.
 - **Plan:** extend `placement.test.js` `placeRoom` to also return `landingKeep`, then add an invariant: for every `hasStair` room in a `forEachRoom(8,8)` sweep, call the real `generateRoomEnemies(room.x,…,room.seed, furniture, room.id, 8, [...stairKeep,...landingKeep])` and assert no returned enemy point lies inside `stairKeep[0]` or `landingKeep[0]`.
 - **Research applied:** (a) full-pipeline invariant tests must import the real keep-out functions/constants (no hand-rolled rects) to avoid pipeline drift — mirror placement.test.js exactly. (b) Non-vacuity = "sometimes assertions" (Antithesis): two count guards, `stairs>0` AND `enemiesSeen>0`; the second is the one people forget (an empty enemy set passes the invariant trivially). (c) **`distance` gotcha:** a raw `getRoomAt` room has NO `distance` field; `generateRoomEnemies` defaults `distance=0` which (SAFE_DISTANCE band) spawns ~0 enemies → vacuous. Pass an explicit `distance=8` (as enemy.test.js does) so several enemies spawn. (d) Enemy is a POINT — use point-in-rect containment (`e.x>=k.x && e.x<=k.x+k.width && …`), not the rect-vs-rect `overlaps` helper. (e) RED demonstration (mutation-by-hand, Trail of Bits): temporarily pass `[]` keep-out → enemies land in the zone → test fails; restore the real keep-out → green. Refs: Antithesis "Sometimes Assertions", ProcTHOR generate-then-validate, fast-check/Hypothesis 100-run baseline (here the deterministic grid sweep far exceeds it), roguelike min-distance-from-arrival spawn-safety convention (RogueBasin/roguetemple).
+
+## Stable Per-Save World Seed (Level Stable Day-to-Day) Research
+
+Context: APPLICATION_SPEC binding feedback "the level should not change day to day, so the
+player can build a mental map over time" + main body "rooms ... remain static once generated
+... but also changing from person to person." Current code: `GameScene.init` sets
+`this.levelSeed = runCount + 1`, and `runCount` increments every run, so the entire
+deterministic world (`worldgen.getRoomAt(seed, gx, gy)` -> doors, mazes, furniture, stairs,
+switches) is re-seeded and completely changes every day. This is the exact anti-pattern.
+
+Findings (web research, sources cited inline):
+- The fix is the canonical **map seed** pattern (Minecraft World seed, Dwarf Fortress, Terraria,
+  Factorio): generate ONE random world seed ONCE at save creation, persist it in the save, and
+  reuse it as the top-level seed forever. Identical seed + identical algorithm => identical world.
+  Per-player uniqueness falls out for free (the random seed differs per save). Sources:
+  Minecraft Wiki "World seed" (seed set at creation, auto-filled once from time, then stored);
+  Wikipedia "Map seed" ("without a seed you wouldn't be able to ... guarantee it would be the same
+  world when you load it up again"); DF Wiki advanced worldgen (subsystem seeds derived from one
+  world seed). Caveat: a seed only has meaning relative to the generation ALGORITHM — a worldgen
+  code change is itself a breaking migration (acceptable here; documented).
+- **Generate-once-then-persist, never re-derive from a changing counter.** Re-deriving from
+  `runCount` (or `Date.now()` on every load) silently rerolls the world. Generate exactly once,
+  guarded by "does a persisted seed already exist?", and persist immediately so it freezes.
+- **The seed=0 / falsy trap (the single most likely bug).** `||` and `!seed` treat `0` as missing;
+  use `??` / `Number.isInteger`. MDN nullish-coalescing: `count ?? 42` keeps `0`, `count || 42`
+  replaces it. Mitigation here: we GENERATE seeds in `[1, 2^31-1]` (never 0), and `resolveWorldSeed`
+  uses `Number.isInteger(s) && s > 0` so a stored seed is never clobbered and only a truly absent
+  seed triggers generation. (Empirically, this repo's `mulberry32(0)` and `hashU32(0,...)` are NOT
+  degenerate — the `0x6d2b79f5`/`0x9e3779b9` additive constants save it — but non-zero is still the
+  safe default and avoids the `seed | 0` sign-wrap for seeds >= 2^31.)
+- **Save schema migration**: bump a centralized `SAVE_VERSION` by 1 (3 -> 4); adding an optional
+  field defaulted in the loader is a backward-compatible change. Old saves (no `worldSeed`) must
+  load and default it; the loader already rejects `data.version > SAVE_VERSION`. Idiom (Bugnet web
+  save best-practices, Arcadeon versioned-envelope): `data.field ?? default`. Persist the resolved
+  seed back on first use so migration runs once. We keep `loadGame` pure (returns
+  `worldSeed: data.worldSeed ?? null`) and resolve+persist in `GameScene.init` (which already calls
+  `saveGame` at init), so no `Math.random` leaks into the pure loader/tests.
+- **New game must drop the old seed** or a fresh game reuses the previous world (Jupiter Melon
+  devlog: "world seed is now randomised upon starting a new game"). `clearSave()` removes the whole
+  key; `TitleScene.resetSaveState()` must ALSO null the in-memory registry `worldSeed` so a New
+  Game/Delete Save doesn't carry a stale seed forward.
+- **Seed value range for this repo's 32-bit PRNGs** (cprosche mulberry32, Ettinger gist): valid
+  range `[0, 2^32-1]`; avoid 0 (degenerate in generic mulberry32). `random.js` does `seed | 0` and
+  `worldgen.hashU32` does `(seed | 0) ^ 0x9e3779b9`, so seeds >= 2^31 wrap to negative (still
+  deterministic, but messier). Decision: generate in `[1, 2^31-1]` (positive 31-bit) so `| 0` is a
+  no-op, `floorSeed(floor)=seed+floor*1000` doesn't overflow for any realistic floor count, and
+  `0` is excluded. Entropy (~2.1e9 worlds) is far more than enough for "different per person."
+
+Codebase grounding (code research, file:line):
+- `GameScene.js:129` `this.levelSeed = runCount + 1` is the ONLY seed->world coupling; every
+  consumer routes through `this.levelSeed`/`floorSeed(floor)` (`:244,269,296,720,775,1234,1579`),
+  so replacing line 129 with a persisted `worldSeed` stabilizes the whole world with no other gen
+  edits.
+- `worldgen.js`/`random.js`/`maze.js`/`furniture.js`/... are PURE w.r.t. the seed: no `Date.now`,
+  `performance.now`, `new Date`; all `Math.random()` hits are runtime entity behavior/audio/cosmetics
+  (danger spawn pick, enemy x/y/wander/cooldown, rift glow jitter, loot roll) — none feed layout.
+- `runCount` is safe to decouple from the seed: live difficulty is distance-keyed (`scaling.js`,
+  `getEnemyStats(type, distance)`); `runCount` is otherwise only the first-run tutorial tip gate
+  (`GameScene.js:1382 this.runCount === 0`) and save bookkeeping. `stairs.js getFloorRoomCounts(runCount)`
+  is dead (tests-only).
+- Save plumbing to mirror exactly like `runCount`: `persistence.js saveGame/loadGame`
+  (param+envelope+`?? null`), `main.js:67-71`(registry populate)+`:80`(autosave),
+  `ShopScene.js:47,171,294`(saves), `TitleScene.js:109-116`(reset), `GameScene.js:127-138`(init+save).
+- Tests: `persistence.test.js:40-46` is an exhaustive `toEqual` — must add `worldSeed`. Determinism
+  test pattern to mirror: `worldgen.test.js:14-19` (same seed -> `toEqual`), `furniture.test.js:169-181`
+  (same seed equal / different seed not-equal). New test asserts the resolved seed is independent of
+  the day (no runCount input), so `getRoomAt` is identical across simulated days, and differs across
+  different persisted seeds (person-to-person).
+
+Design (decided): add `generateWorldSeed(rng=Math.random)` -> `[1,2^31-1]` and
+`resolveWorldSeed(saved, rng=Math.random)` -> `Number.isInteger(saved)&&saved>0 ? saved : generate`
+to `persistence.js`; `saveGame(...,worldSeed=null)` + `loadGame` returns `worldSeed: data.worldSeed ?? null`;
+`SAVE_VERSION` 3->4; thread `worldSeed` through registry; `GameScene.init` resolves+persists and sets
+`this.levelSeed = worldSeed`. Docs (`src/docs.md`, `src/scenes/docs.md`, `src/systems/docs.md`) call the
+seed "per-run from runCount" / save shape `{version:3,...}` — update to the persisted worldSeed model.

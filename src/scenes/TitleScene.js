@@ -113,6 +113,9 @@ export class TitleScene extends Phaser.Scene {
     this.registry.set('collectedLore', []);
     this.registry.set('unlockedLocations', ['store']);
     this.registry.set('activeLocation', 'store');
+    // Drop any seed left in the registry so a new game mints a fresh world
+    // instead of reusing the deleted save's layout.
+    this.registry.set('worldSeed', null);
   }
 
   onMenuSelect(key) {

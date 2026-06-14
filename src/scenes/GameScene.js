@@ -22,7 +22,7 @@ import { getUpgradeValue, createShopState } from '../systems/shop.js';
 import { toggleDoor, getDoorCenter, findNearestDoor, DOOR_INTERACT_RANGE } from '../systems/doors.js';
 import { toggleSwitch, findNearestSwitch, getLitRoomIds, isPointInRoom, computeSwitchPosition, SWITCH_INTERACT_RANGE } from '../systems/lightswitch.js';
 import { createHidingState, enterHiding, exitHiding, findNearestHideable, HIDE_INTERACT_RANGE, HIDING_SPEED_MULTIPLIER } from '../systems/hiding.js';
-import { saveGame } from '../systems/persistence.js';
+import { saveGame, resolveWorldSeed } from '../systems/persistence.js';
 import { createExplorationState, updateExploration, getWindowedMinimapData, getCurrentRoom, MINIMAP_COLORS, MINIMAP_WINDOW_CELLS } from '../systems/exploration.js';
 import { generateCrackPoints, isThroughRift } from '../systems/startroom.js';
 import { getLocation, getLocationLayout, getLocationExitPosition } from '../systems/locations.js';
@@ -126,7 +126,12 @@ export class GameScene extends Phaser.Scene {
 
     const runCount = this.registry.get('runCount') ?? 0;
     this.registry.set('runCount', runCount + 1);
-    this.levelSeed = runCount + 1;
+    // The world seed is persisted per save and reused every run, so the level
+    // stays stable day-to-day (the player can build a mental map) while still
+    // differing between players. It is minted once on the first run of a save.
+    const worldSeed = resolveWorldSeed(this.registry.get('worldSeed'));
+    this.registry.set('worldSeed', worldSeed);
+    this.levelSeed = worldSeed;
     this.runCount = runCount;
     this.collectedLore = new Set(this.registry.get('collectedLore') ?? []);
     this.activeLocation = this.registry.get('activeLocation') ?? 'store';
@@ -135,7 +140,7 @@ export class GameScene extends Phaser.Scene {
     this.dangerState = createDangerState();
     this.runStats = createRunStats();
     this.audioSettings = this.registry.get('audioSettings') || createDefaultSettings();
-    saveGame(shopState || createShopState(), runCount + 1, [...this.collectedLore], this.unlockedLocations, this.activeLocation);
+    saveGame(shopState || createShopState(), runCount + 1, [...this.collectedLore], this.unlockedLocations, this.activeLocation, worldSeed);
   }
 
   updateWeaponStats() {

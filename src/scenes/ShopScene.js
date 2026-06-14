@@ -44,7 +44,7 @@ export class ShopScene extends Phaser.Scene {
     }
     this.activeLocation = this.registry.get('activeLocation') ?? 'store';
 
-    saveGame(shopState, this.registry.get('runCount') ?? 0, this.registry.get('collectedLore') ?? [], this.unlockedLocations, this.activeLocation);
+    saveGame(shopState, this.registry.get('runCount') ?? 0, this.registry.get('collectedLore') ?? [], this.unlockedLocations, this.activeLocation, this.registry.get('worldSeed') ?? null);
     this.shopState = shopState;
     this.treasureEarned = treasureEarned;
     this.newLocation = newLocation;
@@ -168,7 +168,7 @@ export class ShopScene extends Phaser.Scene {
       this.playSound('shop_click');
       this.registry.set('shopState', this.shopState);
       this.registry.set('activeLocation', this.activeLocation);
-      saveGame(this.shopState, this.registry.get('runCount') ?? 0, this.registry.get('collectedLore') ?? [], this.unlockedLocations, this.activeLocation);
+      saveGame(this.shopState, this.registry.get('runCount') ?? 0, this.registry.get('collectedLore') ?? [], this.unlockedLocations, this.activeLocation, this.registry.get('worldSeed') ?? null);
       this.scene.start('GameScene');
     });
 
@@ -291,7 +291,7 @@ export class ShopScene extends Phaser.Scene {
       if (canPurchase(this.shopState, upgrade.id)) {
         this.shopState = purchaseUpgrade(this.shopState, upgrade.id);
         this.registry.set('shopState', this.shopState);
-        saveGame(this.shopState, this.registry.get('runCount') ?? 0, this.registry.get('collectedLore') ?? [], this.unlockedLocations, this.activeLocation);
+        saveGame(this.shopState, this.registry.get('runCount') ?? 0, this.registry.get('collectedLore') ?? [], this.unlockedLocations, this.activeLocation, this.registry.get('worldSeed') ?? null);
         this.refreshDisplay();
         this.playSound('shop_purchase');
       } else {
