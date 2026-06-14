@@ -85,13 +85,6 @@ describe('createSwitchStates', () => {
 
 describe('computeSwitchPosition (door-aware)', () => {
   const W = WALL_THICKNESS;
-  // A door occupies [door.offset, door.offset + door.width] along its wall.
-  function inDoorGap(coord, room, wall) {
-    return (room.doors || [])
-      .filter(d => d.wall === wall)
-      .some(d => coord >= room.x + d.offset && coord <= room.x + d.offset + d.width
-        || coord >= room.y + d.offset && coord <= room.y + d.offset + d.width);
-  }
 
   it('does not place a north-wall switch inside a centered north doorway', () => {
     const room = makeRoom(1, 0, 0, { doors: [{ wall: 'north', offset: 560, width: 80 }] });

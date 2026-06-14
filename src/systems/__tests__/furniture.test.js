@@ -50,23 +50,30 @@ describe('light-blocking furniture illumination (Bug 6 / Bug 2)', () => {
     return inside;
   }
 
-  it('lights the near face of a light-blocking piece instead of leaving it pitch black', () => {
-    // A tall, thin bookcase-like blocker; the player stands to its left and
-    // shines right at it.
-    const furniture = { x: 200, y: 100, width: 30, height: 120 };
-    const origin = { x: 100, y: 160 };
-    const aim = 0; // pointing +x toward the piece
+  it('lights the near face of a light-blocking furniture piece (sized to its visible art) instead of leaving it black', () => {
+    // A real light-blocking, tall furniture type. Its occluder is the VISIBLE
+    // art sub-rect (the same rect GameScene pushes for blocksLight furniture),
+    // derived here via visibleFurnitureRect from the furniture module.
+    const type = 'bookcase';
+    expect(FURNITURE_TYPES[type].blocksLight).toBe(true);
+    const def = FURNITURE_TYPES[type];
+    const item = { type, x: 200, y: 100, width: def.width, height: def.height };
+    const frac = { x: 0.2, y: 0.18, width: 0.6, height: 0.65 }; // padded art
+    const occ = visibleFurnitureRect(item, frac);
+
+    const origin = { x: occ.x - 100, y: occ.y + occ.height / 2 }; // to its left, facing it
+    const aim = 0;
     const cone = Math.PI / 4;
-    const nearFace = { x: furniture.x + 2, y: 160 }; // just inside the near (left) face
+    const nearFace = { x: occ.x + 2, y: origin.y }; // just inside the near (left) face
 
     // Old behavior: the full outline blocks the ray at the near face, so the
     // footprint falls OUTSIDE the lit polygon (renders black).
-    const polyFull = getFlashlightPolygon(origin, aim, cone, wallRectSegments(furniture), 300);
+    const polyFull = getFlashlightPolygon(origin, aim, cone, wallRectSegments(occ), 300);
     expect(pointInPolygon(nearFace.x, nearFace.y, polyFull)).toBe(false);
 
     // New behavior: back-face culling drops the near face, so the cone reaches
-    // across to the far face and the near surface is lit.
-    const polyCulled = getFlashlightPolygon(origin, aim, cone, wallRectOccluders(furniture, origin), 300);
+    // across the piece to its far face and the near surface is lit.
+    const polyCulled = getFlashlightPolygon(origin, aim, cone, wallRectOccluders(occ, origin), 300);
     expect(pointInPolygon(nearFace.x, nearFace.y, polyCulled)).toBe(true);
   });
 });
