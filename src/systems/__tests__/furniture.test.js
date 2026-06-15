@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES, blocksBullets, opaqueBounds, visibleFurnitureRect } from '../furniture.js';
+import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES, blocksBullets, opaqueBounds, visibleFurnitureRect, billboardDepth } from '../furniture.js';
 import { generateMazeWalls, wallRectSegments, wallRectOccluders } from '../maze.js';
 import { getFlashlightPolygon } from '../visibility.js';
 import { createRoomWalls } from '../room.js';
@@ -431,10 +431,12 @@ describe('new vibe furniture types', () => {
 describe('blocksBullets', () => {
   // Low furniture you shoot across -- the spec's "tables and desks and low
   // furniture" that gunfire goes over.
-  const LOW = ['table', 'desk', 'bed', 'vent', 'couch', 'bush', 'pod'];
+  const LOW = ['table', 'desk', 'bed', 'vent', 'couch', 'bush', 'pod',
+    'water_cooler', 'potted_plant', 'payphone', 'shopping_cart'];
   // Tall/solid cover -- the spec's "armoires and other furniture" that stops
   // gunfire.
-  const TALL = ['armoire', 'closet', 'bookcase', 'shelf', 'counter', 'tree', 'rock', 'console'];
+  const TALL = ['armoire', 'closet', 'bookcase', 'shelf', 'counter', 'tree', 'rock', 'console',
+    'vending_machine', 'lockers'];
 
   it('lets gunfire pass over low furniture', () => {
     for (const type of LOW) {
@@ -458,5 +460,79 @@ describe('blocksBullets', () => {
     // gunfire passes over it -- the hand-authored LOW/TALL lists above are the
     // ground truth and must cover the whole catalogue.
     expect([...LOW, ...TALL].sort()).toEqual(Object.keys(FURNITURE_TYPES).sort());
+  });
+});
+
+describe('billboardDepth', () => {
+  it('keeps every billboard in the band above flat furniture and below enemies', () => {
+    for (const feetY of [-50000, -600, 0, 600, 12345, 99999, 500000]) {
+      const d = billboardDepth(feetY, 0);
+      expect(d).toBeGreaterThanOrEqual(50);
+      expect(d).toBeLessThan(60);
+    }
+  });
+
+  it('draws a prop further south in front of one to the north', () => {
+    expect(billboardDepth(1600, 0)).toBeGreaterThan(billboardDepth(1000, 0));
+  });
+
+  it('never sorts a more-northern prop in front of a more-southern one', () => {
+    let prev = -Infinity;
+    for (let feetY = -2000; feetY <= 20000; feetY += 250) {
+      const d = billboardDepth(feetY, 0);
+      expect(d).toBeGreaterThanOrEqual(prev);
+      prev = d;
+    }
+  });
+
+  it('is deterministic', () => {
+    expect(billboardDepth(4321, 0)).toBe(billboardDepth(4321, 0));
+  });
+
+  it('sorts by position within the floor band, independent of which floor it is', () => {
+    const FLOOR_BAND = 5_000_000;
+    expect(billboardDepth(600 + FLOOR_BAND, FLOOR_BAND)).toBe(billboardDepth(600, 0));
+  });
+});
+
+describe('upright billboard props', () => {
+  const UPRIGHT = ['vending_machine', 'lockers', 'water_cooler', 'potted_plant', 'payphone', 'shopping_cart'];
+
+  it('stand taller than the footprint they occupy on the floor', () => {
+    for (const type of UPRIGHT) {
+      const def = FURNITURE_TYPES[type];
+      expect(def, type).toBeDefined();
+      expect(def.upright, type).toBe(true);
+      expect(def.spriteHeight, type).toBeGreaterThan(def.height);
+    }
+  });
+
+  it('place without overlap and keep their footprints inside the room', () => {
+    const profile = {
+      clusters: [[
+        { type: 'vending_machine', dx: 0, dy: 0 },
+        { type: 'lockers', dx: 140, dy: 0 },
+      ]],
+      singletons: ['water_cooler', 'potted_plant', 'payphone', 'shopping_cart'],
+    };
+    const items = generateRoomFurniture(0, 0, 720, 600, 16, 99, profile);
+    expect(items.length).toBeGreaterThan(0);
+    const overlaps = (a, b) =>
+      a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+    for (let i = 0; i < items.length; i++) {
+      const piece = items[i];
+      expect(piece.x).toBeGreaterThanOrEqual(0);
+      expect(piece.y).toBeGreaterThanOrEqual(0);
+      expect(piece.x + piece.width).toBeLessThanOrEqual(720);
+      expect(piece.y + piece.height).toBeLessThanOrEqual(600);
+      for (let j = i + 1; j < items.length; j++) {
+        expect(overlaps(piece, items[j]), `${piece.type} vs ${items[j].type}`).toBe(false);
+      }
+    }
+  });
+
+  it('treats solid upright props as cover that stops gunfire', () => {
+    expect(blocksBullets('vending_machine')).toBe(true);
+    expect(blocksBullets('lockers')).toBe(true);
   });
 });

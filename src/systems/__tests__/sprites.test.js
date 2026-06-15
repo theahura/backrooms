@@ -13,16 +13,22 @@ function getRenderedSize(config) {
   };
 }
 
+// Upright billboard props are front-elevation PNG sprites (like the directional
+// characters); they have no top-down procedural form and fall back to a flat
+// footprint rect, so they are excluded from the procedural-grid coverage checks.
+const TOPDOWN_FURNITURE = Object.keys(FURNITURE_TYPES).filter(t => !FURNITURE_TYPES[t].upright);
+
 describe('sprites', () => {
   describe('furniture sprite coverage', () => {
-    it('has a sprite definition for every furniture type', () => {
-      for (const type of Object.keys(FURNITURE_TYPES)) {
+    it('has a sprite definition for every top-down furniture type', () => {
+      for (const type of TOPDOWN_FURNITURE) {
         expect(getSpriteConfig(`furniture_${type}`)).toBeDefined();
       }
     });
 
     it('furniture sprites render at the correct furniture dimensions', () => {
-      for (const [type, def] of Object.entries(FURNITURE_TYPES)) {
+      for (const type of TOPDOWN_FURNITURE) {
+        const def = FURNITURE_TYPES[type];
         const config = getSpriteConfig(`furniture_${type}`);
         const size = getRenderedSize(config);
         expect(size.width).toBe(def.width);
@@ -83,7 +89,7 @@ describe('sprites', () => {
   describe('getAllSpriteKeys returns at least all entity sprites', () => {
     it('includes furniture, item, weapon, bullet, and utility sprites', () => {
       const keys = getAllSpriteKeys();
-      for (const type of Object.keys(FURNITURE_TYPES)) {
+      for (const type of TOPDOWN_FURNITURE) {
         expect(keys).toContain(`furniture_${type}`);
       }
       for (const item of ITEM_TYPES) {

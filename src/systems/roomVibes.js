@@ -61,8 +61,13 @@ export const ZONES = {
           { type: 'table', dx: 0, dy: 70 },
           { type: 'table', dx: 100, dy: 70 },
         ],
+        // a bank of vending machines against a wall
+        [
+          { type: 'vending_machine', dx: 0, dy: 0 },
+          { type: 'vending_machine', dx: 72, dy: 0 },
+        ],
       ],
-      singletons: ['couch', 'table', 'counter'],
+      singletons: ['couch', 'table', 'vending_machine', 'potted_plant', 'payphone', 'shopping_cart'],
     },
   },
 
@@ -94,7 +99,7 @@ export const ZONES = {
           { type: 'shelf', dx: 0, dy: 80 },
         ],
       ],
-      singletons: ['bed', 'closet', 'desk'],
+      singletons: ['bed', 'closet', 'water_cooler', 'potted_plant'],
     },
   },
 
@@ -126,7 +131,7 @@ export const ZONES = {
           { type: 'table', dx: 0, dy: 60 },
         ],
       ],
-      singletons: ['bed', 'armoire', 'couch'],
+      singletons: ['bed', 'armoire', 'couch', 'potted_plant', 'payphone'],
     },
   },
 
@@ -158,8 +163,13 @@ export const ZONES = {
           { type: 'closet', dx: 60, dy: 0 },
           { type: 'shelf', dx: 0, dy: 80 },
         ],
+        // a row of lockers down a wall
+        [
+          { type: 'lockers', dx: 0, dy: 0 },
+          { type: 'lockers', dx: 110, dy: 0 },
+        ],
       ],
-      singletons: ['desk', 'closet', 'table'],
+      singletons: ['desk', 'lockers', 'vending_machine', 'water_cooler'],
     },
   },
 
@@ -193,7 +203,7 @@ export const ZONES = {
           { type: 'shelf', dx: 0, dy: 90 },
         ],
       ],
-      singletons: ['shelf', 'closet', 'table'],
+      singletons: ['shelf', 'closet', 'lockers', 'shopping_cart'],
     },
   },
 };

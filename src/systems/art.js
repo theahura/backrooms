@@ -61,11 +61,27 @@ const ICON_SUFFIX =
   'BACKGROUND REQUIREMENT: the entire background must be solid flat chroma key ' +
   'green, exact hex #00FF00 (RGB 0,255,0), with NO gradient, NO noise and NO shadow.';
 
+// Upright billboard props are drawn FRONT-ON (elevation), the opposite of the
+// top-down SPRITE_SUFFIX, so they stand up in the world like the player/enemy.
+const PROP_SUFFIX =
+  'Front elevation view seen straight on at eye level with a very slight ' +
+  'downward angle, the object standing upright with its full front face visible, ' +
+  'orthographic, no perspective distortion. A single centered object that fills ' +
+  'most of the frame. 2D video game prop sprite, pixel art style, limited ' +
+  'desaturated palette, grimy liminal-space horror mood, flat even lighting, ' +
+  'bold dark outline around the shape, NO cast shadow, NO ground, NO floor. ' +
+  'CRITICAL BACKGROUND REQUIREMENT: the entire background must be solid flat ' +
+  'chroma key green, exact hex #00FF00 (RGB 0,255,0), with NO gradient, NO ' +
+  'noise, NO texture and NO shadow.';
+
 function sprite(subject) {
   return `${subject}. ${SPRITE_SUFFIX}`;
 }
 function icon(subject) {
   return `${subject}. ${ICON_SUFFIX}`;
+}
+function prop(subject) {
+  return `${subject}. ${PROP_SUFFIX}`;
 }
 
 export const ART_MANIFEST = [
@@ -92,6 +108,16 @@ export const ART_MANIFEST = [
   { id: 'furniture_bush', prompt: sprite('A low leafy green shrub bush seen from directly straight above'), width: 112, height: 88, keys: ['furniture_bush'] },
   { id: 'furniture_console', prompt: sprite('A spaceship control console panel with glowing cyan screens and buttons seen from directly straight above'), width: 192, height: 80, keys: ['furniture_console'] },
   { id: 'furniture_pod', prompt: sprite('A sci-fi cryo sleep pod with a glass canopy seen from directly straight above'), width: 112, height: 176, keys: ['furniture_pod'] },
+
+  // 2.5D upright billboard props (front elevation, stood up in the world). Sizes
+  // are the VISUAL standee size; the in-game floor footprint is smaller (see
+  // FURNITURE_TYPES). Keys are furniture_<type> so they load like any furniture.
+  { id: 'furniture_vending_machine', prompt: prop('A tall glass-front vending machine stocked with cans and snacks behind the glass, faint cold internal glow'), width: 128, height: 240, keys: ['furniture_vending_machine'] },
+  { id: 'furniture_lockers', prompt: prop('A bank of four tall dented metal school lockers standing side by side, institutional grey-green, with vents and latches'), width: 208, height: 224, keys: ['furniture_lockers'] },
+  { id: 'furniture_water_cooler', prompt: prop('An office water cooler dispenser with an upturned pale blue water jug on top and two spigots'), width: 80, height: 168, keys: ['furniture_water_cooler'] },
+  { id: 'furniture_potted_plant', prompt: prop('A tall potted ficus house plant with slightly wilted dark green leaves in a plain ceramic pot'), width: 112, height: 208, keys: ['furniture_potted_plant'] },
+  { id: 'furniture_payphone', prompt: prop('A wall payphone on a short metal stand with a coin box, keypad and hanging handset'), width: 88, height: 192, keys: ['furniture_payphone'] },
+  { id: 'furniture_shopping_cart', prompt: prop('An abandoned metal wire shopping cart with a child seat, slightly rusted, seen from the front'), width: 120, height: 144, keys: ['furniture_shopping_cart'] },
 
   // Weapon pickups.
   { id: 'pickup_pistol', prompt: sprite('A handgun pistol weapon lying on the ground seen from directly straight above'), width: 28, height: 20, keys: ['pickup_pistol'] },

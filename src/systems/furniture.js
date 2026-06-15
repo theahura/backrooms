@@ -18,7 +18,35 @@ export const FURNITURE_TYPES = {
   // Spaceship vibe: derelict control bay.
   console: { width: 96, height: 40, color: 0x2a3a40, canHide: false, blocksLight: true },
   pod: { width: 56, height: 88, color: 0x4a5a60, canHide: true, blocksLight: false },
+  // 2.5D upright billboard props -- rendered as front-elevation standees that
+  // rise above a small floor footprint (the width/height here). `spriteWidth`/
+  // `spriteHeight` are the VISUAL size; placement, collision and light occlusion
+  // all use the footprint, so a tall standee never becomes a tall wall.
+  vending_machine: { width: 56, height: 30, color: 0x39506a, canHide: false, blocksLight: true, upright: true, spriteWidth: 64, spriteHeight: 120 },
+  lockers: { width: 96, height: 28, color: 0x5d7064, canHide: false, blocksLight: true, upright: true, spriteWidth: 104, spriteHeight: 112 },
+  water_cooler: { width: 32, height: 28, color: 0x9ab2c2, canHide: false, blocksLight: false, upright: true, spriteWidth: 40, spriteHeight: 84 },
+  potted_plant: { width: 40, height: 36, color: 0x4a5a36, canHide: false, blocksLight: false, upright: true, spriteWidth: 56, spriteHeight: 104 },
+  payphone: { width: 36, height: 24, color: 0x46464f, canHide: false, blocksLight: false, upright: true, spriteWidth: 44, spriteHeight: 96 },
+  shopping_cart: { width: 48, height: 32, color: 0x8a8a92, canHide: false, blocksLight: false, upright: true, spriteWidth: 60, spriteHeight: 72 },
 };
+
+// Draw-order key for an upright billboard prop. Props sort among themselves by
+// the world-Y of their base ("feet"): one further south (larger feetY) draws in
+// front. The result stays in the band [50, 60) -- above flat furniture (depth
+// 50), below enemies (60) and the darkness layer (100) -- so billboards are
+// revealed by the flashlight like all other world art and never hide an enemy.
+// Depth tracks position WITHIN the floor band (feetY - floorBaseY), with
+// headroom for rooms north of the origin; rooms far beyond the headroom clamp
+// together but are never on screen at the same time.
+const BILLBOARD_DEPTH_BASE = 50;
+const BILLBOARD_DEPTH_SPAN = 9.99;
+const BILLBOARD_DEPTH_HEADROOM = 30000;
+
+export function billboardDepth(feetY, floorBaseY) {
+  const local = feetY - floorBaseY + BILLBOARD_DEPTH_HEADROOM;
+  const clamped = Math.min(99900, Math.max(0, local));
+  return BILLBOARD_DEPTH_BASE + Math.min(BILLBOARD_DEPTH_SPAN, clamped * 0.0001);
+}
 
 // Furniture is placed as semantic clusters -- recognizable arrangements left
 // behind by whoever furnished these rooms -- rather than uniform scatter.

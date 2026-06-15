@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { calculateVelocity } from '../systems/movement.js';
-import { generateRoomFurniture, FURNITURE_TYPES, blocksBullets, opaqueBounds, visibleFurnitureRect } from '../systems/furniture.js';
+import { generateRoomFurniture, FURNITURE_TYPES, blocksBullets, opaqueBounds, visibleFurnitureRect, billboardDepth } from '../systems/furniture.js';
 import { generateMazeWalls, wallRectSegments, wallRectOccluders, doorEntryZones } from '../systems/maze.js';
 import { getRoomVibe } from '../systems/roomVibes.js';
 import { getZoneAt } from '../systems/zones.js';
@@ -540,6 +540,10 @@ export class GameScene extends Phaser.Scene {
     this.roomGfx = this.add.graphics();
     this.furnitureGfx = this.add.graphics();
     this.furnitureGfx.setDepth(50);
+    // Contact shadows for upright billboard props, drawn just below the props
+    // (depth 49) and above the floor textures so they ground the standees.
+    this.shadowGfx = this.add.graphics();
+    this.shadowGfx.setDepth(49);
     // Per-room floor/wall texture overlays (TileSprites). Like every other
     // per-room object (furniture sprites, wall zones), these are never freed --
     // rooms stay generated for the run. Unlike the single batched roomGfx this is
@@ -684,8 +688,32 @@ export class GameScene extends Phaser.Scene {
       // padded logical rect. For a PNG the visible art fills only part of the
       // texture (transparent margins); the procedural fallback fills the whole
       // rect, so its visible rect is the full rect.
+      const def = FURNITURE_TYPES[item.type];
+      // Collision body / light occluder track the VISIBLE art for flat top-down
+      // furniture; for upright billboards they track the small floor FOOTPRINT
+      // (item rect) instead, so a tall standee never becomes a tall wall.
       let visible = { x: item.x, y: item.y, width: item.width, height: item.height };
-      if (this.textures.exists(spriteKey)) {
+      if (def && def.upright && this.textures.exists(spriteKey)) {
+        const cx = item.x + item.width / 2;
+        const baseY = item.y + item.height; // the standee plants on the footprint's near edge
+        this.shadowGfx.fillStyle(0x000000, 0.32);
+        this.shadowGfx.fillEllipse(cx, baseY, item.width * 1.1, item.height * 0.7);
+        const sprite = this.add.sprite(cx, baseY, spriteKey);
+        sprite.setOrigin(0.5, 1);
+        sprite.setDisplaySize(def.spriteWidth, def.spriteHeight);
+        sprite.setDepth(billboardDepth(baseY, room.floor * FLOOR_Y_OFFSET));
+        // Clip the standee where it would rise past the room's interior so a tall
+        // prop against the north wall never pokes through into the next room. The
+        // crop is in texture space (before display scaling); the base stays put.
+        const interiorTop = room.y + WALL_THICKNESS;
+        const overflow = interiorTop - (baseY - def.spriteHeight);
+        if (overflow > 0) {
+          const frameH = sprite.frame.height;
+          const cropTop = Math.min(frameH, overflow * frameH / def.spriteHeight);
+          sprite.setCrop(0, cropTop, sprite.frame.width, frameH - cropTop);
+        }
+        // visible stays the footprint rect (collision/occluder use the base)
+      } else if (this.textures.exists(spriteKey)) {
         const sprite = this.add.sprite(
           item.x + item.width / 2,
           item.y + item.height / 2,
