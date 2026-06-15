@@ -3993,3 +3993,77 @@ by `margin = WALL_THICKNESS+40 = 56` (far outside the [6,34] switch band).
   that the OLD door-only placement produced > 0 embedded (RED proof).
 - lightswitch.test.js: computeSwitchPosition with a mazeRects arg moves the switch off an interior
   wall that meets the chosen wall; without mazeRects it stays byte-identical (back-compat).
+
+## 2026-06-14 — Bug (regression-guard gap): light switches "on doors and open entrances" unguarded on the LIVE path
+
+### Independent re-verification of the two current spec "Known bugs" (real engine)
+Re-ran `scripts/playtest.mjs` (vite :5199, playwright at `/home/amol/code/node_modules`):
+`stair landing offCentre=0px`, rift re-entry `1/1/2`, recharge `off +0.005 / on -0.015 / gate 0`,
+`doorOnRift=false`, 0 console/page errors. Then drove the REAL generation pipeline with a throwaway
+deterministic probe (`/tmp/probe-bugs-loop.mjs`, since deleted) across **300 seeds × 11×11 cells =
+36,300 rooms**, mirroring `GameScene.activateRoom`'s obstacle assembly exactly:
+- **Light switches (live path: `chooseSwitchWall` + maze-aware `computeSwitchPosition`):** 5391 placed
+  (2295 in `maze`/`corridor` rooms — the only types whose interior walls reach the perimeter band),
+  **0 embedded in a maze wall, 0 on a `doorEntryZones` rect, 0 with a footprint outside the room.**
+- **Stairs (Bug 1): 2650 stairs / 6694 stair-adjacent enemies** from the real `generateRoomEnemies`
+  with the real `[stairKeepOut, stairLandingKeepOut]`: **0 enemies on the stair, 0 on the landing,
+  0 landings embedded in a maze wall, 0 landings out of room bounds.**
+So BOTH listed bugs are genuinely fixed behaviorally; per YAGNI no behavioral change is warranted.
+
+### The genuine gap (the actual change this commit makes — a permanent regression guard)
+The spec bug text is literally "light switches can spawn on **doors and open entrances**". The LIVE
+runtime switch path has a permanent full-pipeline guard ONLY for maze-wall embedding
+(`placement.test.js` → `placeSwitchLive`, asserts footprint ∉ `mazeRects`). The only door-avoidance
+PERMANENT test (`lightswitch.test.js` → `'createSwitchStates door avoidance'`) exercises the **dead**
+`createSwitchStates` path (random wall, 3-arg maze-blind `computeSwitchPosition`, synthetic rooms with
+centered doors) — NOT the path the game runs (`activateRoomSwitch`), NOT real worldgen rooms, and it
+checks the raw door gap, not the `doorEntryZones` rectangle. So a future change to `chooseSwitchWall` /
+`freeWallSpan`'s door folding / `computeSwitchPosition` could regress "switch on a doorway" on the live
+path and every committed test would still pass. This commit closes that with a live-path,
+real-worldgen, `doorEntryZones` guard.
+
+### Geometry (why the live path clears doorways — confirmed by code research)
+- A door is `{wall, offset, width: DOOR_WIDTH=80}` (worldgen.js). `doorEntryZones`/`getDoorZone`
+  (maze.js) expand it to a rect `entryDepth = 80 + wallThickness = 96`px deep, spanning the door's
+  `[offset, offset+80]` along the wall and hugging that perimeter edge.
+- `freeWallSpan` (lightswitch.js) folds each same-wall door into a blocked interval
+  `[offset - SWITCH_DOOR_CLEARANCE(30), offset + width + 30]`, then centers the switch in the largest
+  clear gap. The switch is inset `wallThickness+4 = 20`px from the perimeter; footprint half-extents
+  10×14. Since the switch center sits outside `[offset-30, offset+110]`, the footprint edge
+  (`±10` along the wall) clears the door span `[offset, offset+80]` by ≥20px → footprint ∉ entry zone.
+- "Open entrance" == doorway: `room.doors` already contains EVERY opening (worldgen has no separate
+  "open entrance" concept). The store rift opening is on room id 0, which `activateRoomSwitch` skips,
+  and a wall-mounted switch (≤34px deep) can never reach a centered stair (≥100px from every edge,
+  `STAIR_MARGIN`), so "doors and open entrances" reduces exactly to `doorEntryZones`.
+
+### Non-vacuity (the key test-design point from research)
+Metatesting / mutation-in-harness (G-Research "Metatesting Your PBTs"; Wikipedia "Mutation testing"):
+a passing invariant guard must be PROVEN to fail under the regressed algorithm. CAUTION surfaced by
+code research: the existing `placeSwitchOld` (3-arg `computeSwitchPosition`) is only **maze-blind** — it
+STILL calls the door-aware `freeWallSpan`, so it does NOT bury switches on doors and CANNOT prove a
+door guard non-vacuous. The non-vacuous proof needs a **truly door-blind** placement = the historically
+accurate pre-fix inline `GameScene` formula (bare wall midpoint at the inset, no `freeWallSpan`):
+`{x: room.x + span/2, y: room.y + inset}` etc. The wall midpoint (x=360 N/S, y=300 E/W) lands inside a
+door's `[offset, offset+80]` whenever `offset ∈ [280,360]` (N/S) / `[220,300]` (E/W) — a real subset of
+the door offset range `[100, dim-180]` — so a door-blind midpoint DOES land switches on doorways in a
+meaningful fraction of rooms, proving the guard bites.
+
+### Test plan (added to placement.test.js, beside the maze-wall live-path guard)
+- Add a `placeSwitchDoorBlind` helper (bare wall midpoint, no door/maze awareness) — the faithful
+  pre-fix path, used ONLY for the non-vacuous proof.
+- New guard: across `forEachRoom` (real worldgen rooms), the LIVE switch footprint never overlaps any
+  `doorEntryZones(room, WALL_THICKNESS)` rect; anti-vacuous asserts: switches actually placed (>0) AND
+  some were placed on walls that have a door (the at-risk population >0). Sibling proof: the door-blind
+  midpoint path produces >0 footprints overlapping a door entry zone (RED proof of non-vacuity).
+- Sweep size: a few hundred seeds (PBT consensus: 100 baseline, hundreds–thousands for a strong
+  invariant), kept deterministic (fixed seed loop) and fast.
+
+### Sources (web)
+- fast-check / Hypothesis: numRuns/max_examples default 100; deterministic seeded sweeps; hundreds–
+  thousands for strong invariant guards; pin the seed list.
+- G-Research "Metatesting Your Property-Based Tests"; Wikipedia "Mutation testing"; Criteo "Intro to
+  PBT": run the OLD buggy algorithm in the harness + coverage/population assertions to prove non-vacuity.
+- gdbooks AABB-AABB; Hamaluik/MDN Minkowski difference; noonat Intersection Tests 2D: test the FOOTPRINT
+  via half-extent inflation, not the center; inclusive/exclusive boundary convention is a deliberate choice.
+- Merge-intervals / sweep-line (LeetCode 56; USACO; Dilip Kumar): largest-free-gap edge cases — fully
+  covering interval (degenerate fallback), end gaps (corner margins), touching intervals.

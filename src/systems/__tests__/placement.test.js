@@ -169,6 +169,22 @@ const placeSwitchOld = (room, mazeRects, startWall) => {
   return { wall, pos: computeSwitchPosition(room, wall, WALL_THICKNESS) };
 };
 
+// Frozen reconstruction of the ORIGINAL pre-fix inline GameScene formula: a bare
+// wall midpoint with NO door/maze awareness at all. Unlike placeSwitchOld (which
+// still routes through the door-aware computeSwitchPosition/freeWallSpan), this is
+// genuinely door-blind -- so it lands switches on doorways and proves the door
+// guard below is non-vacuous.
+const SWITCH_INSET = WALL_THICKNESS + 4;
+const placeSwitchDoorBlind = (room, mazeRects, startWall) => {
+  const wall = SWITCH_WALLS[startWall];
+  if (wall === 'north') return { wall, pos: { x: room.x + room.width / 2, y: room.y + SWITCH_INSET } };
+  if (wall === 'south') return { wall, pos: { x: room.x + room.width / 2, y: room.y + room.height - SWITCH_INSET } };
+  if (wall === 'east') return { wall, pos: { x: room.x + room.width - SWITCH_INSET, y: room.y + room.height / 2 } };
+  return { wall, pos: { x: room.x + SWITCH_INSET, y: room.y + room.height / 2 } };
+};
+
+const wallHasDoor = (room, wall) => (room.doors || []).some(d => d.wall === wall);
+
 describe('light switch placement clears interior maze walls (Known bug)', () => {
   it('never lands a switch footprint inside an interior maze wall, across the generated world', () => {
     let switches = 0;
@@ -199,5 +215,48 @@ describe('light switch placement clears interior maze walls (Known bug)', () => 
       if (mazeRects.some(wall => overlaps(fp, wall))) inMazeWall++;
     });
     expect(inMazeWall).toBeGreaterThan(0);
+  });
+});
+
+// The spec's "light switches can spawn on doors and open entrances" bug. A door's
+// opening is a doorEntryZones rectangle (the gap the player walks through); a
+// switch mounted across it would block the doorway / read as floating in the gap.
+// room.doors already holds EVERY opening (worldgen has no separate "open entrance"
+// concept), so avoiding doorEntryZones covers both. This guards the LIVE runtime
+// path (chooseSwitchWall + maze-aware computeSwitchPosition, as GameScene runs it)
+// over the real generation pipeline; the door tests in lightswitch.test.js use only
+// synthetic rooms (the dead createSwitchStates path and direct computeSwitchPosition
+// unit checks), never real worldgen rooms with the live wall selection / RNG.
+describe('light switch placement clears doorways / open entrances (Known bug)', () => {
+  it('never lands a switch footprint on a door entry zone, across the generated world', () => {
+    let switches = 0;
+    let onDoorWall = 0;
+    let onDoorZone = 0;
+    forEachRoom(80, 8, ({ room, mazeRects }, seed, gx, gy) => {
+      const placed = placeSwitch(seed, gx, gy, room, mazeRects, placeSwitchLive);
+      if (!placed) return;
+      switches++;
+      if (wallHasDoor(room, placed.wall)) onDoorWall++;
+      const fp = switchFootprint(placed.pos);
+      const zones = doorEntryZones(room, WALL_THICKNESS);
+      if (zones.some(z => overlaps(fp, z))) onDoorZone++;
+    });
+    expect(switches).toBeGreaterThan(0);
+    // Anti-vacuous: switches actually land on walls that HAVE a door (the at-risk
+    // population), so a world that stopped generating doors can't pass trivially.
+    expect(onDoorWall).toBeGreaterThan(0);
+    expect(onDoorZone, `${onDoorZone}/${switches} switches on a doorway`).toBe(0);
+  });
+
+  it('the door-blind midpoint placement DID land switches on doorways (proves the guard is non-vacuous)', () => {
+    let onDoorZone = 0;
+    forEachRoom(80, 8, ({ room, mazeRects }, seed, gx, gy) => {
+      const placed = placeSwitch(seed, gx, gy, room, mazeRects, placeSwitchDoorBlind);
+      if (!placed) return;
+      const fp = switchFootprint(placed.pos);
+      const zones = doorEntryZones(room, WALL_THICKNESS);
+      if (zones.some(z => overlaps(fp, z))) onDoorZone++;
+    });
+    expect(onDoorZone).toBeGreaterThan(0);
   });
 });
