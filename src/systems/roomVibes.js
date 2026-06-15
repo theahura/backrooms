@@ -64,7 +64,8 @@ export const ZONES = {
         // a bank of vending machines against a wall
         [
           { type: 'vending_machine', dx: 0, dy: 0 },
-          { type: 'vending_machine', dx: 72, dy: 0 },
+          { type: 'vending_machine', dx: 30, dy: 0 },
+          { type: 'vending_machine', dx: 60, dy: 0 },
         ],
       ],
       singletons: ['couch', 'table', 'vending_machine', 'potted_plant', 'payphone', 'shopping_cart'],
@@ -166,7 +167,7 @@ export const ZONES = {
         // a row of lockers down a wall
         [
           { type: 'lockers', dx: 0, dy: 0 },
-          { type: 'lockers', dx: 110, dy: 0 },
+          { type: 'lockers', dx: 50, dy: 0 },
         ],
       ],
       singletons: ['desk', 'lockers', 'vending_machine', 'water_cooler'],

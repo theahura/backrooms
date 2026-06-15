@@ -130,11 +130,46 @@ function removeBackground(img) {
   }
 }
 
+// Trim transparent margins so the object fills the frame. For an upright
+// billboard this makes setDisplaySize control the real object size and lands the
+// object's feet on the sprite's bottom edge (where the contact shadow is drawn).
+function autoCropContent(img) {
+  const { data, width, height } = img.bitmap;
+  let minX = width, minY = height, maxX = -1, maxY = -1;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (data[(y * width + x) * 4 + 3] > 8) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < minX || maxY < minY) return;
+  img.crop({ x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 });
+}
+
 async function postProcess(buffer, entry) {
   const img = await Jimp.fromBuffer(buffer);
   img.resize({ w: entry.width, h: entry.height, mode: ResizeStrategy.BILINEAR });
   if (entry.chroma !== false) removeBackground(img);
+  if (entry.crop) autoCropContent(img);
   return img.getBuffer('image/png');
+}
+
+async function recropExisting(entries) {
+  for (const entry of entries) {
+    if (!entry.crop) continue;
+    for (const k of entry.keys) {
+      const p = new URL(`${k}.png`, OUT_DIR);
+      if (!fs.existsSync(p)) continue;
+      const img = await Jimp.read(p);
+      autoCropContent(img);
+      fs.writeFileSync(p, await img.getBuffer('image/png'));
+    }
+    console.log('recropped', entry.id);
+  }
 }
 
 async function rekeyExisting(entries) {
@@ -159,6 +194,7 @@ async function main() {
   const args = process.argv.slice(2);
   const force = args.includes('--force');
   const rekey = args.includes('--rekey');
+  const recrop = args.includes('--recrop');
   const ids = args.filter((a) => !a.startsWith('--'));
   fs.mkdirSync(OUT_DIR, { recursive: true });
 
@@ -168,6 +204,13 @@ async function main() {
   if (rekey) {
     await rekeyExisting(entries);
     console.log('\nRekey done.');
+    return;
+  }
+
+  // --recrop trims transparent margins on already-downloaded crop:true PNGs (no API).
+  if (recrop) {
+    await recropExisting(entries);
+    console.log('\nRecrop done.');
     return;
   }
 

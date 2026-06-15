@@ -112,12 +112,12 @@ export const ART_MANIFEST = [
   // 2.5D upright billboard props (front elevation, stood up in the world). Sizes
   // are the VISUAL standee size; the in-game floor footprint is smaller (see
   // FURNITURE_TYPES). Keys are furniture_<type> so they load like any furniture.
-  { id: 'furniture_vending_machine', prompt: prop('A tall glass-front vending machine stocked with cans and snacks behind the glass, faint cold internal glow'), width: 128, height: 240, keys: ['furniture_vending_machine'] },
-  { id: 'furniture_lockers', prompt: prop('A bank of four tall dented metal school lockers standing side by side, institutional grey-green, with vents and latches'), width: 208, height: 224, keys: ['furniture_lockers'] },
-  { id: 'furniture_water_cooler', prompt: prop('An office water cooler dispenser with an upturned pale blue water jug on top and two spigots'), width: 80, height: 168, keys: ['furniture_water_cooler'] },
-  { id: 'furniture_potted_plant', prompt: prop('A tall potted ficus house plant with slightly wilted dark green leaves in a plain ceramic pot'), width: 112, height: 208, keys: ['furniture_potted_plant'] },
-  { id: 'furniture_payphone', prompt: prop('A wall payphone on a short metal stand with a coin box, keypad and hanging handset'), width: 88, height: 192, keys: ['furniture_payphone'] },
-  { id: 'furniture_shopping_cart', prompt: prop('An abandoned metal wire shopping cart with a child seat, slightly rusted, seen from the front'), width: 120, height: 144, keys: ['furniture_shopping_cart'] },
+  { id: 'furniture_vending_machine', prompt: prop('A tall glass-front vending machine stocked with cans and snacks behind the glass, faint cold internal glow'), width: 128, height: 240, crop: true, keys: ['furniture_vending_machine'] },
+  { id: 'furniture_lockers', prompt: prop('A bank of four tall dented metal school lockers standing side by side, institutional grey-green, with vents and latches'), width: 208, height: 224, crop: true, keys: ['furniture_lockers'] },
+  { id: 'furniture_water_cooler', prompt: prop('A short squat office water cooler about waist height, a clear pale-blue water jug resting on a boxy white dispenser base with two spigots, the whole unit shorter than a person and fairly wide'), width: 110, height: 132, crop: true, keys: ['furniture_water_cooler'] },
+  { id: 'furniture_potted_plant', prompt: prop('A tall potted ficus house plant with slightly wilted dark green leaves in a plain ceramic pot'), width: 112, height: 208, crop: true, keys: ['furniture_potted_plant'] },
+  { id: 'furniture_payphone', prompt: prop('A wall payphone on a short metal stand with a coin box, keypad and hanging handset'), width: 88, height: 192, crop: true, keys: ['furniture_payphone'] },
+  { id: 'furniture_shopping_cart', prompt: prop('An abandoned metal wire shopping cart seen from the front, the wide wire basket facing the viewer, wider than it is tall, about hip height, slightly rusted'), width: 150, height: 110, crop: true, keys: ['furniture_shopping_cart'] },
 
   // Weapon pickups.
   { id: 'pickup_pistol', prompt: sprite('A handgun pistol weapon lying on the ground seen from directly straight above'), width: 28, height: 20, keys: ['pickup_pistol'] },

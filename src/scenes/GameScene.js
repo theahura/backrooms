@@ -706,8 +706,13 @@ export class GameScene extends Phaser.Scene {
       if (def && def.upright && this.textures.exists(spriteKey)) {
         const cx = item.x + item.width / 2;
         const baseY = item.y + item.height; // the standee plants on the footprint's near edge
-        this.shadowGfx.fillStyle(0x000000, 0.32);
-        this.shadowGfx.fillEllipse(cx, baseY, item.width * 1.1, item.height * 0.7);
+        // Soft contact shadow sized to the VISIBLE base width (cropped art lands
+        // the prop's feet on baseY), so it grounds the standee without the wide
+        // smear the old footprint-based ellipse produced.
+        const shadowW = def.spriteWidth * 0.9;
+        const shadowH = Math.max(7, def.spriteWidth * 0.32);
+        this.shadowGfx.fillStyle(0x000000, 0.3);
+        this.shadowGfx.fillEllipse(cx, baseY, shadowW, shadowH);
         const sprite = this.add.sprite(cx, baseY, spriteKey);
         sprite.setOrigin(0.5, 1);
         sprite.setDisplaySize(def.spriteWidth, def.spriteHeight);

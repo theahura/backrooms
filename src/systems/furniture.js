@@ -22,12 +22,17 @@ export const FURNITURE_TYPES = {
   // rise above a small floor footprint (the width/height here). `spriteWidth`/
   // `spriteHeight` are the VISUAL size; placement, collision and light occlusion
   // all use the footprint, so a tall standee never becomes a tall wall.
-  vending_machine: { width: 50, height: 28, color: 0x39506a, canHide: false, blocksLight: true, upright: true, spriteWidth: 54, spriteHeight: 100 },
-  lockers: { width: 96, height: 26, color: 0x5d7064, canHide: false, blocksLight: true, upright: true, spriteWidth: 100, spriteHeight: 92 },
-  water_cooler: { width: 30, height: 24, color: 0x9ab2c2, canHide: false, blocksLight: false, upright: true, spriteWidth: 34, spriteHeight: 66 },
-  potted_plant: { width: 42, height: 32, color: 0x4a5a36, canHide: false, blocksLight: false, upright: true, spriteWidth: 50, spriteHeight: 88 },
-  payphone: { width: 30, height: 22, color: 0x46464f, canHide: false, blocksLight: false, upright: true, spriteWidth: 36, spriteHeight: 76 },
-  shopping_cart: { width: 48, height: 30, color: 0x8a8a92, canHide: false, blocksLight: false, upright: true, spriteWidth: 54, spriteHeight: 58 },
+  // spriteHeight is sized against the ~48px player (a person): a vending machine
+  // and lockers stand about person-height, a tall ficus a little over, while a
+  // water cooler, payphone and shopping cart are clearly shorter than a person.
+  // spriteWidth keeps the cropped art's aspect so nothing is stretched; the
+  // footprint (width/height) is the floor the prop occupies for collision.
+  vending_machine: { width: 22, height: 14, color: 0x39506a, canHide: false, blocksLight: true, upright: true, spriteWidth: 25, spriteHeight: 52 },
+  lockers: { width: 44, height: 14, color: 0x5d7064, canHide: false, blocksLight: true, upright: true, spriteWidth: 47, spriteHeight: 50 },
+  water_cooler: { width: 15, height: 12, color: 0x9ab2c2, canHide: false, blocksLight: false, upright: true, spriteWidth: 15, spriteHeight: 36 },
+  potted_plant: { width: 18, height: 16, color: 0x4a5a36, canHide: false, blocksLight: false, upright: true, spriteWidth: 19, spriteHeight: 56 },
+  payphone: { width: 13, height: 10, color: 0x46464f, canHide: false, blocksLight: false, upright: true, spriteWidth: 13, spriteHeight: 40 },
+  shopping_cart: { width: 24, height: 16, color: 0x8a8a92, canHide: false, blocksLight: false, upright: true, spriteWidth: 25, spriteHeight: 34 },
 };
 
 // Draw-order key for an upright billboard prop. Props sort among themselves by
