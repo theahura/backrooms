@@ -248,5 +248,57 @@ if (stairCheck.skipped) {
   }
 }
 
+// Rift re-entry guard: the dimensional-transition effect must fire ONCE per real
+// crossing through the rift opening and must NOT replay when the player loops
+// through a room north/south of the store (which shares the store's east-edge X)
+// and then re-enters the rift's horizontal band. Drives the REAL state machine.
+const riftCheck = await gameEval(page, () => {
+  const s = window.__game.scene.getScene('GameScene');
+  if (!s.riftRect || !s.entranceRoom) return { skipped: 'no rift this run' };
+  const room = s.entranceRoom;
+  const edge = room.x + room.width;
+  const riftY = s.riftRect.y + s.riftRect.height / 2;
+
+  const saved = { floor: s.currentFloor, x: s.player.x, y: s.player.y, crossed: s.riftCrossed };
+  let flashes = 0;
+  const realFlash = s.cameras.main.flash.bind(s.cameras.main);
+  s.cameras.main.flash = (...a) => { flashes++; return realFlash(...a); };
+  const drive = (x, y) => { s.player.x = x; s.player.y = y; s.updateRiftCrossing(); };
+
+  s.currentFloor = 0;
+  s.riftCrossed = false;
+  drive(room.x + 100, riftY);   // inside the store, not yet crossed
+  drive(edge + 10, riftY);      // genuine crossing -> flash #1
+  const afterCross = flashes;
+
+  // Loop to room (0,-1): west of the east edge but NORTH of the store (NOT the
+  // store). This must not re-arm the one-shot.
+  drive(edge - 100, room.y - 300);
+  const rearmedSpuriously = s.riftCrossed === false;
+  drive(edge + 10, riftY);      // re-enter the band east -> must NOT flash again
+  const afterReentry = flashes;
+
+  // Non-vacuous control: a genuine return into the store re-arms, and re-crossing
+  // DOES replay -- proving the guard isn't passing by simply never firing.
+  drive(room.x + 100, riftY);
+  drive(edge + 10, riftY);
+  const afterRealReentry = flashes;
+
+  s.cameras.main.flash = realFlash;
+  s.currentFloor = saved.floor; s.player.x = saved.x; s.player.y = saved.y; s.riftCrossed = saved.crossed;
+  return { afterCross, afterReentry, afterRealReentry, rearmedSpuriously };
+});
+if (riftCheck.skipped) {
+  log(`rift re-entry check skipped (${riftCheck.skipped})`);
+} else {
+  log(`rift re-entry: afterCross=${riftCheck.afterCross} afterReentry=${riftCheck.afterReentry} afterRealReentry=${riftCheck.afterRealReentry}`);
+  if (riftCheck.afterReentry !== riftCheck.afterCross || riftCheck.rearmedSpuriously) {
+    log('FAIL: the rift transition replayed after looping through a column-0 neighbor (spurious re-arm)');
+  }
+  if (riftCheck.afterRealReentry <= riftCheck.afterReentry) {
+    log('FAIL: a genuine return-to-store + re-cross did NOT replay the transition (guard is vacuous)');
+  }
+}
+
 await browser.close();
 log('done');
