@@ -5,7 +5,7 @@ import { generateMazeWalls, wallRectSegments, wallRectOccluders, doorEntryZones 
 import { getRoomVibe } from '../systems/roomVibes.js';
 import { getFlashlightPolygon, filterSegmentsNear, filterRectsNear, FLASHLIGHT_RANGE } from '../systems/visibility.js';
 import { createRoomWalls } from '../systems/room.js';
-import { STAIR_SIZE, STAIR_MARGIN, getStairTopLeft, stairKeepOut, getStairLandingPosition, stairLandingKeepOut } from '../systems/stairs.js';
+import { STAIR_SIZE, STAIR_MARGIN, getStairTopLeft, stairKeepOut, getStairLandingPosition, stairLandingKeepOut, STAIR_LANDING_SAFE_RADIUS, roomInteriorBounds, relocateEnemyFromLanding } from '../systems/stairs.js';
 import { getRoomAt, roomsWithinRadius, hasStairDown, localDistance, isRiftDoor, ROOM_WIDTH, ROOM_HEIGHT } from '../systems/worldgen.js';
 import { mulberry32 } from '../systems/random.js';
 import { generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_CHASE, DETECTION_RANGE } from '../systems/enemy.js';
@@ -1694,6 +1694,12 @@ export class GameScene extends Phaser.Scene {
 
       player.body.reset(destX, destY);
       player.body.enable = true;
+      // Clear a safe zone around the landing: relocate any enemy standing near
+      // the spot the player materializes on, so they are never attacked the
+      // instant they arrive while still facing away (the spawn keep-out only
+      // covers spawning; enemies wander). Runs inside the teleport freeze, so
+      // moving the sprite bodies sticks.
+      this.clearLandingZone(destRoom, destX, destY);
       // Snap the camera onto the landing while the screen is still black.
       // The camera smooth-follows the player (startFollow lerp 0.1); without an
       // explicit snap it would ease in across the (huge, cross-floor) teleport
@@ -1709,6 +1715,40 @@ export class GameScene extends Phaser.Scene {
         this.isTeleporting = false;
       });
     });
+  }
+
+  // Push any enemy currently inside the stair-landing safe radius out to its
+  // boundary (clamped into the room interior), so the player never materializes
+  // within attack range of an enemy. The spatial push is the actual protection
+  // (an idle enemy with line of sight re-chases next frame, so resetting to idle
+  // only cancels in-progress chase/stale navigation, it is not a safety
+  // guarantee). isPointInRoom is floor-safe because floors are offset by a large
+  // world-Y gap, so other-floor enemies never match destRoom. The pure relocation
+  // geometry lives in stairs.js; here we apply it to the live sprite bodies. Move
+  // the sprite via body.reset -- updateEnemies overwrites enemyState.x/y from the
+  // sprite each frame, so setting only the state would be clobbered.
+  clearLandingZone(destRoom, landingX, landingY) {
+    const landing = { x: landingX, y: landingY };
+    const bounds = roomInteriorBounds(destRoom, WALL_THICKNESS);
+    for (const es of this.enemyStates) {
+      if (!isPointInRoom(destRoom, es.sprite.x, es.sprite.y)) continue;
+      const moved = relocateEnemyFromLanding(
+        { x: es.sprite.x, y: es.sprite.y }, landing, bounds, STAIR_LANDING_SAFE_RADIUS
+      );
+      if (moved.x === es.sprite.x && moved.y === es.sprite.y) continue;
+      es.sprite.body.reset(moved.x, moved.y);
+      es.x = moved.x;
+      es.y = moved.y;
+      es.lastKnownX = moved.x;
+      es.lastKnownY = moved.y;
+      es.velocityX = 0;
+      es.velocityY = 0;
+      es.state = 'idle';
+      es.searchTimer = 0;
+      es.wanderTimer = 0;
+      es.targetDoorway = null;
+      es.currentRoomId = destRoom.id;
+    }
   }
 
   onDayComplete(newLocation) {

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { generateMultiFloorLevel, getFloorBounds, getFloorRoomCounts, FLOOR_Y_OFFSET, STAIR_SIZE, STAIR_MARGIN, getStairTopLeft, stairKeepOut, getStairLandingPosition, stairLandingKeepOut } from '../stairs.js';
+import { generateMultiFloorLevel, getFloorBounds, getFloorRoomCounts, FLOOR_Y_OFFSET, STAIR_SIZE, STAIR_MARGIN, getStairTopLeft, stairKeepOut, getStairLandingPosition, stairLandingKeepOut, STAIR_LANDING_SAFE_RADIUS, pushOutsideRadius, roomInteriorBounds, relocateEnemyFromLanding } from '../stairs.js';
+import { getRoomAt } from '../worldgen.js';
 import { generateMazeWalls } from '../maze.js';
 import { generateRoomFurniture } from '../furniture.js';
 
@@ -411,5 +412,122 @@ describe('stair landing keep-out clears the spot the player materializes on', ()
       for (const f of furniture) expect(overlaps(f, keep), `furniture, seed ${seed}`).toBe(false);
     }
     expect(wallsSeen).toBeGreaterThan(0);
+  });
+});
+
+describe('pushOutsideRadius', () => {
+  const center = { x: 1000, y: 1000 };
+
+  it('projects an interior point onto the ring at exactly the radius, preserving direction', () => {
+    const point = { x: 1030, y: 1040 };
+    const r = 200;
+    const out = pushOutsideRadius(center, point, r);
+    expect(Math.hypot(out.x - center.x, out.y - center.y)).toBeCloseTo(r, 6);
+    const angIn = Math.atan2(point.y - center.y, point.x - center.x);
+    const angOut = Math.atan2(out.y - center.y, out.x - center.x);
+    expect(angOut).toBeCloseTo(angIn, 6);
+  });
+
+  it('maps a point already beyond the radius back onto the ring at the radius', () => {
+    const out = pushOutsideRadius(center, { x: 1500, y: 1000 }, 200);
+    expect(Math.hypot(out.x - center.x, out.y - center.y)).toBeCloseTo(200, 6);
+  });
+
+  it('falls back to straight below the center when the point coincides with it (never NaN)', () => {
+    const out = pushOutsideRadius(center, { x: 1000, y: 1000 }, 150);
+    expect(out).toEqual({ x: 1000, y: 1150 });
+  });
+});
+
+describe('relocateEnemyFromLanding', () => {
+  const room = { x: 0, y: 0, width: 720, height: 600 };
+  const bounds = roomInteriorBounds(room, 16);
+  const landing = getStairLandingPosition(room);
+  const R = 160;
+  const distTo = (p) => Math.hypot(p.x - landing.x, p.y - landing.y);
+
+  it('leaves an enemy already outside the safe radius exactly where it is', () => {
+    const far = { x: bounds.minX, y: bounds.minY };
+    expect(distTo(far)).toBeGreaterThan(R);
+    expect(relocateEnemyFromLanding(far, landing, bounds, R)).toEqual(far);
+  });
+
+  it('pushes an enemy inside the safe radius out to at least the radius, staying within the interior', () => {
+    const near = { x: landing.x + 10, y: landing.y - 25 };
+    expect(distTo(near)).toBeLessThan(R);
+    const out = relocateEnemyFromLanding(near, landing, bounds, R);
+    expect(distTo(out)).toBeGreaterThanOrEqual(R - 1e-6);
+    expect(out.x).toBeGreaterThanOrEqual(bounds.minX);
+    expect(out.x).toBeLessThanOrEqual(bounds.maxX);
+    expect(out.y).toBeGreaterThanOrEqual(bounds.minY);
+    expect(out.y).toBeLessThanOrEqual(bounds.maxY);
+  });
+
+  it('keeps a pushed-out enemy on its own bearing when the room has room (never flings it to a corner)', () => {
+    const near = { x: landing.x + 30, y: landing.y - 30 };
+    expect(distTo(near)).toBeLessThan(R);
+    const out = relocateEnemyFromLanding(near, landing, bounds, R);
+    const angIn = Math.atan2(near.y - landing.y, near.x - landing.x);
+    const angOut = Math.atan2(out.y - landing.y, out.x - landing.x);
+    expect(angOut).toBeCloseTo(angIn, 5);
+    expect(distTo(out)).toBeCloseTo(R, 4);
+  });
+
+  it('relocates to the farthest interior corner when the room is too small to clear the radius', () => {
+    const smallBounds = { minX: 0, minY: 0, maxX: 100, maxY: 100 };
+    const landingPt = { x: 70, y: 70 };
+    const enemy = { x: 75, y: 72 };
+    const bigR = 500;
+    const out = relocateEnemyFromLanding(enemy, landingPt, smallBounds, bigR);
+    const corners = [
+      { x: 0, y: 0 }, { x: 100, y: 0 }, { x: 0, y: 100 }, { x: 100, y: 100 },
+    ];
+    expect(corners).toContainEqual(out);
+    const farthest = corners.reduce((a, b) =>
+      Math.hypot(b.x - landingPt.x, b.y - landingPt.y) > Math.hypot(a.x - landingPt.x, a.y - landingPt.y) ? b : a);
+    expect(out).toEqual(farthest);
+  });
+});
+
+describe('stair-arrival safe zone over a real generated room', () => {
+  it('clears every enemy out of the safe radius (or to a corner if the room cannot) and never out of the interior', () => {
+    const room = getRoomAt(12345, 1, 1);
+    const bounds = roomInteriorBounds(room, 16);
+    const landing = getStairLandingPosition(room);
+    const R = STAIR_LANDING_SAFE_RADIUS;
+    const distTo = (p) => Math.hypot(p.x - landing.x, p.y - landing.y);
+
+    const positions = [];
+    for (let i = 0; i <= 10; i++) {
+      for (let j = 0; j <= 10; j++) {
+        positions.push({
+          x: bounds.minX + (bounds.maxX - bounds.minX) * (i / 10),
+          y: bounds.minY + (bounds.maxY - bounds.minY) * (j / 10),
+        });
+      }
+    }
+
+    const corners = [
+      { x: bounds.minX, y: bounds.minY }, { x: bounds.maxX, y: bounds.minY },
+      { x: bounds.minX, y: bounds.maxY }, { x: bounds.maxX, y: bounds.maxY },
+    ];
+
+    const startedInside = positions.filter(p => distTo(p) < R);
+    expect(startedInside.length).toBeGreaterThan(0);
+
+    for (const p of positions) {
+      const out = relocateEnemyFromLanding(p, landing, bounds, R);
+      expect(out.x).toBeGreaterThanOrEqual(bounds.minX);
+      expect(out.x).toBeLessThanOrEqual(bounds.maxX);
+      expect(out.y).toBeGreaterThanOrEqual(bounds.minY);
+      expect(out.y).toBeLessThanOrEqual(bounds.maxY);
+      if (distTo(p) >= R) {
+        expect(out).toEqual(p);
+      } else {
+        const cleared = distTo(out) >= R - 1e-6;
+        const isCorner = corners.some(c => c.x === out.x && c.y === out.y);
+        expect(cleared || isCorner).toBe(true);
+      }
+    }
   });
 });

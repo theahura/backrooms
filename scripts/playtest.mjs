@@ -237,7 +237,31 @@ const stairCheck = await gameEval(page, async () => {
 
   const sx = (s.player.x - cam.scrollX - cx) * cam.zoom + cx;
   const sy = (s.player.y - cam.scrollY - cy) * cam.zoom + cy;
-  return { floor: s.currentFloor, offCentrePx: Math.round(Math.hypot(sx - cx, sy - cy)) };
+
+  // Stair-landing safe zone: no enemy may stand on the spot the player lands on.
+  // Drop a real enemy right next to the landing and run the actual
+  // clearLandingZone -- it must be pushed out (non-vacuous: it starts inside).
+  const px = s.player.x, py = s.player.y;
+  const destRoom = s.level.rooms.find(r =>
+    px >= r.x && px <= r.x + r.width && py >= r.y && py <= r.y + r.height);
+  let safeZone = { skipped: 'no dest room' };
+  if (destRoom) {
+    const inRoom = s.enemyStates.filter(es =>
+      es.sprite.x >= destRoom.x && es.sprite.x <= destRoom.x + destRoom.width &&
+      es.sprite.y >= destRoom.y && es.sprite.y <= destRoom.y + destRoom.height);
+    if (inRoom.length === 0) {
+      safeZone = { skipped: 'no enemy in dest room to probe' };
+    } else {
+      const es = inRoom[0];
+      es.sprite.body.reset(px + 30, py - 30);
+      es.x = es.sprite.x; es.y = es.sprite.y;
+      const beforePx = Math.round(Math.hypot(es.sprite.x - px, es.sprite.y - py));
+      s.clearLandingZone(destRoom, px, py);
+      const afterPx = Math.round(Math.hypot(es.sprite.x - px, es.sprite.y - py));
+      safeZone = { beforePx, afterPx };
+    }
+  }
+  return { floor: s.currentFloor, offCentrePx: Math.round(Math.hypot(sx - cx, sy - cy)), safeZone };
 });
 if (stairCheck.skipped) {
   log(`stair check skipped (${stairCheck.skipped})`);
@@ -245,6 +269,14 @@ if (stairCheck.skipped) {
   log(`stair landing: floor=${stairCheck.floor} offCentre=${stairCheck.offCentrePx}px`);
   if (stairCheck.offCentrePx > 20) {
     log(`FAIL: after a stair the player is ${stairCheck.offCentrePx}px off-centre (camera did not snap)`);
+  }
+  const sz = stairCheck.safeZone;
+  if (sz.skipped) {
+    log(`stair safe zone check skipped (${sz.skipped})`);
+  } else {
+    log(`stair safe zone: enemy ${sz.beforePx}px -> ${sz.afterPx}px from landing`);
+    if (sz.beforePx >= 150) log('FAIL: safe-zone probe enemy did not start near the landing (guard is vacuous)');
+    if (sz.afterPx < 150) log(`FAIL: clearLandingZone left an enemy ${sz.afterPx}px from the landing (inside the safe zone)`);
   }
 }
 

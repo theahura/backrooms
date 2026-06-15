@@ -4107,3 +4107,74 @@ Phaser `Camera.flash(duration, r, g, b)` has no max-alpha cap — the overlay al
 starts fully opaque and fades. To cap opacity you must draw your own overlay (here a
 depth-ordered Graphics filling the worldView), which also lets it sit BELOW the
 player so the player is never covered — the key to "never disappears".
+
+## Stair-Landing Safe Zone (Known bug: instant attack on stair arrival)
+
+### The bug, root-caused
+Spec "Known bugs": *"stairs ... the player ... become vulnerable to attack
+immediately after spawning even when the player cannot see the character yet. I
+think there should be a limitation on enemies spawning or being near stairs."*
+
+Prior work resolved the *"dropped in a random place"* half (centered landing via
+`getStairLandingPosition`, camera snap in 3885ecf) and added a 1200ms arrival
+invulnerability + a 60px enemy spawn keep-out (99f6d70). What remained: the
+keep-out only stops enemies *spawning* on the tiny 60px landing footprint at
+room-activation time. Enemies **move**, so by the time the player materializes an
+enemy can be standing right next to the landing and deals contact damage the
+instant the 1.2s invuln expires — while the flashlight still faces away. The
+spec's word *"being"* (not just "spawning") near stairs is the unaddressed half.
+
+### External research (how games handle teleport/stair arrival safety)
+Two-layer industry pattern: **placement-time exclusion** (no enemy near the
+landing) + **arrival-time enforcement** (sweep the landing on teleport, relocate
+drifters). Plus an optional short **grace/invuln window** (0.3-2.5s, cancel-on-
+attack) as a safety net.
+- **Relocate, don't delete.** Nuclear Throne portals instant-kill all enemies on
+  transition — clean, but only because the portal is a level-clear *reward*. For
+  freely-usable stairs, deleting enemies = a free "clear the room" exploit. Push
+  offenders radially out instead; the encounter is preserved.
+- **Reset aggro on arrival.** Even after relocating, an enemy that already has the
+  player targeted re-closes immediately. Reset relocated enemies to idle so they
+  must re-acquire LOS — mirrors "the player can't see them yet, the enemy
+  shouldn't have perfect knowledge either." (Cogmind's opt-in entry "spawn
+  protection / breathing room"; BoI anchors spawns to geometry never on the
+  player; classic roguelikes use rejection-sampling with a distance check.)
+- **Radial-push geometry:** `d = e - c`; if `|d| >= R` skip; else `e' = c + (d/|d|)*R`;
+  clamp `e'` per-axis to room interior. Edge cases that break naive code: (a)
+  `|d| == 0` (divide-by-zero) → deterministic fallback direction; (b) room too
+  small in the push direction → after clamping `e'` is still inside R → fall back
+  to the farthest interior corner from `c`.
+
+### Codebase mechanics (verified by code-reader subagents)
+- `update()` early-returns while `this.isTeleporting` (GameScene.js:2674), so
+  `updateEnemies` is frozen for the whole teleport. Relocating enemies inside the
+  `camerafadeoutcomplete` callback (isTeleporting still true), right after
+  `player.body.reset(destX, destY)` (GameScene.js:1695), is safe and sticks.
+- `updateEnemies` overwrites `es.x/es.y` from `es.sprite.x/es.sprite.y` at the top
+  of every frame (GameScene.js:1941-1942). So you must move the **sprite**:
+  `es.sprite.body.reset(x, y)` (same call the player landing uses); setting only
+  `es.x/es.y` is clobbered next frame.
+- Select destination-room enemies with `isPointInRoom(destRoom, es.sprite.x,
+  es.sprite.y)` (lightswitch.js:171, already imported in GameScene). `currentRoomId`
+  is stale during the teleport freeze; the point-in-room test on live sprite coords
+  is authoritative. Floors are offset by FLOOR_Y_OFFSET=10000 so other-floor
+  enemies are naturally excluded.
+- `updateEnemyAI` idle→chase fires next frame if player within DETECTION_RANGE=300
+  with LOS (enemy.js:7,134). So `state='idle'` alone is not a safety guarantee —
+  the **spatial push** is the real protection; idle reset just drops in-progress
+  chase + stale nav. Combined with maze-wall LOS breaks + the 1200ms invuln, robust.
+- Interior clamp box matches `generateRoomEnemies`: `WALL_THICKNESS=16`
+  (GameScene.js:51) + margin 40 (enemy.js:63). Clamp relocated enemies to
+  `[x+56, x+W-56] × [y+56, y+H-56]`.
+- For a 720x600 room the landing sits at center+140 (y), so downward clearance is
+  only ~104px — enemies directly below the landing hit the farthest-corner
+  fallback; enemies in the dominant directions push cleanly within radius.
+
+### Decision
+Pure helpers in `stairs.js` (`STAIR_LANDING_SAFE_RADIUS`, `pushOutsideRadius`,
+`roomInteriorBounds`, `relocateEnemyFromLanding` with the corner fallback) —
+unit-tested like the existing landing helpers. Scene wiring in `onStairEnter`
+relocates + idles dest-room enemies inside the safe radius. Keep the existing
+centered landing, camera snap, spawn keep-out, and 1200ms invuln (the time-based
+safety net layered under the new spatial fix). Radius is a named constant for
+playtest tuning (start ~160).
