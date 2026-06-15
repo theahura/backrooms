@@ -4178,3 +4178,86 @@ relocates + idles dest-room enemies inside the safe radius. Keep the existing
 centered landing, camera snap, spawn keep-out, and 1200ms invuln (the time-based
 safety net layered under the new spatial fix). Radius is a named constant for
 playtest tuning (start ~160).
+
+---
+
+## Automatic fluorescent lamps / ceiling lights (loop session 2026-06-15)
+
+**Context:** The 3 spec "Known bugs" (stairs landing/safe-zone, light switches on doors/open
+entrances, being-shot-disappears) are all verified-fixed on `loop` at three layers — 933 unit
+tests, the real-engine Playwright playtest (every bug guard passes), and line-by-line review.
+They remain *listed* only because the fixes live on the unmerged `loop` branch (PR #10) while
+the spec is hand-edited. Next commit per workflow: the clearest unimplemented, bug-adjacent spec
+item — **automatic lamps / fluorescent lights** ("areas that do provide light automatically in
+some rooms"), which also advances the binding "never anything pitch-black under the flashlight".
+
+### Code research (authoritative for implementation)
+- **LIVE world generator is `worldgen.js`** (rooms 720x600, infinite streaming via
+  `getRoomAt(seed, gx, gy)`), NOT legacy `level.js`/`stairs.js` (1200x1000, unused for the live
+  world). `WALL_THICKNESS = 16` (GameScene.js:51, module-local).
+- **Seed-offset registry** (all in use): enemies +10000, items +20000, doors +30000, switches
+  +40000, stairs +50000, weapons +60000, maze +70000, level +80000, lore +90000, alt-exit
+  +100000, roomVibes +130000. **FREE: +110000 and +120000.** No "traps" offset exists. → use
+  `LAMP_SEED_OFFSET = 110000` (named-constant style, like lore/maze/locations/roomVibes).
+- **Pure placement template** = `lightswitch.js createSwitchStates`: `mulberry32(seed + OFFSET)`,
+  iterate rooms, `if (room.id === 0) continue`, `if (rand() >= CHANCE) continue`, push state.
+  Ceiling lamps need NO furniture-overlap avoidance (overhead), so single deterministic position
+  like the switch (no retry loop).
+- **GameScene per-room activation**: `activateRoom(room)` (GameScene.js:324) calls a fixed
+  sequence of `activateRoom*` helpers (≈364-370), guarded by `activatedRoomIds`. Streams rooms
+  one at a time, so each helper RE-SEEDS per cell:
+  `mulberry32(this.floorSeed(room.floor) + OFFSET + room.gridX*131 + room.gridY*977)`
+  (`activateRoomSwitch`, GameScene.js:777). `this.floorSeed(f) = this.levelSeed + f*1000`.
+  Add `activateRoomLamps(room)` + init `this.lampStates = []` in an infra method.
+- **Render hook**: `updateDarkness(time)` (GameScene.js:2619). Lit rooms + spill zones draw into
+  BOTH `maskGraphics` (reveal, 0xffffff) and `lightGraphics` (warm tint 0xffffcc) BEFORE the
+  flashlight early-return `if (!isFlashlightLit(...)) return;` (line 2656). Drawing lamp pools
+  there = always-on regardless of battery. Reuse `drawRadialGlow(gfx,x,y,radius,steps,color,ringAlpha)`
+  (GameScene.js:2612) — stacked concentric `fillCircle`s, centre alpha accumulates bright.
+  Player near-field already calls it twice (mask 0xffffff@0.09, light 0xffffcc@0.003), lines
+  2693-2696. Cull lamps to `cameras.main.worldView`. Other floors are offset +10000 in world-Y
+  so the viewport cull excludes them naturally.
+- **Depth registry**: stairGlow 1, stair/crack 2, items/lore 5, exit 10, furniture/doors/switch
+  50, enemies 60, crackGlow 95 (ADD blend), lightGraphics 99, darkGraphics 100 (masked), bullets
+  150, damageFlash 190, player 200, HUD 1000. → draw lamp fixture as a world graphic at depth ~55
+  (above furniture, below enemies); it sits inside its own pool so the mask reveals it.
+- **Room theme** = `getRoomVibe(room.seed)` (roomVibes.js:206, offset +130000), cached in
+  `this.roomThemes` (GameScene.js:331). 6 vibes: furnitureStore, library, office, spaceship,
+  forest, warehouse. Use vibe to pick a cool vs warm lamp tint (harmonize, avoid monotone).
+- **Determinism/persistence**: world seed minted once per save, persisted (SAVE_VERSION 4). Lamps
+  derive purely from seed → stable day-to-day, NO save-format change, NO version bump. Do NOT
+  seed placement from time/mutable state — only `floorSeed + offset + grid coords`.
+- **Test conventions** (`__tests__/lightswitch.test.js`): vitest `describe/it/expect`; room
+  fixture `{ id, gridX, gridY, x, y, width, height, doors:[], seed }`; assert room-0 skip,
+  determinism (same seed → `toEqual`), different seeds → different, bounds, spawn-rate band over
+  many seeds, NON-VACUOUS (`length > 0` before asserting properties).
+
+### Web research (aesthetic + safety)
+- **Backrooms canon = mono-yellow warm fluorescent** ("fluorescent lights at maximum hum-buzz").
+  Warm lamp emissive ≈ `0xfbf3c8`–`0xf5e6a0`; cast/tint ≈ `0xe8d88a`/`0xffffcc`. Cool clinical
+  white (`0xeaf2ff`) reads as hospital/office — use cool for office/spaceship vibes, warm for the
+  rest, for variety.
+- **Flicker = Quake/Valve light-style string stepped at 10 fps (100ms/char)**. Brightness
+  `(char-'a')/('m'-'a')`, 'a'=0..'m'=1. Canonical fluorescent string
+  `"mmamammmmammamamaaamammma"` = mostly full-bright with rare brief dips. Lerp between chars for
+  smoothness. Make MOST lamps steady; only ~25-30% (the "one bad tube") flicker.
+- **Accessibility (hard rules)**: seizure danger band 3–55 Hz; never strobe >3 flashes/sec over
+  large area. Our model is safe: 10fps steps, rare shallow dips, and a BRIGHTNESS FLOOR (never to
+  black). Keep dips shallow and slow.
+- **Perf**: stacked-circle glow is O(steps) path tessellation/frame ×2 layers; fine for a
+  viewport's worth of lamps with viewport culling. Pre-baked radial texture is the optimization
+  if profiling ever shows a hotspot — NOT needed now (YAGNI).
+
+### Design decisions
+- Pure `src/systems/lamps.js`: `generateRoomLamps(rooms, seed, opts)` → `[{id,roomId,x,y,radius,
+  flicker,phase}]` (one central-ish lamp per lamp-room, seeded inner-box position, `LAMP_CHANCE
+  ≈ 0.3`, `LAMP_RADIUS ≈ 200`, `LAMP_FLICKER_CHANCE ≈ 0.3`). And pure `lampBrightness(lamp,
+  timeMs)` → [FLICKER_FLOOR, 1] (1 when not flickering; Quake string lerped at 100ms otherwise;
+  FLICKER_FLOOR ≈ 0.4). Both deterministic, time only enters brightness (cosmetic), never placement.
+- GameScene: `activateRoomLamps(room)` (re-seed per cell, push lampState, draw static fixture
+  bar at depth 55, tint from vibe); render pools in `updateDarkness` before the flashlight
+  early-return (cull to viewport, ring alpha × `lampBrightness`); lamps provide LIGHT ONLY (no
+  enemy-spawn suppression — that stays the light switch's special property).
+- Playtest guard: position camera/player on a current-floor lamp, force flashlight OFF, spy
+  `drawRadialGlow` → assert it is still called for the lamp position (lamps light regardless of
+  battery), plus a screenshot. Non-vacuous (`lampStates.length > 0`).

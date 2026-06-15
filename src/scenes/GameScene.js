@@ -3,6 +3,7 @@ import { calculateVelocity } from '../systems/movement.js';
 import { generateRoomFurniture, FURNITURE_TYPES, blocksBullets, opaqueBounds, visibleFurnitureRect } from '../systems/furniture.js';
 import { generateMazeWalls, wallRectSegments, wallRectOccluders, doorEntryZones } from '../systems/maze.js';
 import { getRoomVibe } from '../systems/roomVibes.js';
+import { rollRoomLamp, lampBrightness, LAMP_SEED_OFFSET } from '../systems/lamps.js';
 import { getFlashlightPolygon, filterSegmentsNear, filterRectsNear, FLASHLIGHT_RANGE } from '../systems/visibility.js';
 import { createRoomWalls } from '../systems/room.js';
 import { STAIR_SIZE, STAIR_MARGIN, getStairTopLeft, stairKeepOut, getStairLandingPosition, stairLandingKeepOut, STAIR_LANDING_SAFE_RADIUS, roomInteriorBounds, relocateEnemyFromLanding } from '../systems/stairs.js';
@@ -85,6 +86,18 @@ const FLASHLIGHT_MUZZLE_OFFSET = 16;
 // instead of the beam stabbing from a single hard apex point.
 const FLASHLIGHT_NEARFIELD_RADIUS = 50;
 const FLASHLIGHT_NEARFIELD_STEPS = 26;
+
+// Automatic ceiling lamps: a soft circular pool drawn into the reveal mask (so it
+// reads as a hole in the darkness) and the warm-tint layer. Stacked fading rings
+// like the player near-field. Mask alpha is tuned so the pool centre is nearly
+// fully revealed (always-on light) and fades smoothly to the rim.
+const LAMP_GLOW_STEPS = 30;
+const LAMP_MASK_RING_ALPHA = 0.10;
+const LAMP_LIGHT_RING_ALPHA = 0.004;
+// Cool tubes for clinical room vibes, warm fluorescent for the rest.
+const LAMP_TINT_COOL = 0xeaf2ff;
+const LAMP_TINT_WARM = 0xfff2d2;
+const LAMP_COOL_VIBES = new Set(['office', 'spaceship']);
 
 export class GameScene extends Phaser.Scene {
   constructor() {
@@ -222,6 +235,7 @@ export class GameScene extends Phaser.Scene {
     this.createRoomGraphics();
     this.createDoorInfra();
     this.createSwitchInfra();
+    this.createLampInfra();
     this.createItems();
     this.createLoreItems();
     this.createEnemies();
@@ -363,6 +377,7 @@ export class GameScene extends Phaser.Scene {
 
     this.activateRoomDoors(room);
     this.activateRoomSwitch(room, mazeRects);
+    this.activateRoomLamps(room);
     this.activateRoomItems(room, mazeRects);
     this.activateRoomLore(room, mazeRects);
     this.activateRoomEnemies(room, [...stairKeep, ...landingKeep]);
@@ -799,6 +814,43 @@ export class GameScene extends Phaser.Scene {
   onToggleSwitch(switchId) {
     this.switchStates = toggleSwitch(this.switchStates, switchId);
     this.playSound('switch_click');
+  }
+
+  createLampInfra() {
+    this.lampStates = [];
+    this.nextLampId = 0;
+  }
+
+  // Automatic ceiling lamp for this room (rare-ish, seeded per cell so the world
+  // is stable day-to-day). A lamp lights a local pool on its own -- unlike a
+  // light switch it provides light only and does not suppress enemy spawns.
+  // Seeds a per-cell PRNG (offset + grid coords, like activateRoomSwitch) and
+  // defers to the shared rollRoomLamp placement, so the live streamed path uses
+  // the exact formula the pure lamps module's unit tests cover.
+  activateRoomLamps(room) {
+    if (room.id === 0) return;
+    const rand = mulberry32(this.floorSeed(room.floor) + LAMP_SEED_OFFSET + room.gridX * 131 + room.gridY * 977);
+    const placement = rollRoomLamp(room, rand);
+    if (!placement) return;
+
+    const vibe = this.roomThemes.get(room.id);
+    const tint = vibe && LAMP_COOL_VIBES.has(vibe.id) ? LAMP_TINT_COOL : LAMP_TINT_WARM;
+
+    this.lampStates.push({ id: this.nextLampId++, roomId: room.id, ...placement, tint });
+    this.drawLampFixture(placement.x, placement.y, tint);
+  }
+
+  // The fixture itself: a dark troffer housing with two bright fluorescent tubes,
+  // drawn once above the furniture layer. It sits inside its own light pool, so
+  // the darkness mask always reveals it.
+  drawLampFixture(x, y, tint) {
+    const gfx = this.add.graphics();
+    gfx.setDepth(55);
+    gfx.fillStyle(0x26282c, 0.92);
+    gfx.fillRoundedRect(x - 34, y - 11, 68, 22, 4);
+    gfx.fillStyle(tint, 0.9);
+    gfx.fillRoundedRect(x - 30, y - 6, 28, 12, 2);
+    gfx.fillRoundedRect(x + 2, y - 6, 28, 12, 2);
   }
 
   onToggleDoor(doorId) {
@@ -2651,6 +2703,19 @@ export class GameScene extends Phaser.Scene {
         zone.alphas.topLeft * 0.05, zone.alphas.topRight * 0.05,
         zone.alphas.bottomLeft * 0.05, zone.alphas.bottomRight * 0.05);
       this.lightGraphics.fillRect(zone.x, zone.y, zone.width, zone.height);
+    }
+
+    // Automatic ceiling lamps light a local pool regardless of the flashlight or
+    // battery, so they are drawn BEFORE the flashlight early-return. Cull to the
+    // viewport; other floors sit far away in world-Y and fall outside it.
+    for (const lamp of this.lampStates) {
+      if (lamp.x + lamp.radius < view.x || lamp.x - lamp.radius > view.x + view.width ||
+          lamp.y + lamp.radius < view.y || lamp.y - lamp.radius > view.y + view.height) continue;
+      const b = lampBrightness(lamp, time);
+      this.drawRadialGlow(this.maskGraphics, lamp.x, lamp.y, lamp.radius,
+        LAMP_GLOW_STEPS, 0xffffff, LAMP_MASK_RING_ALPHA * b);
+      this.drawRadialGlow(this.lightGraphics, lamp.x, lamp.y, lamp.radius,
+        LAMP_GLOW_STEPS, lamp.tint, LAMP_LIGHT_RING_ALPHA * b);
     }
 
     if (!isFlashlightLit(this.flashlightState)) return;

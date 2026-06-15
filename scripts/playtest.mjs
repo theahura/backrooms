@@ -152,6 +152,18 @@ log(`after crossing: ${JSON.stringify(crossed)}`);
 await page.waitForTimeout(900);
 await shot(page, '04-inside-backrooms');
 
+// Make the player invulnerable for the rest of the scripted run, the instant
+// they enter the backrooms. New Game mints a random world seed, so some runs
+// spawn an enemy right where the player materializes or sweeps; a death tears
+// down GameScene (-> RunSummaryScene) and would crash every downstream check.
+// The shot check below re-enables damage explicitly.
+await gameEval(page, () => {
+  const s = window.__game.scene.getScene('GameScene');
+  if (s && s.combatState) {
+    s.combatState = { ...s.combatState, damageCooldown: Infinity, isDead: false, hp: s.combatState.maxHp };
+  }
+});
+
 // Flashlight sweep: aim around the clock, including the 6-to-8 o'clock arc
 // where the old cone collapsed.
 const sweep = [
@@ -198,11 +210,64 @@ const finalState = await gameEval(page, () => {
 log(`final: ${JSON.stringify(finalState)}`);
 if (finalState.doorOnRift) log('FAIL: a closable door spawned on the rift');
 
+// Spec item: "lamps / fluorescent lights ... areas that do provide light
+// automatically in some rooms." A lamp must light its local pool on its OWN --
+// independent of the flashlight/battery. Drive the REAL render loop: surface a
+// lamp-bearing room, drop the player on the lamp, force the flashlight OFF with a
+// dead battery, and spy the actual drawRadialGlow used to carve the reveal mask.
+// It must still be called at the lamp position (the pool reveals the room with no
+// flashlight). Runs here -- right after exploration, loop reliably live -- before
+// the mutation-heavy stair/rift checks. Non-vacuous: lampStates must be populated.
+const lampCheck = await gameEval(page, async () => {
+  const s = window.__game.scene.getScene('GameScene');
+  if (!s || !s.lampStates || !s.player || !s.player.body) return { skipped: 'GameScene inactive (player died this run)' };
+  // Defensively keep the update loop live so updateDarkness ticks.
+  s.isTeleporting = false; s.dayEnding = false;
+  s.combatState = { ...s.combatState, isDead: false, damageCooldown: Infinity };
+
+  // Exploration above already activated several backrooms rooms (and their lamps).
+  if (s.lampStates.length === 0) return { skipped: 'no lamps generated this seed' };
+
+  const lamp = s.lampStates[0];
+  const room = s.roomsById.get(lamp.roomId);
+  if (room) s.currentFloor = room.floor;
+  const saved = { fx: { ...s.flashlightState }, batt: { ...s.batteryState } };
+  s.player.body.reset(lamp.x, lamp.y);
+  s.cameras.main.centerOn(lamp.x, lamp.y);
+  s.flashlightState = { on: false, hiding: false };
+  s.batteryState = { ...s.batteryState, charge: 0, isDepleted: true };
+
+  let lampGlow = 0;
+  const realGlow = s.drawRadialGlow.bind(s);
+  s.drawRadialGlow = (gfx, x, y, r, steps, color, a) => {
+    if (Math.abs(x - lamp.x) < 0.5 && Math.abs(y - lamp.y) < 0.5) lampGlow++;
+    return realGlow(gfx, x, y, r, steps, color, a);
+  };
+  await new Promise(r => setTimeout(r, 250));
+  const flashlightOn = s.flashlightState.on;
+  s.drawRadialGlow = realGlow;
+  s.flashlightState = saved.fx;
+  s.batteryState = saved.batt;
+
+  return { lamps: s.lampStates.length, lampGlowWhileFlashlightOff: lampGlow, flashlightOn };
+});
+if (lampCheck.skipped) {
+  log(`lamp check skipped (${lampCheck.skipped})`);
+} else {
+  await shot(page, '08-lamp-room');
+  log(`lamps: count=${lampCheck.lamps} glowWhileOff=${lampCheck.lampGlowWhileFlashlightOff} flashlightOn=${lampCheck.flashlightOn}`);
+  if (lampCheck.flashlightOn) log('FAIL: lamp probe did not actually turn the flashlight off (guard is vacuous)');
+  if (lampCheck.lampGlowWhileFlashlightOff <= 0) log('FAIL: a lamp did not light its pool with the flashlight off (auto-light broken)');
+}
+
 // Stair transition: the camera must SNAP onto the landing so the player is
 // revealed dead-centre, never "dropped in a random place nowhere near the
 // stairs" (it smooth-follows otherwise, easing across the cross-floor gap).
 const stairCheck = await gameEval(page, async () => {
   const s = window.__game.scene.getScene('GameScene');
+  if (!window.__game.scene.isActive('GameScene') || !s.cameras || !s.cameras.main) {
+    return { skipped: 'GameScene inactive (player died this run)' };
+  }
   const cam = s.cameras.main;
   const cx = cam.width / 2, cy = cam.height / 2;
 
