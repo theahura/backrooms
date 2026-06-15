@@ -22,12 +22,12 @@ export const FURNITURE_TYPES = {
   // rise above a small floor footprint (the width/height here). `spriteWidth`/
   // `spriteHeight` are the VISUAL size; placement, collision and light occlusion
   // all use the footprint, so a tall standee never becomes a tall wall.
-  vending_machine: { width: 56, height: 30, color: 0x39506a, canHide: false, blocksLight: true, upright: true, spriteWidth: 64, spriteHeight: 120 },
-  lockers: { width: 96, height: 28, color: 0x5d7064, canHide: false, blocksLight: true, upright: true, spriteWidth: 104, spriteHeight: 112 },
-  water_cooler: { width: 32, height: 28, color: 0x9ab2c2, canHide: false, blocksLight: false, upright: true, spriteWidth: 40, spriteHeight: 84 },
-  potted_plant: { width: 40, height: 36, color: 0x4a5a36, canHide: false, blocksLight: false, upright: true, spriteWidth: 56, spriteHeight: 104 },
-  payphone: { width: 36, height: 24, color: 0x46464f, canHide: false, blocksLight: false, upright: true, spriteWidth: 44, spriteHeight: 96 },
-  shopping_cart: { width: 48, height: 32, color: 0x8a8a92, canHide: false, blocksLight: false, upright: true, spriteWidth: 60, spriteHeight: 72 },
+  vending_machine: { width: 50, height: 28, color: 0x39506a, canHide: false, blocksLight: true, upright: true, spriteWidth: 54, spriteHeight: 100 },
+  lockers: { width: 96, height: 26, color: 0x5d7064, canHide: false, blocksLight: true, upright: true, spriteWidth: 100, spriteHeight: 92 },
+  water_cooler: { width: 30, height: 24, color: 0x9ab2c2, canHide: false, blocksLight: false, upright: true, spriteWidth: 34, spriteHeight: 66 },
+  potted_plant: { width: 42, height: 32, color: 0x4a5a36, canHide: false, blocksLight: false, upright: true, spriteWidth: 50, spriteHeight: 88 },
+  payphone: { width: 30, height: 22, color: 0x46464f, canHide: false, blocksLight: false, upright: true, spriteWidth: 36, spriteHeight: 76 },
+  shopping_cart: { width: 48, height: 30, color: 0x8a8a92, canHide: false, blocksLight: false, upright: true, spriteWidth: 54, spriteHeight: 58 },
 };
 
 // Draw-order key for an upright billboard prop. Props sort among themselves by
@@ -46,6 +46,21 @@ export function billboardDepth(feetY, floorBaseY) {
   const local = feetY - floorBaseY + BILLBOARD_DEPTH_HEADROOM;
   const clamped = Math.min(99900, Math.max(0, local));
   return BILLBOARD_DEPTH_BASE + Math.min(BILLBOARD_DEPTH_SPAN, clamped * 0.0001);
+}
+
+// The player is pinned above the darkness/damage layers, so it can't be lowered
+// into the billboard band. Instead, an upright prop draws OVER the player (and
+// thus occludes them) exactly when the player stands behind it and overlaps it
+// on screen -- i.e. the player's feet point falls inside the prop's standee box
+// AND is north of (above) the prop's base. `prop` is { cx, baseY, spriteWidth,
+// spriteHeight }. playerFeetY is the player's ground contact point.
+const PLAYER_OVERLAP_MARGIN = 16;
+
+export function shouldPropDrawOverPlayer(prop, playerX, playerFeetY, playerHalfWidth = PLAYER_OVERLAP_MARGIN) {
+  const halfW = prop.spriteWidth / 2 + playerHalfWidth;
+  const overlapsX = Math.abs(playerX - prop.cx) < halfW;
+  const behindAndOverlapping = playerFeetY < prop.baseY && playerFeetY > prop.baseY - prop.spriteHeight;
+  return overlapsX && behindAndOverlapping;
 }
 
 // Furniture is placed as semantic clusters -- recognizable arrangements left

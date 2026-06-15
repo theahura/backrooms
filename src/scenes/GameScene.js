@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { calculateVelocity } from '../systems/movement.js';
-import { generateRoomFurniture, FURNITURE_TYPES, blocksBullets, opaqueBounds, visibleFurnitureRect, billboardDepth } from '../systems/furniture.js';
+import { generateRoomFurniture, FURNITURE_TYPES, blocksBullets, opaqueBounds, visibleFurnitureRect, billboardDepth, shouldPropDrawOverPlayer } from '../systems/furniture.js';
 import { generateMazeWalls, wallRectSegments, wallRectOccluders, doorEntryZones } from '../systems/maze.js';
 import { getRoomVibe } from '../systems/roomVibes.js';
 import { getZoneAt } from '../systems/zones.js';
@@ -56,6 +56,13 @@ const WALL_THICKNESS = 16;
 // flashlight reveals and the darkness hides them exactly like the flat colours.
 const FLOOR_TEX_DEPTH = 1;
 const WALL_TEX_DEPTH = 2;
+// The player is pinned at depth 200 (above the darkness/damage layers so it is
+// never erased). An upright prop the player is standing BEHIND is bumped just
+// above the player so it occludes them; otherwise it sits in its billboard band.
+const PLAYER_DEPTH = 200;
+const BILLBOARD_OVER_PLAYER_DEPTH = PLAYER_DEPTH + 1;
+// Player ground-contact point relative to its center (48px display) for y-sort.
+const PLAYER_FOOT_Y_OFFSET = 18;
 // Breathing room carved out of maze walls around a room's centered stair, so
 // the stair square is never embedded in (or flush against) an internal wall.
 const STAIR_KEEPOUT_PAD = 16;
@@ -544,6 +551,9 @@ export class GameScene extends Phaser.Scene {
     // (depth 49) and above the floor textures so they ground the standees.
     this.shadowGfx = this.add.graphics();
     this.shadowGfx.setDepth(49);
+    // Upright props that the player can stand behind -- their depth is updated
+    // each frame so they occlude the player when stood behind (see update()).
+    this.billboardProps = [];
     // Per-room floor/wall texture overlays (TileSprites). Like every other
     // per-room object (furniture sprites, wall zones), these are never freed --
     // rooms stay generated for the run. Unlike the single batched roomGfx this is
@@ -701,7 +711,9 @@ export class GameScene extends Phaser.Scene {
         const sprite = this.add.sprite(cx, baseY, spriteKey);
         sprite.setOrigin(0.5, 1);
         sprite.setDisplaySize(def.spriteWidth, def.spriteHeight);
-        sprite.setDepth(billboardDepth(baseY, room.floor * FLOOR_Y_OFFSET));
+        const baseDepth = billboardDepth(baseY, room.floor * FLOOR_Y_OFFSET);
+        sprite.setDepth(baseDepth);
+        this.billboardProps.push({ sprite, cx, baseY, spriteWidth: def.spriteWidth, spriteHeight: def.spriteHeight, baseDepth });
         // Clip the standee where it would rise past the room's interior so a tall
         // prop against the north wall never pokes through into the next room. The
         // crop is in texture space (before display scaling); the base stays put.
@@ -1230,7 +1242,7 @@ export class GameScene extends Phaser.Scene {
     const playerY = spawnRoom.y + spawnRoom.height / 2;
 
     this.player = this.physics.add.sprite(playerX, playerY, 'player_down');
-    this.player.setDepth(200);
+    this.player.setDepth(PLAYER_DEPTH);
     // Directional 64px PNG displayed at 48px (scale 0.75). Arcade bodies are
     // multiplied by the sprite's display scale, so 32 yields a ~24px effective
     // hitbox -- unchanged from the pre-directional 40px/19 player.
@@ -2267,6 +2279,21 @@ export class GameScene extends Phaser.Scene {
     this.applyDirectionalFrame(this.player, 'player', this.playerAngle || 0, isMoving);
   }
 
+  // Y-sort upright props against the player: a prop the player is standing behind
+  // (and overlapping on screen) is bumped above the player so it occludes them;
+  // otherwise it stays in its billboard band below the darkness. Only the prop(s)
+  // the player actually overlaps are lifted, so they sit in the player's own lit
+  // near-field rather than glowing in the dark.
+  updateBillboardOcclusion() {
+    if (!this.player || !this.billboardProps.length) return;
+    const px = this.player.x;
+    const pFeetY = this.player.y + PLAYER_FOOT_Y_OFFSET;
+    for (const prop of this.billboardProps) {
+      const over = shouldPropDrawOverPlayer(prop, px, pFeetY);
+      prop.sprite.setDepth(over ? BILLBOARD_OVER_PLAYER_DEPTH : prop.baseDepth);
+    }
+  }
+
   drawHUD() {
     const gfx = this.hudGraphics;
     gfx.clear();
@@ -2983,6 +3010,7 @@ export class GameScene extends Phaser.Scene {
     this.updateEnemyBullets();
     this.updateEnemies(delta);
     this.drawPlayer();
+    this.updateBillboardOcclusion();
     this.updateDarkness(time);
     this.updateDamageFlash(delta);
     this.updateCrackGlow(time);

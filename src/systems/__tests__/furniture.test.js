@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES, blocksBullets, opaqueBounds, visibleFurnitureRect, billboardDepth } from '../furniture.js';
+import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES, blocksBullets, opaqueBounds, visibleFurnitureRect, billboardDepth, shouldPropDrawOverPlayer } from '../furniture.js';
 import { generateMazeWalls, wallRectSegments, wallRectOccluders } from '../maze.js';
 import { getFlashlightPolygon } from '../visibility.js';
 import { createRoomWalls } from '../room.js';
@@ -534,5 +534,31 @@ describe('upright billboard props', () => {
   it('treats solid upright props as cover that stops gunfire', () => {
     expect(blocksBullets('vending_machine')).toBe(true);
     expect(blocksBullets('lockers')).toBe(true);
+  });
+});
+
+describe('shouldPropDrawOverPlayer', () => {
+  // A tall prop whose floor base is at y=400, standing 120px upward, 100px wide,
+  // centered at x=300. The "occluder zone" is the screen box it covers.
+  const prop = { cx: 300, baseY: 400, spriteWidth: 100, spriteHeight: 120 };
+
+  it('draws over the player when the player stands behind and overlaps it', () => {
+    expect(shouldPropDrawOverPlayer(prop, 300, 350)).toBe(true);
+  });
+
+  it('does NOT draw over the player standing in front of (south of) the base', () => {
+    expect(shouldPropDrawOverPlayer(prop, 300, 450)).toBe(false);
+  });
+
+  it('does NOT draw over a player who is entirely north of the prop top', () => {
+    expect(shouldPropDrawOverPlayer(prop, 300, 250)).toBe(false);
+  });
+
+  it('does NOT draw over a player far to the side (no horizontal overlap)', () => {
+    expect(shouldPropDrawOverPlayer(prop, 500, 350)).toBe(false);
+  });
+
+  it('does NOT draw over a player standing exactly at the front base edge', () => {
+    expect(shouldPropDrawOverPlayer(prop, 300, 400)).toBe(false);
   });
 });
