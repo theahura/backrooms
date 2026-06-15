@@ -73,3 +73,4 @@ Feedback from me (DO NOT CHANGE):
 Known bugs:
 - stairs do not work as expected -- the player is often dropped in a random place nowhere near the stairs themselves, and they become vulnerable to attack immediately after spawning even when the player cannot see the character yet. I think there should be a limitation on enemies spawning or being near stairs, especially when the player goes up / down them
 - light switches can spawn on doors and open entrances, which should not happen
+- being shot makes the player fully disappear

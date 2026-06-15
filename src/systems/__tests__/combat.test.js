@@ -10,6 +10,9 @@ import {
   isEnemyDead,
   getHurtFlash,
   grantInvulnerability,
+  getDamageFlashAlpha,
+  DAMAGE_FLASH_PEAK_ALPHA,
+  DAMAGE_FLASH_DURATION_MS,
   MEDKIT_HEAL_AMOUNT,
 } from '../combat.js';
 
@@ -212,6 +215,40 @@ describe('getHurtFlash', () => {
       // as a multiply tint (setTint), not a flat fill that erases the sprite.
       expect(r).toBeGreaterThan(g);
       expect(r).toBeGreaterThan(b);
+    }
+  });
+});
+
+// The screen-wide red damage tint shown when the player "is shot". The spec bug
+// "being shot makes the player fully disappear" was caused by a FULL-OPACITY
+// red flash overlaying (and erasing) the whole view, player included. The tint
+// alpha must stay well below 1 so the player is always visible through it.
+describe('getDamageFlashAlpha (damage tint never fully obscures the view)', () => {
+  it('peaks at an alpha that is visible but never fully opaque', () => {
+    // The fix: a hit shows a red tint, not a blackout. A positive peak means the
+    // feedback is actually shown; a peak below 1 means it can never hide the player.
+    expect(DAMAGE_FLASH_PEAK_ALPHA).toBeGreaterThan(0);
+    expect(DAMAGE_FLASH_PEAK_ALPHA).toBeLessThan(1);
+  });
+
+  it('is at its peak the instant the player is shot and fades to nothing', () => {
+    expect(getDamageFlashAlpha(DAMAGE_FLASH_DURATION_MS)).toBeCloseTo(DAMAGE_FLASH_PEAK_ALPHA);
+    expect(getDamageFlashAlpha(0)).toBe(0);
+    expect(getDamageFlashAlpha(-50)).toBe(0);
+  });
+
+  it('decays monotonically as the flash time remaining shrinks', () => {
+    const full = getDamageFlashAlpha(DAMAGE_FLASH_DURATION_MS);
+    const half = getDamageFlashAlpha(DAMAGE_FLASH_DURATION_MS / 2);
+    expect(half).toBeGreaterThan(0);
+    expect(half).toBeLessThan(full);
+  });
+
+  it('never exceeds the capped peak for any remaining time', () => {
+    for (let remaining = -100; remaining <= DAMAGE_FLASH_DURATION_MS * 5; remaining += 25) {
+      const a = getDamageFlashAlpha(remaining);
+      expect(a).toBeGreaterThanOrEqual(0);
+      expect(a).toBeLessThanOrEqual(DAMAGE_FLASH_PEAK_ALPHA);
     }
   });
 });

@@ -352,5 +352,36 @@ if (rechargeCheck.skipped) {
   if (gate > 0.0001) log('FAIL: battery recharged while off WITHOUT the upgrade (gate broken)');
 }
 
+// Spec Known bug: "being shot makes the player fully disappear." The old damage
+// feedback was a FULL-OPACITY camera flash (cameras.main.flash(_, 255,0,0)) that
+// overlaid the whole view in solid red, erasing the player. The fix replaces it
+// with a capped-alpha red tint (depth below the player). Drive the REAL damage
+// handler and assert: the hit lands, the capped damage tint fires, NO full-screen
+// camera flash runs, and the player sprite stays visible. Non-vacuous: hpDropped
+// proves a real hit occurred.
+const shotCheck = await gameEval(page, () => {
+  const s = window.__game.scene.getScene('GameScene');
+  if (!s || !s.player) return { skipped: 'no game scene' };
+  const hpBefore = s.combatState.hp;
+  s.combatState.damageCooldown = 0;
+  s.onEnemyBulletHitPlayer({ setActive() {}, setVisible() {}, body: { stop() {} } });
+  const fx = s.cameras.main.flashEffect;
+  return {
+    hpDropped: s.combatState.hp < hpBefore,
+    damageTintActive: s.damageFlashRemaining > 0,
+    cameraFlashRunning: fx ? fx.isRunning : false,
+    playerVisible: s.player.visible && s.player.alpha >= 0.85,
+  };
+});
+if (shotCheck.skipped) {
+  log(`damage-flash check skipped (${shotCheck.skipped})`);
+} else {
+  log(`damage flash: hpDropped=${shotCheck.hpDropped} tint=${shotCheck.damageTintActive} cameraFlash=${shotCheck.cameraFlashRunning} playerVisible=${shotCheck.playerVisible}`);
+  if (!shotCheck.hpDropped) log('FAIL: the shot did not damage the player (guard is vacuous)');
+  if (!shotCheck.damageTintActive) log('FAIL: being shot did not trigger the damage tint');
+  if (shotCheck.cameraFlashRunning) log('FAIL: being shot still triggers a full-screen camera flash (player disappears)');
+  if (!shotCheck.playerVisible) log('FAIL: the player is not visible after being shot');
+}
+
 await browser.close();
 log('done');

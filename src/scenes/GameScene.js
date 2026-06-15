@@ -9,7 +9,7 @@ import { STAIR_SIZE, STAIR_MARGIN, getStairTopLeft, stairKeepOut, getStairLandin
 import { getRoomAt, roomsWithinRadius, hasStairDown, localDistance, isRiftDoor, ROOM_WIDTH, ROOM_HEIGHT } from '../systems/worldgen.js';
 import { mulberry32 } from '../systems/random.js';
 import { generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_CHASE, DETECTION_RANGE } from '../systems/enemy.js';
-import { createCombatState, applyDamage, applyHeal, updateCombat, getHealthFraction, isInvulnerable, grantInvulnerability, applyEnemyDamage, isEnemyDead, getHurtFlash, ENEMY_CONTACT_DAMAGE, ENEMY_MAX_HP, CRAWLER_MAX_HP, SPITTER_MAX_HP, CRAWLER_CONTACT_DAMAGE, SPITTER_CONTACT_DAMAGE, SPITTER_PROJECTILE_DAMAGE, CORPSE_TINT, CORPSE_ALPHA, CORPSE_ANGLE, CORPSE_DEPTH, MEDKIT_HEAL_AMOUNT } from '../systems/combat.js';
+import { createCombatState, applyDamage, applyHeal, updateCombat, getHealthFraction, isInvulnerable, grantInvulnerability, applyEnemyDamage, isEnemyDead, getHurtFlash, getDamageFlashAlpha, DAMAGE_FLASH_DURATION_MS, ENEMY_CONTACT_DAMAGE, ENEMY_MAX_HP, CRAWLER_MAX_HP, SPITTER_MAX_HP, CRAWLER_CONTACT_DAMAGE, SPITTER_CONTACT_DAMAGE, SPITTER_PROJECTILE_DAMAGE, CORPSE_TINT, CORPSE_ALPHA, CORPSE_ANGLE, CORPSE_DEPTH, MEDKIT_HEAL_AMOUNT } from '../systems/combat.js';
 import { createFlashlightState, toggleFlashlight, setFlashlightHiding, isFlashlightLit, updateBatteryWithFlashlight } from '../systems/flashlight.js';
 import { calculateBulletVelocity, calculateShotgunSpread, canFire, updateFireCooldown, isBulletExpired, getBulletVelocityFromAngle, SPITTER_PROJECTILE_SPEED, SPITTER_PROJECTILE_RANGE } from '../systems/shooting.js';
 import { getMoveVelocity, resolveAimAngle, resolveFireIntent, resolveMoveVelocity, detectTouchPrimary, computeTouchLayout } from '../systems/touchControls.js';
@@ -1280,7 +1280,7 @@ export class GameScene extends Phaser.Scene {
     if (this.combatState.hp < before.hp) {
       this.playSound('player_damage');
       this.cameras.main.shake(100, 0.01);
-      this.cameras.main.flash(150, 255, 0, 0);
+      this.triggerDamageFlash();
 
       if (this.combatState.isDead) {
         this.onPlayerDeath();
@@ -1865,7 +1865,7 @@ export class GameScene extends Phaser.Scene {
     if (this.combatState.hp < before.hp) {
       this.playSound('player_damage');
       this.cameras.main.shake(100, 0.01);
-      this.cameras.main.flash(150, 255, 0, 0);
+      this.triggerDamageFlash();
 
       if (this.combatState.isDead) {
         this.onPlayerDeath();
@@ -2526,6 +2526,34 @@ export class GameScene extends Phaser.Scene {
     const bitmapMask = new Phaser.Display.Masks.BitmapMask(this, this.maskGraphics);
     bitmapMask.invertAlpha = true;
     this.darkGraphics.setMask(bitmapMask);
+
+    // Red damage tint shown when the player is shot. Depth 190 keeps it BELOW the
+    // player (200) so it reddens the world for feedback but never covers the
+    // player -- a world object the main camera draws and the HUD camera ignores.
+    this.damageFlashGraphics = this.add.graphics();
+    this.damageFlashGraphics.setDepth(190);
+    this.damageFlashRemaining = 0;
+  }
+
+  // Start the red damage tint (replaces the old full-opacity camera flash that
+  // erased the whole screen, player included, on every hit).
+  triggerDamageFlash() {
+    this.damageFlashRemaining = DAMAGE_FLASH_DURATION_MS;
+  }
+
+  // Repaint the damage tint each frame as it decays. Fills the camera's world
+  // view (so it covers the viewport at any zoom/scroll, like the darkness) at the
+  // capped, fading alpha from getDamageFlashAlpha -- never fully opaque.
+  updateDamageFlash(delta) {
+    this.damageFlashGraphics.clear();
+    if (this.damageFlashRemaining <= 0) return;
+    this.damageFlashRemaining = Math.max(0, this.damageFlashRemaining - delta);
+    const alpha = getDamageFlashAlpha(this.damageFlashRemaining);
+    if (alpha <= 0) return;
+    const v = this.cameras.main.worldView;
+    const pad = 100;
+    this.damageFlashGraphics.fillStyle(0xff0000, alpha);
+    this.damageFlashGraphics.fillRect(v.x - pad, v.y - pad, v.width + pad * 2, v.height + pad * 2);
   }
 
   drawPolygon(gfx, polygon) {
@@ -2753,6 +2781,7 @@ export class GameScene extends Phaser.Scene {
     this.updateEnemies(delta);
     this.drawPlayer();
     this.updateDarkness(time);
+    this.updateDamageFlash(delta);
     this.updateCrackGlow(time);
     this.updateStairGlow(time);
     this.drawDoors();

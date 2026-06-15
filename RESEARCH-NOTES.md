@@ -4067,3 +4067,43 @@ meaningful fraction of rooms, proving the guard bites.
   via half-extent inflation, not the center; inclusive/exclusive boundary convention is a deliberate choice.
 - Merge-intervals / sweep-line (LeetCode 56; USACO; Dilip Kumar): largest-free-gap edge cases — fully
   covering interval (degenerate fallback), end gaps (corner margins), touching intervals.
+
+## 2026-06-14 — Bug: "being shot makes the player fully disappear" (spec-added mid-session)
+
+### Root cause (systematic-debugging; reproduced in the real engine)
+The player SPRITE render is fine (`drawPlayer` floors hurt alpha at 0.85, multiply
+`setTint`, never `setTintFill`/`setVisible(false)`; player depth 200 > darkness 100).
+The disappearance is the DAMAGE FEEDBACK: both damage handlers
+(`onEnemyBulletHitPlayer`, the enemy-contact handler) called
+`cameras.main.flash(150, 255, 0, 0)`. Phaser's camera Flash overlay alpha =
+`(1 − progress)` from the configured max (1.0) → **fully opaque red at the first
+frame**, fading over 150ms, covering the WHOLE main camera. In the near-black
+backrooms that solid red erases everything incl. the player; only the HUD
+(separate uiCamera) survives. Headless probe: flash `rgb [255,0,0]`, alpha tracking
+`(1−progress)`; a held-peak screenshot showed the player invisible under solid red
+while `player.alpha=0.85, player.visible=true` (sprite fine, overlay the culprit).
+
+### Fix: capped-opacity red tint BELOW the player (never covers it)
+- `combat.js`: pure `getDamageFlashAlpha(remainingMs, duration, peak)` +
+  `DAMAGE_FLASH_PEAK_ALPHA=0.45`, `DAMAGE_FLASH_DURATION_MS=200`. Linear fade from
+  the capped peak to 0; clamped `[0, peak]`. Peak ≪ 1 ⇒ tints but never hides.
+- `GameScene`: `damageFlashGraphics` at depth 190 (BELOW player 200, above world /
+  darkness) — a world object the zoomed main camera draws and uiCamera ignores;
+  `triggerDamageFlash()` arms it, `updateDamageFlash(delta)` fills `cameras.main.worldView`
+  (same pattern as the darkness) at the fading alpha each frame. Both damage
+  handlers call `triggerDamageFlash()` instead of the opaque camera flash; shake
+  unchanged; green pickup + rift/day-complete flashes untouched.
+
+### Why this split (codebase convention)
+Pure fade curve is unit-tested (combat.test.js, 4 tests incl. the `0 < peak < 1`
+invariant). GameScene rendering (depth-below-player, worldView fill) is verified by
+the real-engine playtest — the repo has no scene unit tests; a mock-based wiring
+test would be a forbidden mock-test. Added a PERMANENT playtest.mjs guard: real hit
+⇒ capped tint fires, NO full-screen camera flash, player visible (non-vacuous:
+hpDropped proves a real hit).
+
+### Camera-flash mechanics (reference)
+Phaser `Camera.flash(duration, r, g, b)` has no max-alpha cap — the overlay always
+starts fully opaque and fades. To cap opacity you must draw your own overlay (here a
+depth-ordered Graphics filling the worldView), which also lets it sit BELOW the
+player so the player is never covered — the key to "never disappears".
