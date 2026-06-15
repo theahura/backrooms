@@ -1,92 +1,145 @@
 import { mulberry32 } from './random.js';
 
-// A "vibe" is a coherent identity for a room: its colour palette plus the kind
-// of furniture left behind in it. The backrooms still read as liminal because
-// every palette stays desaturated and dim -- but each vibe is its OWN dim,
-// so moving between a library, a derelict ship bay and an overgrown grove feels
-// like crossing into a different place rather than walking the same room twice.
+// A "vibe" is the concrete look of a single room: its floor/wall colours and the
+// furniture left behind in it. Vibes are now organised under ZONES (zones.js):
+// each zone is a liminal-space archetype (a dead mall, an empty hospital, a
+// Shining-style hotel) that spans several adjacent rooms. Every room still gets
+// its OWN shade -- the palette is jittered per room around the zone's base
+// colours -- so a zone reads as one coherent place without every room being an
+// identical copy. This keeps the rooms desaturated and dim (liminal) while
+// deliberately avoiding the old single shared sickly-yellow palette.
 //
-// Vibe is an axis ORTHOGONAL to a room's structural layout (open/maze/columns/
-// ...). A library can be a maze; a forest can be a column hall. The two are
-// drawn from independent seed streams (see VIBE_SEED_OFFSET).
+// Floor/wall textures (tex_<zone>_floor / tex_<zone>_wall) are generated offline
+// by scripts/gen-textures.mjs; GameScene draws them when present and falls back
+// to the flat jittered colours otherwise.
 
 const VIBE_SEED_OFFSET = 130000;
+const JITTER = 8; // per-channel +/- shade variation between rooms of one zone
 
-// Cluster = a recognizable arrangement of furniture (relative dx/dy offsets)
-// that whoever inhabited this kind of space would have left behind. Singletons
-// = stray pieces scattered to fill the room. Both reference furniture.js types.
-export const ROOM_VIBES = {
-  furnitureStore: {
-    id: 'furnitureStore',
-    name: 'Furniture Store',
-    floorColor: 0x6b5a3f,
-    wallColor: 0x7a6a4a,
+function clamp8(v) {
+  return v < 0 ? 0 : v > 255 ? 255 : v;
+}
+
+function jitterColor(base, rand, amt) {
+  const r = clamp8(((base >> 16) & 0xff) + Math.round((rand() - 0.5) * 2 * amt));
+  const g = clamp8(((base >> 8) & 0xff) + Math.round((rand() - 0.5) * 2 * amt));
+  const b = clamp8((base & 0xff) + Math.round((rand() - 0.5) * 2 * amt));
+  return (r << 16) | (g << 8) | b;
+}
+
+// Cluster = a recognizable furniture arrangement (relative dx/dy) that whoever
+// used this kind of space would have left behind. Singletons = stray pieces.
+// Both reference furniture.js types. Bases are chosen so each zone's floor is
+// distinguishable from every other even after jitter.
+export const ZONES = {
+  mall: {
+    id: 'mall',
+    name: 'Dead Mall',
+    floorBase: 0x615a4e,
+    wallBase: 0x837a68,
+    floorTextureKey: 'tex_mall_floor',
+    wallTextureKey: 'tex_mall_wall',
     furniture: {
       clusters: [
-        // showroom waiting row: couches in a line with a coffee table
+        // a row of shuttered storefronts with a kiosk
+        [
+          { type: 'shelf', dx: 0, dy: 0 },
+          { type: 'shelf', dx: 0, dy: 40 },
+          { type: 'shelf', dx: 0, dy: 80 },
+          { type: 'counter', dx: 130, dy: 30 },
+        ],
+        // concourse seating around a planter
         [
           { type: 'couch', dx: 0, dy: 0 },
-          { type: 'couch', dx: 100, dy: 0 },
-          { type: 'couch', dx: 200, dy: 0 },
+          { type: 'couch', dx: 0, dy: 70 },
+          { type: 'table', dx: 110, dy: 20 },
+        ],
+        // food-court tables
+        [
+          { type: 'table', dx: 0, dy: 0 },
+          { type: 'table', dx: 100, dy: 0 },
+          { type: 'table', dx: 0, dy: 70 },
           { type: 'table', dx: 100, dy: 70 },
         ],
-        // checkout counter with display tables
+      ],
+      singletons: ['couch', 'table', 'counter'],
+    },
+  },
+
+  hospital: {
+    id: 'hospital',
+    name: 'Empty Ward',
+    floorBase: 0x44524f,
+    wallBase: 0x5e706c,
+    floorTextureKey: 'tex_hospital_floor',
+    wallTextureKey: 'tex_hospital_wall',
+    furniture: {
+      clusters: [
+        // a row of beds with a supply cabinet
         [
-          { type: 'counter', dx: 0, dy: 0 },
-          { type: 'table', dx: 10, dy: 50 },
-          { type: 'table', dx: 110, dy: 50 },
+          { type: 'bed', dx: 0, dy: 0 },
+          { type: 'bed', dx: 0, dy: 80 },
+          { type: 'closet', dx: 110, dy: 0 },
         ],
-        // staged bedroom set
+        // nurse station
+        [
+          { type: 'desk', dx: 0, dy: 0 },
+          { type: 'desk', dx: 70, dy: 0 },
+          { type: 'counter', dx: 0, dy: 60 },
+        ],
+        // supply corner
+        [
+          { type: 'closet', dx: 0, dy: 0 },
+          { type: 'closet', dx: 60, dy: 0 },
+          { type: 'shelf', dx: 0, dy: 80 },
+        ],
+      ],
+      singletons: ['bed', 'closet', 'desk'],
+    },
+  },
+
+  hotel: {
+    id: 'hotel',
+    name: 'Overlook Halls',
+    floorBase: 0x53402c,
+    wallBase: 0x6f4636,
+    floorTextureKey: 'tex_hotel_floor',
+    wallTextureKey: 'tex_hotel_wall',
+    furniture: {
+      clusters: [
+        // a guest room set
         [
           { type: 'bed', dx: 0, dy: 0 },
           { type: 'armoire', dx: 110, dy: 0 },
           { type: 'closet', dx: 110, dy: 80 },
         ],
-      ],
-      singletons: ['couch', 'table', 'armoire'],
-    },
-  },
-
-  library: {
-    id: 'library',
-    name: 'Library',
-    floorColor: 0x3f4a3a,
-    wallColor: 0x4e5a44,
-    furniture: {
-      clusters: [
-        // reading corner: a wall of bookcases with a desk pulled up
+        // lobby lounge
         [
-          { type: 'bookcase', dx: 0, dy: 0 },
-          { type: 'bookcase', dx: 40, dy: 0 },
-          { type: 'bookcase', dx: 80, dy: 0 },
-          { type: 'desk', dx: 30, dy: 95 },
+          { type: 'couch', dx: 0, dy: 0 },
+          { type: 'couch', dx: 0, dy: 70 },
+          { type: 'table', dx: 110, dy: 20 },
         ],
-        // book stacks aisle
+        // vanity nook
         [
-          { type: 'shelf', dx: 0, dy: 0 },
-          { type: 'shelf', dx: 0, dy: 50 },
-          { type: 'shelf', dx: 0, dy: 100 },
-          { type: 'closet', dx: 120, dy: 30 },
-        ],
-        // study table flanked by stacks
-        [
-          { type: 'table', dx: 0, dy: 0 },
-          { type: 'bookcase', dx: 110, dy: 0 },
-          { type: 'bookcase', dx: 150, dy: 0 },
+          { type: 'desk', dx: 0, dy: 0 },
+          { type: 'armoire', dx: 80, dy: 0 },
+          { type: 'table', dx: 0, dy: 60 },
         ],
       ],
-      singletons: ['bookcase', 'desk', 'table'],
+      singletons: ['bed', 'armoire', 'couch'],
     },
   },
 
   office: {
     id: 'office',
-    name: 'Office',
-    floorColor: 0x3c4450,
-    wallColor: 0x4a5360,
+    name: 'Cubicle Maze',
+    floorBase: 0x685b39,
+    wallBase: 0x847848,
+    floorTextureKey: 'tex_office_floor',
+    wallTextureKey: 'tex_office_wall',
     furniture: {
       clusters: [
-        // office pod: a grid of desks all facing the same way
+        // a pod of desks all facing one way
         [
           { type: 'desk', dx: 0, dy: 0 },
           { type: 'desk', dx: 90, dy: 0 },
@@ -99,78 +152,24 @@ export const ROOM_VIBES = {
           { type: 'couch', dx: 0, dy: 70 },
           { type: 'couch', dx: 110, dy: 70 },
         ],
+        // supply corner
+        [
+          { type: 'closet', dx: 0, dy: 0 },
+          { type: 'closet', dx: 60, dy: 0 },
+          { type: 'shelf', dx: 0, dy: 80 },
+        ],
       ],
       singletons: ['desk', 'closet', 'table'],
     },
   },
 
-  spaceship: {
-    id: 'spaceship',
-    name: 'Derelict Ship',
-    floorColor: 0x35454a,
-    wallColor: 0x44585e,
-    furniture: {
-      clusters: [
-        // control bank: stacked consoles with a equipment locker
-        [
-          { type: 'console', dx: 0, dy: 0 },
-          { type: 'console', dx: 0, dy: 60 },
-          { type: 'closet', dx: 120, dy: 10 },
-        ],
-        // cryo pod bay
-        [
-          { type: 'pod', dx: 0, dy: 0 },
-          { type: 'pod', dx: 70, dy: 0 },
-          { type: 'pod', dx: 140, dy: 0 },
-        ],
-        // maintenance corner: vents beside a console
-        [
-          { type: 'vent', dx: 0, dy: 0 },
-          { type: 'vent', dx: 50, dy: 0 },
-          { type: 'console', dx: 0, dy: 60 },
-        ],
-      ],
-      singletons: ['pod', 'console', 'vent'],
-    },
-  },
-
-  forest: {
-    id: 'forest',
-    name: 'Overgrowth',
-    floorColor: 0x36402e,
-    wallColor: 0x445030,
-    furniture: {
-      clusters: [
-        // grove: a stand of trees with a boulder
-        [
-          { type: 'tree', dx: 0, dy: 0 },
-          { type: 'tree', dx: 90, dy: 10 },
-          { type: 'tree', dx: 180, dy: 0 },
-          { type: 'rock', dx: 90, dy: 90 },
-        ],
-        // thicket: dense brush guarded by a tree
-        [
-          { type: 'bush', dx: 0, dy: 0 },
-          { type: 'bush', dx: 70, dy: 0 },
-          { type: 'bush', dx: 140, dy: 0 },
-          { type: 'tree', dx: 70, dy: 60 },
-        ],
-        // rocky clearing
-        [
-          { type: 'rock', dx: 0, dy: 0 },
-          { type: 'rock', dx: 80, dy: 0 },
-          { type: 'bush', dx: 40, dy: 70 },
-        ],
-      ],
-      singletons: ['tree', 'rock', 'bush'],
-    },
-  },
-
   warehouse: {
     id: 'warehouse',
-    name: 'Warehouse',
-    floorColor: 0x453a2c,
-    wallColor: 0x544734,
+    name: 'Storeroom',
+    floorBase: 0x40372a,
+    wallBase: 0x5a4c38,
+    floorTextureKey: 'tex_warehouse_floor',
+    wallTextureKey: 'tex_warehouse_wall',
     furniture: {
       clusters: [
         // storage aisle
@@ -199,12 +198,19 @@ export const ROOM_VIBES = {
   },
 };
 
-const VIBE_IDS = Object.keys(ROOM_VIBES);
-
-// Deterministic, independent of getRoomType (different seed offset), so the
-// same structural layout can wear any vibe.
-export function getRoomVibe(seed) {
+// Resolve a concrete per-room vibe for a zone: the zone's identity plus a
+// per-room jittered shade of its palette. `seed` is the room's content seed, so
+// each room in a zone gets a stable but distinct shade.
+export function getRoomVibe(zoneId, seed) {
+  const zone = ZONES[zoneId] || ZONES.office;
   const rand = mulberry32(seed + VIBE_SEED_OFFSET);
-  const index = Math.floor(rand() * VIBE_IDS.length);
-  return ROOM_VIBES[VIBE_IDS[index]];
+  return {
+    id: zone.id,
+    name: zone.name,
+    floorColor: jitterColor(zone.floorBase, rand, JITTER),
+    wallColor: jitterColor(zone.wallBase, rand, JITTER),
+    floorTextureKey: zone.floorTextureKey,
+    wallTextureKey: zone.wallTextureKey,
+    furniture: zone.furniture,
+  };
 }

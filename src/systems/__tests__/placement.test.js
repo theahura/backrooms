@@ -4,6 +4,7 @@ import { generateMazeWalls, doorEntryZones, getRoomType } from '../maze.js';
 import { generateRoomFurniture } from '../furniture.js';
 import { generateRoomEnemies } from '../enemy.js';
 import { getRoomVibe } from '../roomVibes.js';
+import { getZoneAt } from '../zones.js';
 import { stairKeepOut, stairLandingKeepOut, STAIR_SIZE, STAIR_MARGIN } from '../stairs.js';
 import { computeSwitchPosition, chooseSwitchWall, SWITCH_HALF_W, SWITCH_HALF_H } from '../lightswitch.js';
 import { mulberry32 } from '../random.js';
@@ -31,7 +32,7 @@ function placeRoom(seed, gx, gy) {
     ? generateMazeWalls(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed, room.doors, [...stairKeep, ...landingKeep])
     : [];
   const furnitureObstacles = [...mazeRects, ...doorEntryZones(room, WALL_THICKNESS), ...landingKeep];
-  const vibe = getRoomVibe(room.seed);
+  const vibe = getRoomVibe(getZoneAt(seed, gx, gy), room.seed);
   const furniture = entrance
     ? []
     : generateRoomFurniture(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed, vibe.furniture, furnitureObstacles);

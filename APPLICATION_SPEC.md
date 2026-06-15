@@ -69,9 +69,8 @@ Feedback from me (DO NOT CHANGE):
 - the rooms themselves should have sounds for various things in them. We should have more variety (and more detail) for the various kinds of things that can be in given rooms, and some of them should make sounds of their own
 - we should add lamps / flourescent lights to the game, areas that do provide light automatically in some rooms
   - note: the lamp light should be limited to the room it is in. It should not leak over walls into rooms that the player has not yet been to, for example
+  - the lamps and lights can also be _glows_ that come from things that should glow
 - add a rechargeable battery to the game store (it should be very expensive)
 
 Known bugs:
-- stairs do not work as expected -- the player is often dropped in a random place nowhere near the stairs themselves, and they become vulnerable to attack immediately after spawning even when the player cannot see the character yet. I think there should be a limitation on enemies spawning or being near stairs, especially when the player goes up / down them
-- light switches can spawn on doors and open entrances, which should not happen
-- being shot makes the player fully disappear
+- NA

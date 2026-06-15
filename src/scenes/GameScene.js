@@ -3,6 +3,7 @@ import { calculateVelocity } from '../systems/movement.js';
 import { generateRoomFurniture, FURNITURE_TYPES, blocksBullets, opaqueBounds, visibleFurnitureRect } from '../systems/furniture.js';
 import { generateMazeWalls, wallRectSegments, wallRectOccluders, doorEntryZones } from '../systems/maze.js';
 import { getRoomVibe } from '../systems/roomVibes.js';
+import { getZoneAt } from '../systems/zones.js';
 import { rollRoomLamp, lampBrightness, LAMP_SEED_OFFSET } from '../systems/lamps.js';
 import { getFlashlightPolygon, filterSegmentsNear, filterRectsNear, FLASHLIGHT_RANGE } from '../systems/visibility.js';
 import { createRoomWalls } from '../systems/room.js';
@@ -50,6 +51,11 @@ const SPRITE_PNGS = import.meta.glob('../assets/sprites/*.png', {
 });
 
 const WALL_THICKNESS = 16;
+// Zone floor/wall textures (when generated) overlay the flat colour base. They
+// sit below furniture (depth 50) and the darkness layer (depth 100), so the
+// flashlight reveals and the darkness hides them exactly like the flat colours.
+const FLOOR_TEX_DEPTH = 1;
+const WALL_TEX_DEPTH = 2;
 // Breathing room carved out of maze walls around a room's centered stair, so
 // the stair square is never embedded in (or flush against) an internal wall.
 const STAIR_KEEPOUT_PAD = 16;
@@ -94,10 +100,11 @@ const FLASHLIGHT_NEARFIELD_STEPS = 26;
 const LAMP_GLOW_STEPS = 30;
 const LAMP_MASK_RING_ALPHA = 0.10;
 const LAMP_LIGHT_RING_ALPHA = 0.004;
-// Cool tubes for clinical room vibes, warm fluorescent for the rest.
+// Cool fluorescent tubes for the clinical/institutional zones, warm sconce light
+// for the hotel (the Overlook's corridors are never daylit).
 const LAMP_TINT_COOL = 0xeaf2ff;
 const LAMP_TINT_WARM = 0xfff2d2;
-const LAMP_COOL_VIBES = new Set(['office', 'spaceship']);
+const LAMP_COOL_VIBES = new Set(['office', 'hospital', 'mall', 'warehouse']);
 
 export class GameScene extends Phaser.Scene {
   constructor() {
@@ -342,7 +349,9 @@ export class GameScene extends Phaser.Scene {
     this.level.rooms.push(room);
     this.roomsById.set(room.id, room);
 
-    const theme = room.id === 0 ? this.activeLocationData : getRoomVibe(room.seed);
+    const zoneId = room.id === 0 ? 'store' : getZoneAt(this.floorSeed(room.floor), room.gridX, room.gridY);
+    room.zoneId = zoneId;
+    const theme = room.id === 0 ? this.activeLocationData : getRoomVibe(zoneId, room.seed);
     this.roomThemes.set(room.id, theme);
 
     this.drawRoom(this.roomGfx, room, theme);
@@ -374,6 +383,7 @@ export class GameScene extends Phaser.Scene {
       this.renderRoomMaze(this.roomGfx, mazeRects, theme);
     }
     this.drawRoomDoorways(this.roomGfx, room, theme);
+    this.applyRoomTextures(room, theme, mazeRects);
 
     this.activateRoomDoors(room);
     this.activateRoomSwitch(room, mazeRects);
@@ -530,6 +540,66 @@ export class GameScene extends Phaser.Scene {
     this.roomGfx = this.add.graphics();
     this.furnitureGfx = this.add.graphics();
     this.furnitureGfx.setDepth(50);
+    // Per-room floor/wall texture overlays (TileSprites). Like every other
+    // per-room object (furniture sprites, wall zones), these are never freed --
+    // rooms stay generated for the run. Unlike the single batched roomGfx this is
+    // one object per textured rect, so the count grows with exploration; if long
+    // sessions ever bog down, bake each room's textures into one RenderTexture.
+    this.roomTileSprites = [];
+  }
+
+  // Wall-band rectangles for a room's four perimeter edges, split at doorways so
+  // the gaps stay open (the floor texture shows through them). Mirrors the
+  // door-aware split used for physics walls.
+  wallBandRects(room) {
+    const t = WALL_THICKNESS;
+    const rects = [];
+    const split = (length, doors) => {
+      const sorted = [...doors].sort((a, b) => a.offset - b.offset);
+      const segs = [];
+      let cursor = 0;
+      for (const d of sorted) {
+        if (d.offset > cursor) segs.push([cursor, d.offset - cursor]);
+        cursor = d.offset + d.width;
+      }
+      if (cursor < length) segs.push([cursor, length - cursor]);
+      return segs;
+    };
+    const north = room.doors.filter(d => d.wall === 'north');
+    const south = room.doors.filter(d => d.wall === 'south');
+    const east = room.doors.filter(d => d.wall === 'east');
+    const west = room.doors.filter(d => d.wall === 'west');
+    for (const [s, len] of split(room.width, north)) rects.push({ x: room.x + s, y: room.y, width: len, height: t });
+    for (const [s, len] of split(room.width, south)) rects.push({ x: room.x + s, y: room.y + room.height - t, width: len, height: t });
+    for (const [s, len] of split(room.height, west)) rects.push({ x: room.x, y: room.y + s, width: t, height: len });
+    for (const [s, len] of split(room.height, east)) rects.push({ x: room.x + room.width - t, y: room.y + s, width: t, height: len });
+    return rects;
+  }
+
+  // Overlay the zone's tileable floor/wall textures on top of the flat-colour
+  // base drawn by drawRoom/renderRoomMaze. Tiling is aligned to world space so a
+  // multi-room zone reads as one continuous floor. No-ops (leaving the flat
+  // colours) when a zone has no generated texture, so it degrades gracefully.
+  applyRoomTextures(room, theme, mazeRects) {
+    const floorKey = theme.floorTextureKey;
+    const wallKey = theme.wallTextureKey;
+    const hasFloor = floorKey && this.textures.exists(floorKey);
+    const hasWall = wallKey && this.textures.exists(wallKey);
+    if (!hasFloor && !hasWall) return;
+
+    const tile = (key, x, y, w, h, depth) => {
+      const ts = this.add.tileSprite(x, y, w, h, key).setOrigin(0, 0).setDepth(depth);
+      ts.setTilePosition(x, y);
+      this.roomTileSprites.push(ts);
+    };
+
+    if (hasFloor) {
+      tile(floorKey, room.x, room.y, room.width, room.height, FLOOR_TEX_DEPTH);
+    }
+    if (hasWall) {
+      for (const r of this.wallBandRects(room)) tile(wallKey, r.x, r.y, r.width, r.height, WALL_TEX_DEPTH);
+      for (const r of mazeRects) tile(wallKey, r.x, r.y, r.width, r.height, WALL_TEX_DEPTH);
+    }
   }
 
   drawRoom(gfx, room, theme) {

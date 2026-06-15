@@ -17,7 +17,7 @@ const DOOR_MIN_OFFSET = 100;
 const DOOR_PROB = 0.62;
 const STAIR_PROB = 0.08;
 
-function hashU32(seed, gx, gy, salt) {
+export function hashU32(seed, gx, gy, salt) {
   let h = (seed | 0) ^ 0x9e3779b9;
   h = Math.imul(h ^ ((gx | 0) + 0x85ebca6b), 0xcc9e2d51);
   h = Math.imul(h ^ ((gy | 0) + 0x165667b1), 0x1b873593);
