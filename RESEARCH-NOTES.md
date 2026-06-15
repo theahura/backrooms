@@ -3865,3 +3865,75 @@ read nowhere else (confirmed: 5 sites, all in init + this method).
   fixtures, boundary assertions, mirror the `isThroughRift` block) AND add a PERMANENT real-engine
   guard to `playtest.mjs` (drive the bug path, assert no spurious second flash; non-vacuous: assert a
   genuine in-store return + re-cross DOES re-flash). Precedent: the stair-landing playtest guard.
+
+---
+
+# Rechargeable Battery store upgrade (spec "things to implement": "add a rechargeable battery to the game store (it should be very expensive)")
+
+## Status / why this commit
+All five APPLICATION_SPEC "Known bugs" were independently RE-VERIFIED fixed in the real engine this
+run (playtest.mjs guards: stair offCentre=0px, rift afterCross=1/afterReentry=1/afterRealReentry=2;
+throwaway deep probe: 0 zones embedded in walls across 836 furniture/5 stairs/83 items/27 lore vs 911
+wall rects, hurt minAlpha=0.85 never invisible, 0 of 16 live switches on a door; 0 console errors) and
+each already has a PERMANENT guard (combat.test.js hurt-alpha floor, lightswitch.test.js no-switch-on-
+door across seeds, placement.test.js no-enemy-on-stair, startroom.test.js + playtest.mjs rift). So the
+literal "fix the bugs" task is complete; per YAGNI we do NOT fabricate a fix for a clean area. Next
+appropriate commit = the still-unimplemented spec item. Enemy proximity/attack sounds are already
+wired (audio.js getEnemySoundEvent + getDistanceVolume via GameScene.playSoundAtDistance), so the
+cleanest genuinely-missing item is the rechargeable battery.
+
+## Design (research-backed): recharge while the flashlight is OFF
+The flashlight already drains while ON and can be turned OFF to conserve (spec line 51); a "rechargeable
+battery" most naturally EXTENDS that toggle into off-to-recharge. Web research (Alan Wake, Half-Life 2,
+Lethal Company, Dark Souls stamina, TV Tropes "Ten-Second Flashlight", Lost Garden faucet/drain):
+- Recharge-while-off is a well-established, tension-PRESERVING pattern, BUT only when recharge is
+  SLOWER than drain so the player still spends most time in the dark. The cautionary tale is Alan
+  Wake 2: free illumination + generous auto-recharge "undermines tension." HL2's flashlight (drains
+  fast / recharges ~1:1, forcing you to wait in pitch black) is the canonical good version.
+- Recommended rate: recharge ≈ 1/3 of the drain rate (genre cluster 1/3–1/2; horror skews harsher).
+  At 1/3, every 1s of light regained costs ~3s of darkness (3:1 dark:light) — the tension floor holds
+  and toggle-cheese is impossible (a balanced on/off cycle nets −2/3·drain, always a loss), so NO
+  anti-toggle delay is needed (YAGNI). A full empty→full off-recharge takes ~450s of darkness.
+- A sub-100% cap (e.g. 80%) and a recharge delay were considered and REJECTED per YAGNI: the spec asks
+  only for "a rechargeable battery (very expensive)"; the 3:1 ratio + being blind-while-charging + the
+  natural maxCharge clamp already preserve the threat. Consumable spares (+30, instant) remain useful
+  because waiting 450s in the dark with enemies is far worse than a spare.
+
+## Pricing: "very expensive"
+Meta-progression capstone pricing (Hades Mirror, Rogue Legacy inflation): a strong one-time unlock =
+several full runs of currency. Existing top prices: minimap 3000, startingRifle 2000. Chosen cost
+2500 — clearly "very expensive" (above the starting weapons, below only the minimap), a clear capstone
+goal. One-time unlock modeled like minimap/startingPistol: maxLevel:1, costs:[2500], base:0, perLevel:1.
+
+## Wiring map (code research, all file:line confirmed)
+The upgrade system is fully data-driven, so the change is small and mostly additive:
+1. shop.js UPGRADES: append `{ id:'rechargeBattery', name:'Rechargeable Battery',
+   description:'Battery slowly recharges while the flashlight is off', maxLevel:1, costs:[2500],
+   base:0, perLevel:1 }`. Auto-flows into createShopState (seeds level 0), ShopScene (renders by
+   iterating UPGRADES), persistence (shopState.upgrades saved/loaded wholesale; the {...defaults,
+   ...saved} merge in GameScene.init/ShopScene.init defaults old saves to 0). NO SAVE_VERSION bump
+   (version is 4; bumping would reject old saves). art.js shopIconKey auto-derives shop_icon_
+   rechargeBattery; missing PNG → row renders icon-less, no crash.
+2. battery.js: add `BATTERY_RECHARGE_PER_MS = BATTERY_MAX / 450000` (= BATTERY_DRAIN_PER_MS/3). Reuse
+   existing rechargeBattery(state, amount) (clamps to maxCharge, recomputes isDepleted → recovers a
+   depleted battery).
+3. flashlight.js: extend `updateBatteryWithFlashlight(batteryState, flashlightState, delta,
+   rechargeRatePerMs = 0)` — when NOT lit and rate>0, return rechargeBattery(state, rate*delta); else
+   unchanged; when lit, drain as before. Default param 0 keeps existing callers/tests byte-identical.
+   (Hiding forces the light off, so a hidden player also recharges — consistent with "off = charging".)
+4. GameScene.js: init() reads `this.hasRechargeBattery = (levels.rechargeBattery||0) > 0` (beside the
+   minimap flag); the per-frame battery update (the single updateBatteryWithFlashlight call site) passes
+   `this.hasRechargeBattery ? BATTERY_RECHARGE_PER_MS : 0`. Import BATTERY_RECHARGE_PER_MS.
+5. art.js: add an ART_MANIFEST icon entry for shop_icon_rechargeBattery so the icon is generated at the
+   next build-time `npm run generate-art` (no API call now; AI art is build-time).
+
+## Tests (codebase split: pure fns unit-tested, GameScene wiring playtest-verified)
+- flashlight.test.js: recharges-while-off (rate>0); does NOT recharge while off by default (rate=0,
+  back-compat); recharges while hiding; still drains while ON even with a rate; clamps to maxCharge;
+  recovers a depleted battery. (mirror the existing off/on/hiding tests at flashlight.test.js:47-67)
+- battery.test.js: BATTERY_RECHARGE_PER_MS > 0 AND < BATTERY_DRAIN_PER_MS (the tension invariant).
+- shop.test.js: describe('rechargeable battery upgrade') — cost 2500 @ lvl0, maxLevel 1, MAX after
+  purchase (getUpgradeCost null @ lvl1), canPurchase gated on gold. (mirror minimap block)
+- art/persistence: no new tests needed; existing all-upgrades iteration tests cover it.
+- GameScene wiring verified by playtest.mjs (buy the upgrade via registry, confirm battery fraction
+  rises while off and falls while on).

@@ -312,3 +312,29 @@ describe('minimap upgrade', () => {
   });
 });
 
+describe('rechargeable battery upgrade', () => {
+  it('is included in default shop state at level 0', () => {
+    const state = createShopState();
+    expect(state.upgrades.rechargeBattery).toBe(0);
+  });
+
+  it('cannot be purchased with insufficient gold (it is very expensive)', () => {
+    const state = addGold(createShopState(), 2499);
+    expect(canPurchase(state, 'rechargeBattery')).toBe(false);
+  });
+
+  it('can be purchased with exactly 2500 gold', () => {
+    let state = addGold(createShopState(), 2500);
+    expect(canPurchase(state, 'rechargeBattery')).toBe(true);
+    state = purchaseUpgrade(state, 'rechargeBattery');
+    expect(state.upgrades.rechargeBattery).toBe(1);
+    expect(state.gold).toBe(0);
+  });
+
+  it('cannot be purchased twice (single tier)', () => {
+    let state = addGold(createShopState(), 9999);
+    state = purchaseUpgrade(state, 'rechargeBattery');
+    expect(canPurchase(state, 'rechargeBattery')).toBe(false);
+  });
+});
+

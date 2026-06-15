@@ -300,5 +300,57 @@ if (riftCheck.skipped) {
   }
 }
 
+// Rechargeable Battery upgrade: with the upgrade owned, the flashlight battery
+// must RECHARGE while the light is OFF and still DRAIN while ON. Drives the REAL
+// per-frame update loop (window.__game ticks update() every frame), so this guards
+// the actual GameScene wiring (init flag -> rate passed to updateBatteryWithFlashlight),
+// not just the pure function. Non-vacuous: a control with the upgrade NOT owned must
+// NOT recharge while off.
+const rechargeCheck = await gameEval(page, async () => {
+  const s = window.__game.scene.getScene('GameScene');
+  if (!s || !s.batteryState) return { skipped: 'no game scene' };
+  const frac = () => s.batteryState.charge / s.batteryState.maxCharge;
+  const settle = (ms) => new Promise(r => setTimeout(r, ms));
+  const drainToHalf = () => { s.batteryState = { ...s.batteryState, charge: s.batteryState.maxCharge * 0.5, isDepleted: false }; };
+
+  s.player.body.stop();
+
+  // OFF + upgrade owned -> recharges.
+  s.hasRechargeBattery = true;
+  drainToHalf();
+  s.flashlightState = { on: false, hiding: false };
+  const offStart = frac();
+  await settle(2000);
+  const offEnd = frac();
+
+  // ON + upgrade owned -> still drains.
+  drainToHalf();
+  s.flashlightState = { on: true, hiding: false };
+  const onStart = frac();
+  await settle(2000);
+  const onEnd = frac();
+
+  // OFF + upgrade NOT owned -> does NOT recharge (gate proof).
+  s.hasRechargeBattery = false;
+  drainToHalf();
+  s.flashlightState = { on: false, hiding: false };
+  const gateStart = frac();
+  await settle(2000);
+  const gateEnd = frac();
+
+  return { offStart, offEnd, onStart, onEnd, gateStart, gateEnd };
+});
+if (rechargeCheck.skipped) {
+  log(`rechargeable battery check skipped (${rechargeCheck.skipped})`);
+} else {
+  const off = rechargeCheck.offEnd - rechargeCheck.offStart;
+  const on = rechargeCheck.onEnd - rechargeCheck.onStart;
+  const gate = rechargeCheck.gateEnd - rechargeCheck.gateStart;
+  log(`rechargeable battery: off +${off.toFixed(4)} on ${on.toFixed(4)} gate ${gate.toFixed(4)}`);
+  if (off <= 0) log('FAIL: battery did not recharge while the flashlight was off (upgrade owned)');
+  if (on >= 0) log('FAIL: battery did not drain while the flashlight was on');
+  if (gate > 0.0001) log('FAIL: battery recharged while off WITHOUT the upgrade (gate broken)');
+}
+
 await browser.close();
 log('done');

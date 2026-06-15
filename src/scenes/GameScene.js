@@ -15,7 +15,7 @@ import { calculateBulletVelocity, calculateShotgunSpread, canFire, updateFireCoo
 import { getMoveVelocity, resolveAimAngle, resolveFireIntent, resolveMoveVelocity, detectTouchPrimary, computeTouchLayout } from '../systems/touchControls.js';
 import { WEAPON_TYPES, createWeaponState, switchWeapon, pickupWeapon, getActiveWeapon, getEffectiveStats, generateRoomWeapon, hasAmmo, consumeAmmo, addAmmo, AMMO_PER_PICKUP } from '../systems/weapons.js';
 import { getEnemyHP, getEnemyDamage } from '../systems/scaling.js';
-import { createBatteryState, getBatteryFraction, getFlashlightConeAngle, shouldFlicker, rechargeBattery, getBatteryHint, BATTERY_RECHARGE_AMOUNT } from '../systems/battery.js';
+import { createBatteryState, getBatteryFraction, getFlashlightConeAngle, shouldFlicker, rechargeBattery, getBatteryHint, BATTERY_RECHARGE_AMOUNT, BATTERY_RECHARGE_PER_MS } from '../systems/battery.js';
 import { generateRoomItems, ITEM_TYPES } from '../systems/items.js';
 import { createInventoryState, pickupItem, useBattery, canPickupItem } from '../systems/inventory.js';
 import { getUpgradeValue, createShopState } from '../systems/shop.js';
@@ -117,6 +117,7 @@ export class GameScene extends Phaser.Scene {
     const hasStartingShotgun = (levels.startingShotgun || 0) > 0;
     const hasStartingRifle = (levels.startingRifle || 0) > 0;
     this.hasMinimap = (levels.minimap || 0) > 0;
+    this.hasRechargeBattery = (levels.rechargeBattery || 0) > 0;
     this.weaponState = createWeaponState({
       startingPistol: hasStartingPistol,
       startingShotgun: hasStartingShotgun,
@@ -2695,7 +2696,7 @@ export class GameScene extends Phaser.Scene {
     this.player.setVelocity(velocity.x, velocity.y);
 
     this.combatState = updateCombat(this.combatState, delta);
-    this.batteryState = updateBatteryWithFlashlight(this.batteryState, this.flashlightState, delta);
+    this.batteryState = updateBatteryWithFlashlight(this.batteryState, this.flashlightState, delta, this.hasRechargeBattery ? BATTERY_RECHARGE_PER_MS : 0);
     this.fireCooldown = updateFireCooldown(this.fireCooldown, delta);
 
     const fireButtonDown = this.touchMode ? this.isFireHeld() : false;

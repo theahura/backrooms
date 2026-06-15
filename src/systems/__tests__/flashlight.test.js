@@ -6,7 +6,7 @@ import {
   isFlashlightLit,
   updateBatteryWithFlashlight,
 } from '../flashlight.js';
-import { createBatteryState, getBatteryFraction } from '../battery.js';
+import { createBatteryState, updateBattery, getBatteryFraction, BATTERY_RECHARGE_PER_MS } from '../battery.js';
 
 describe('flashlight toggle', () => {
   it('starts lit', () => {
@@ -63,5 +63,52 @@ describe('battery drain gating', () => {
     const hiding = setFlashlightHiding(createFlashlightState(), true);
     const after = updateBatteryWithFlashlight(battery, hiding, 60000);
     expect(getBatteryFraction(after)).toBe(getBatteryFraction(battery));
+  });
+});
+
+describe('battery recharge while the light is off (rechargeable battery upgrade)', () => {
+  const RATE = BATTERY_RECHARGE_PER_MS;
+
+  it('recharges the battery while the light is off when a recharge rate is supplied', () => {
+    const drained = updateBattery(createBatteryState(), 60000);
+    const off = toggleFlashlight(createFlashlightState());
+    const after = updateBatteryWithFlashlight(drained, off, 30000, RATE);
+    expect(getBatteryFraction(after)).toBeGreaterThan(getBatteryFraction(drained));
+  });
+
+  it('does NOT recharge while off when no recharge rate is supplied (default behavior)', () => {
+    const drained = updateBattery(createBatteryState(), 60000);
+    const off = toggleFlashlight(createFlashlightState());
+    const after = updateBatteryWithFlashlight(drained, off, 30000);
+    expect(getBatteryFraction(after)).toBe(getBatteryFraction(drained));
+  });
+
+  it('recharges while hiding (the light is forced off) when a recharge rate is supplied', () => {
+    const drained = updateBattery(createBatteryState(), 60000);
+    const hiding = setFlashlightHiding(createFlashlightState(), true);
+    const after = updateBatteryWithFlashlight(drained, hiding, 30000, RATE);
+    expect(getBatteryFraction(after)).toBeGreaterThan(getBatteryFraction(drained));
+  });
+
+  it('still drains while the light is ON even when a recharge rate is supplied', () => {
+    const battery = createBatteryState();
+    const after = updateBatteryWithFlashlight(battery, createFlashlightState(), 5000, RATE);
+    expect(getBatteryFraction(after)).toBeLessThan(getBatteryFraction(battery));
+  });
+
+  it('does not recharge past a full charge', () => {
+    const nearlyFull = updateBattery(createBatteryState(), 1000);
+    const off = toggleFlashlight(createFlashlightState());
+    const after = updateBatteryWithFlashlight(nearlyFull, off, 10000000, RATE);
+    expect(getBatteryFraction(after)).toBe(1);
+  });
+
+  it('recovers a fully depleted battery while off', () => {
+    const dead = updateBattery(createBatteryState(), 200000);
+    expect(dead.isDepleted).toBe(true);
+    const off = toggleFlashlight(createFlashlightState());
+    const after = updateBatteryWithFlashlight(dead, off, 30000, RATE);
+    expect(after.isDepleted).toBe(false);
+    expect(getBatteryFraction(after)).toBeGreaterThan(0);
   });
 });

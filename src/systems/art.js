@@ -134,6 +134,7 @@ export const ART_MANIFEST = [
   { id: 'shop_icon_startingShotgun', prompt: icon('A pump shotgun'), width: 48, height: 48, keys: ['shop_icon_startingShotgun'] },
   { id: 'shop_icon_startingRifle', prompt: icon('A rifle'), width: 48, height: 48, keys: ['shop_icon_startingRifle'] },
   { id: 'shop_icon_minimap', prompt: icon('A folded paper treasure map'), width: 48, height: 48, keys: ['shop_icon_minimap'] },
+  { id: 'shop_icon_rechargeBattery', prompt: icon('A battery power cell encircled by two curved recharge arrows'), width: 48, height: 48, keys: ['shop_icon_rechargeBattery'] },
 ];
 
 export function getArtSpriteKeys() {

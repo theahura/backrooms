@@ -92,7 +92,7 @@ index.html
        -> src/systems/settings.js     (loadSettings on boot, stored in registry as 'audioSettings')
 
   game.registry (cross-scene in-memory state, backed by localStorage):
-    shopState          -> { gold, upgrades: { battery, flashlight, health, speed, weaponDamage, fireRate, bulletRange, backpack, startingPistol, startingShotgun, startingRifle, minimap } }
+    shopState          -> { gold, upgrades: { ...one level per UPGRADES entry: battery, flashlight, health, speed, weaponDamage, fireRate, bulletRange, backpack, startingPistol, startingShotgun, startingRifle, minimap, rechargeBattery, ... } } (data-driven from UPGRADES in @/src/systems/shop.js; new ids default to level 0 via the createShopState() merge, no SAVE_VERSION bump)
     runCount           -> incrementing integer for save bookkeeping + first-run tutorial toast (NO LONGER the world seed)
     worldSeed          -> persisted per-save world seed (minted once via resolveWorldSeed; stable day-to-day, differs per player; null until first run mints it)
     collectedLore      -> array of lore entry IDs collected across all runs (meta-progression)

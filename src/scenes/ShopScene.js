@@ -95,8 +95,8 @@ export class ShopScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     this.upgradeRows = [];
-    const startY = 155;
-    const rowHeight = 45;
+    const startY = 140;
+    const rowHeight = 42;
 
     for (let i = 0; i < UPGRADES.length; i++) {
       const upgrade = UPGRADES[i];
