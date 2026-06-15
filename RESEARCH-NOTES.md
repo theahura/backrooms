@@ -3937,3 +3937,59 @@ The upgrade system is fully data-driven, so the change is small and mostly addit
 - art/persistence: no new tests needed; existing all-upgrades iteration tests cover it.
 - GameScene wiring verified by playtest.mjs (buy the upgrade via registry, confirm battery fraction
   rises while off and falls while on).
+
+## 2026-06-14 — Bug: light switches spawn inside interior maze walls
+
+### Independent re-verification of the 5 spec "Known bugs" (real engine)
+Re-ran `scripts/playtest.mjs` against the live game (vite :5199, playwright at
+`/home/amol/code/node_modules`): stair landing `offCentre=0px`, rift re-entry
+`afterCross=1 afterReentry=1 afterRealReentry=2`, recharge `off +0.005 / on -0.013 / gate 0`.
+So bugs 2 (disappear-when-shot, alpha floor 0.85 + combat.test guard), 3 (stairs, camera
+centerOn + dual keep-out + 1200ms invuln + 8800-room placement.test), and 5 (rift 2D
+store-containment re-arm + startroom.test + playtest guard) are genuinely fixed.
+
+### Root cause of the remaining live bug
+`computeSwitchPosition` (lightswitch.js) + `GameScene.activateRoomSwitch` (GameScene.js:777)
+only avoid perimeter DOOR gaps (`freeWallOffset`). Unlike items/lore/weapon/furniture, the
+switch placement is NEVER handed the room's `mazeRects`. In `maze`/`corridor` rooms,
+`subdivisionWallRect` (maze.js:147) EXTENDS interior wall ends that touch the inner bound out to
+the true room edge (`x===inner.x → room.x`, etc.), so a 16px-thick interior wall reaches the
+perimeter band where the switch mounts (inset = WALL_THICKNESS+4 = 20). When the switch's
+along-wall offset aligns with that extended wall, the 20×28 sprite (depth 50, drawn OVER the
+depth-0 wall graphics) sits buried in the wall band.
+
+Deterministic probe (60 level seeds × 13×13 cells, floor 0): **34 / 1499 switches (~2.3%) had
+their CENTER inside an interior maze wall**; 0 inside a door entry zone (perimeter door avoidance
+is solid). Only `maze`/`corridor` types bury switches; `columns`/`storage`/`cubicles` inset rects
+by `margin = WALL_THICKNESS+40 = 56` (far outside the [6,34] switch band).
+
+### Fix design (mirror the items/lore mazeRects pattern)
+- Extend the 1-D largest-free-span search so its `blocked` interval list ALSO contains the
+  along-wall projection of any `mazeRects` overlapping the switch mounting band, inflated by the
+  sprite half-extent along that wall (half-width 10 for N/S, half-height 14 for E/W) + clearance.
+  Then place at the midpoint of the largest clear span — already clear of doors AND maze walls.
+- `computeSwitchPosition(room, wall, wallThickness, mazeRects = [])` — optional 4th param keeps all
+  8 existing 3-arg call sites byte-identical.
+- Add `chooseSwitchWall(room, wallThickness, mazeRects, startWallIndex)` — deterministic fallback:
+  scan the 4 walls from the RNG-chosen start, return the first with an adequate clear span (else the
+  largest), so a wall fully blocked by a maze wall is skipped. Research-recommended "try other walls"
+  fallback (sweep-line / interval-complement; see web research below).
+- Wire `mazeRects` (already in scope at GameScene.js:353) into `activateRoomSwitch(room, mazeRects)`.
+  Keep the `SWITCH_CHANCE` roll unchanged (which rooms get a switch is untouched).
+
+### Sources (web)
+- Merge-intervals / interval-complement (LeetCode 56; Galaxy interval ops; USACO sweep-line):
+  sort blocked spans, sweep to largest uncovered gap, place at midpoint.
+- AABB / point-vs-rect boundary pitfalls (noonat Intersection Tests 2D): inflate obstacle by the
+  placed object's half-extent (Minkowski) and test the FOOTPRINT, not just the center, with a
+  consistent inclusive convention — embedding happens when only the center is tested.
+- Phaser depth: higher depth renders in front (switch 50 > roomGfx 0) — confirms the embedded
+  switch is visible-on-wall, a geometry bug, not a z-order one.
+
+### Tests
+- placement.test.js: new guard — across many seeds/cells, the live switch (placed exactly as
+  GameScene does: per-room RNG → chooseSwitchWall → computeSwitchPosition with mazeRects) never has
+  its center/footprint inside any mazeRect. Anti-vacuous: assert switches were actually placed, and
+  that the OLD door-only placement produced > 0 embedded (RED proof).
+- lightswitch.test.js: computeSwitchPosition with a mazeRects arg moves the switch off an interior
+  wall that meets the chosen wall; without mazeRects it stays byte-identical (back-compat).

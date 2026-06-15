@@ -6,10 +6,23 @@ import {
   getLitRoomIds,
   isPointInRoom,
   computeSwitchPosition,
+  chooseSwitchWall,
   SWITCH_INTERACT_RANGE,
+  SWITCH_HALF_W,
+  SWITCH_HALF_H,
 } from '../lightswitch.js';
 
 const WALL_THICKNESS = 16;
+
+// The switch sprite footprint, derived from the module's own half-extents so the
+// tests track the real sprite size rather than hardcoding it.
+const switchFootprint = pos => ({
+  x: pos.x - SWITCH_HALF_W, y: pos.y - SWITCH_HALF_H,
+  width: SWITCH_HALF_W * 2, height: SWITCH_HALF_H * 2,
+});
+const rectsOverlap = (a, b) =>
+  a.x < b.x + b.width && a.x + a.width > b.x &&
+  a.y < b.y + b.height && a.y + a.height > b.y;
 
 function makeRoom(id, x, y, overrides = {}) {
   return {
@@ -125,6 +138,66 @@ describe('computeSwitchPosition (door-aware)', () => {
     const pos = computeSwitchPosition(room, 'north', W);
     expect(pos.x).toBeGreaterThanOrEqual(room.x);
     expect(pos.x).toBeLessThanOrEqual(room.x + room.width);
+  });
+});
+
+describe('computeSwitchPosition (maze-aware)', () => {
+  const W = WALL_THICKNESS;
+
+  it('moves the switch off an interior maze wall that meets the chosen wall', () => {
+    const room = makeRoom(1, 0, 0); // 1200x1000, no doors
+    // Where the door-only placement would sit (wall centre).
+    const bare = computeSwitchPosition(room, 'north', W);
+    // A 16px-thick interior wall reaching the north perimeter right under it.
+    const mazeRects = [{ x: bare.x - 8, y: room.y, width: 16, height: 200 }];
+
+    // The buggy (maze-blind) placement overlaps the wall...
+    expect(rectsOverlap(switchFootprint(bare), mazeRects[0])).toBe(true);
+    // ...the maze-aware placement does not.
+    const pos = computeSwitchPosition(room, 'north', W, mazeRects);
+    expect(rectsOverlap(switchFootprint(pos), mazeRects[0])).toBe(false);
+    expect(pos.y).toBe(bare.y); // still flush against the north wall
+  });
+
+  it('is byte-identical to the 3-arg call when no maze rects are supplied (back-compat)', () => {
+    const room = makeRoom(1, 0, 0, { doors: [{ wall: 'north', offset: 560, width: 80 }] });
+    expect(computeSwitchPosition(room, 'north', W, [])).toEqual(computeSwitchPosition(room, 'north', W));
+    expect(computeSwitchPosition(room, 'east', W, [])).toEqual(computeSwitchPosition(room, 'east', W));
+  });
+
+  it('still avoids the door gap when both a door and a maze wall are present', () => {
+    const room = makeRoom(1, 0, 0, { doors: [{ wall: 'north', offset: 200, width: 80 }] });
+    const mazeRects = [{ x: 900, y: room.y, width: 16, height: 200 }];
+    const pos = computeSwitchPosition(room, 'north', W, mazeRects);
+    expect(pos.x >= 200 && pos.x <= 280).toBe(false); // clear of the door gap
+    expect(rectsOverlap(switchFootprint(pos), mazeRects[0])).toBe(false); // clear of the maze wall
+  });
+});
+
+describe('chooseSwitchWall', () => {
+  const W = WALL_THICKNESS;
+
+  it('skips the starting wall when an interior maze wall has buried it and picks a clear wall', () => {
+    const room = makeRoom(1, 0, 0); // 1200x1000, no doors
+    // A maze wall spanning the entire north mounting band -> north has no clear span.
+    const mazeRects = [{ x: room.x, y: room.y, width: room.width, height: 40 }];
+    const wall = chooseSwitchWall(room, W, mazeRects, 0); // start at 'north'
+    expect(wall).not.toBe('north');
+    // The switch placed on the chosen wall is clear of the maze wall.
+    const pos = computeSwitchPosition(room, wall, W, mazeRects);
+    expect(mazeRects.some(r => rectsOverlap(switchFootprint(pos), r))).toBe(false);
+  });
+
+  it('still returns one of the four walls when every wall is buried (graceful fallback)', () => {
+    const room = makeRoom(1, 0, 0);
+    const mazeRects = [
+      { x: room.x, y: room.y, width: room.width, height: 40 },                       // north band
+      { x: room.x, y: room.y + room.height - 40, width: room.width, height: 40 },    // south band
+      { x: room.x, y: room.y, width: 40, height: room.height },                      // west band
+      { x: room.x + room.width - 40, y: room.y, width: 40, height: room.height },    // east band
+    ];
+    const wall = chooseSwitchWall(room, W, mazeRects, 2);
+    expect(['north', 'south', 'east', 'west']).toContain(wall);
   });
 });
 

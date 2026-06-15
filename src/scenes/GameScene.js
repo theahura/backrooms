@@ -20,7 +20,7 @@ import { generateRoomItems, ITEM_TYPES } from '../systems/items.js';
 import { createInventoryState, pickupItem, useBattery, canPickupItem } from '../systems/inventory.js';
 import { getUpgradeValue, createShopState } from '../systems/shop.js';
 import { toggleDoor, getDoorCenter, findNearestDoor, DOOR_INTERACT_RANGE } from '../systems/doors.js';
-import { toggleSwitch, findNearestSwitch, getLitRoomIds, isPointInRoom, computeSwitchPosition, SWITCH_INTERACT_RANGE } from '../systems/lightswitch.js';
+import { toggleSwitch, findNearestSwitch, getLitRoomIds, isPointInRoom, computeSwitchPosition, chooseSwitchWall, SWITCH_INTERACT_RANGE } from '../systems/lightswitch.js';
 import { createHidingState, enterHiding, exitHiding, findNearestHideable, HIDE_INTERACT_RANGE, HIDING_SPEED_MULTIPLIER } from '../systems/hiding.js';
 import { saveGame, resolveWorldSeed } from '../systems/persistence.js';
 import { createExplorationState, updateExploration, getWindowedMinimapData, getCurrentRoom, MINIMAP_COLORS, MINIMAP_WINDOW_CELLS } from '../systems/exploration.js';
@@ -362,7 +362,7 @@ export class GameScene extends Phaser.Scene {
     this.drawRoomDoorways(this.roomGfx, room, theme);
 
     this.activateRoomDoors(room);
-    this.activateRoomSwitch(room);
+    this.activateRoomSwitch(room, mazeRects);
     this.activateRoomItems(room, mazeRects);
     this.activateRoomLore(room, mazeRects);
     this.activateRoomEnemies(room, [...stairKeep, ...landingKeep]);
@@ -774,17 +774,19 @@ export class GameScene extends Phaser.Scene {
     this.switchSprites = new Map();
   }
 
-  activateRoomSwitch(room) {
+  activateRoomSwitch(room, mazeRects = []) {
     if (room.id === 0) return;
     const SWITCH_CHANCE = 0.15;
     const WALLS = ['north', 'south', 'east', 'west'];
     const rand = mulberry32(this.floorSeed(room.floor) + 40000 + room.gridX * 131 + room.gridY * 977);
     if (rand() >= SWITCH_CHANCE) return;
 
-    const wall = WALLS[Math.floor(rand() * WALLS.length)];
-    // Place the switch flush to the wall but clear of any doorway on it (the
-    // door-aware free-span search lives in lightswitch.js).
-    const { x, y } = computeSwitchPosition(room, wall, WALL_THICKNESS);
+    // Place the switch flush to a wall but clear of any doorway AND of any
+    // interior maze wall on it (the door- and maze-aware free-span search lives
+    // in lightswitch.js). chooseSwitchWall skips a wall a maze wall has buried.
+    const startWall = Math.floor(rand() * WALLS.length);
+    const wall = chooseSwitchWall(room, WALL_THICKNESS, mazeRects, startWall);
+    const { x, y } = computeSwitchPosition(room, wall, WALL_THICKNESS, mazeRects);
 
     const sw = { id: this.nextSwitchId++, roomId: room.id, x, y, isOn: false };
     this.switchStates.push(sw);

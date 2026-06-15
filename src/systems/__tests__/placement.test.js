@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { getRoomAt, hasStairDown } from '../worldgen.js';
-import { generateMazeWalls, doorEntryZones } from '../maze.js';
+import { generateMazeWalls, doorEntryZones, getRoomType } from '../maze.js';
 import { generateRoomFurniture } from '../furniture.js';
 import { generateRoomEnemies } from '../enemy.js';
 import { getRoomVibe } from '../roomVibes.js';
 import { stairKeepOut, stairLandingKeepOut, STAIR_SIZE, STAIR_MARGIN } from '../stairs.js';
+import { computeSwitchPosition, chooseSwitchWall, SWITCH_HALF_W, SWITCH_HALF_H } from '../lightswitch.js';
+import { mulberry32 } from '../random.js';
 
 // These tests exercise the REAL room-generation pipeline the way
 // GameScene.activateRoom assembles it, so they guard the spec's
@@ -130,5 +132,72 @@ describe('intra-room placement clearance (Bug 1)', () => {
     });
     expect(stairs).toBeGreaterThan(0);
     expect(enemiesSeen).toBeGreaterThan(0);
+  });
+});
+
+// A light switch sprite is drawn centered (and unscaled) on the chosen wall. The
+// footprint is what the player sees, so the bug ("light switches can spawn inside
+// walls / on doors") shows up as the footprint overlapping an interior maze wall.
+// Half-extents come from lightswitch.js so this tracks the real sprite size.
+const SWITCH_CHANCE = 0.15;
+const SWITCH_WALLS = ['north', 'south', 'east', 'west'];
+
+function switchFootprint(pos) {
+  return { x: pos.x - SWITCH_HALF_W, y: pos.y - SWITCH_HALF_H, width: SWITCH_HALF_W * 2, height: SWITCH_HALF_H * 2 };
+}
+
+// Mirror GameScene.activateRoomSwitch's RNG exactly (floor 0 -> floorSeed = seed):
+// one draw decides whether the room gets a switch, the next picks the starting
+// wall index. The `choose` callback turns (room, mazeRects, startWallIndex) into a
+// final {wall, pos}, so the same driver expresses both the fixed and buggy paths.
+function placeSwitch(seed, gx, gy, room, mazeRects, choose) {
+  const rand = mulberry32(seed + 40000 + gx * 131 + gy * 977);
+  if (rand() >= SWITCH_CHANCE) return null;
+  const startWall = Math.floor(rand() * SWITCH_WALLS.length);
+  return choose(room, mazeRects, startWall);
+}
+
+const placeSwitchLive = (room, mazeRects, startWall) => {
+  const wall = chooseSwitchWall(room, WALL_THICKNESS, mazeRects, startWall);
+  return { wall, pos: computeSwitchPosition(room, wall, WALL_THICKNESS, mazeRects) };
+};
+
+// Frozen reconstruction of the pre-fix path (random wall + maze-blind 3-arg
+// placement) -- exists only so the guard above is provably non-vacuous.
+const placeSwitchOld = (room, mazeRects, startWall) => {
+  const wall = SWITCH_WALLS[startWall];
+  return { wall, pos: computeSwitchPosition(room, wall, WALL_THICKNESS) };
+};
+
+describe('light switch placement clears interior maze walls (Known bug)', () => {
+  it('never lands a switch footprint inside an interior maze wall, across the generated world', () => {
+    let switches = 0;
+    let inMazeWall = 0;
+    let switchesInMazeTypeRooms = 0;
+    forEachRoom(40, 8, ({ room, mazeRects }, seed, gx, gy) => {
+      const placed = placeSwitch(seed, gx, gy, room, mazeRects, placeSwitchLive);
+      if (!placed) return;
+      switches++;
+      const type = getRoomType(room.seed);
+      if (type === 'maze' || type === 'corridor') switchesInMazeTypeRooms++;
+      const fp = switchFootprint(placed.pos);
+      if (mazeRects.some(wall => overlaps(fp, wall))) inMazeWall++;
+    });
+    expect(switches).toBeGreaterThan(0);
+    // Anti-vacuous: switches actually land in the room types whose interior walls
+    // reach the perimeter (the only ones that can bury a switch).
+    expect(switchesInMazeTypeRooms).toBeGreaterThan(0);
+    expect(inMazeWall, `${inMazeWall}/${switches} switches embedded in a maze wall`).toBe(0);
+  });
+
+  it('the old door-only placement DID bury switches in maze walls (proves the guard is non-vacuous)', () => {
+    let inMazeWall = 0;
+    forEachRoom(40, 8, ({ room, mazeRects }, seed, gx, gy) => {
+      const placed = placeSwitch(seed, gx, gy, room, mazeRects, placeSwitchOld);
+      if (!placed) return;
+      const fp = switchFootprint(placed.pos);
+      if (mazeRects.some(wall => overlaps(fp, wall))) inMazeWall++;
+    });
+    expect(inMazeWall).toBeGreaterThan(0);
   });
 });
