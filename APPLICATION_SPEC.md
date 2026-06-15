@@ -62,18 +62,14 @@ To create pixel art, use gemini nano banana. There is a key in the .env file at 
 
 Feedback from me (DO NOT CHANGE):
 - enemies should make sounds that get louder as they get closer and have attack sounds
-- the level should not change day to day, so the player can build a mental map over time
-- the rooms themselves should have sounds for various things in them. We should have more variety (and more detail) for the various kinds of things that can be in given rooms, and some of them should make sounds of their own
-- we should add lamps / lights to the game, areas that do provide light automatically in some rooms
-- add a rechargeable battery to the game store (it should be very expensive)
-- in rooms with lights, the light switch shouldnt always be on the outer wall. It can sometimes be on the inner wall
-- rooms shouldn't be so obviously delineated
 - picking up a gun should be automatic
   - we should have a change in the player sprite + animations for when they pick up a gun
+- 'room state' should remain from day to day. If the player picks up an item, or picks up treasure or ammo or health, or kills an enemy, that should all remain from one day to the next. Right now it resets
+- upgrade the aesthetics that are using. Look through https://commons.wikimedia.org/wiki/Category:Liminal_spaces. Download some of the images and get a sense for what we are going for. Note the variety but the common theme: unsettling. Then, use nano banana to generate a wide range of sprites, backgrounds, and wall textures to make a variety of liminal space rooms. It's difficult because we are working in a top down genre, so rely heavily on sprites rendering in 2.5d like the main player character and the enemies (e.g. with a front and a back) so the player can get a sense of what they are walking through. Canonical examples would be malls, classrooms, hospitals, warehouses, storerooms, lockers, sewers, hotels, train stations, etc. Think: the shining. Rooms that should be filled with tons of people that are empty. Weird symmetry. Claustrophia. Based on these, put together procedurally generated maps that can fit together. This may require rethinking our current room approach entirely, which is acceptable -- it would be very cool to have a large mall composed of multiple rooms that hooks directly into a hospital of multiple rooms etc.
+- the rooms themselves should have sounds for various things in them. We should have more variety (and more detail) for the various kinds of things that can be in given rooms, and some of them should make sounds of their own
+- we should add lamps / flourescent lights to the game, areas that do provide light automatically in some rooms
+- add a rechargeable battery to the game store (it should be very expensive)
 
 Known bugs:
-- Hiding places, stairs, and doors will often spawn inside walls
-- Getting shot makes the player character disappear
 - stairs do not work as expected -- the player is often dropped in a random place nowhere near the stairs themselves, and they become vulnerable to attack immediately after spawning even when the player cannot see the character yet. I think there should be a limitation on enemies spawning or being near stairs, especially when the player goes up / down them
 - light switches can spawn on doors and open entrances, which should not happen
-- when the player goes through any door boundary from left to right that is on the same horizontal line as the rift entrance, the rift entrance animation plays even though it shouldnt
