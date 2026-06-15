@@ -3,9 +3,13 @@ import {
   saveGame,
   loadGame,
   clearSave,
+  generateWorldSeed,
+  resolveWorldSeed,
+  MAX_WORLD_SEED,
   SAVE_KEY,
   SAVE_VERSION,
 } from '../persistence.js';
+import { getRoomAt } from '../worldgen.js';
 
 function createMockStorage() {
   const store = {};
@@ -43,6 +47,7 @@ describe('saveGame and loadGame round-trip', () => {
       collectedLore: [],
       unlockedLocations: ['store'],
       activeLocation: 'store',
+      worldSeed: null,
     });
   });
 
@@ -218,5 +223,102 @@ describe('clearSave', () => {
     };
 
     expect(() => clearSave()).not.toThrow();
+  });
+});
+
+describe('generateWorldSeed', () => {
+  it('produces a positive integer within the valid seed range', () => {
+    const lo = generateWorldSeed(() => 0);
+    const hi = generateWorldSeed(() => 0.9999999);
+
+    expect(Number.isInteger(lo)).toBe(true);
+    expect(Number.isInteger(hi)).toBe(true);
+    expect(lo).toBeGreaterThanOrEqual(1);
+    expect(hi).toBeLessThanOrEqual(MAX_WORLD_SEED);
+  });
+
+  it('never returns zero, even for the lowest random draw', () => {
+    expect(generateWorldSeed(() => 0)).toBeGreaterThan(0);
+  });
+});
+
+describe('resolveWorldSeed', () => {
+  it('reuses a stored seed unchanged so the world stays the same across days', () => {
+    expect(resolveWorldSeed(777)).toBe(777);
+    expect(resolveWorldSeed(777)).toBe(resolveWorldSeed(777));
+  });
+
+  it('mints a fresh valid seed when none is stored (old/new save)', () => {
+    for (const absent of [null, undefined]) {
+      const seed = resolveWorldSeed(absent, () => 0.5);
+      expect(Number.isInteger(seed)).toBe(true);
+      expect(seed).toBeGreaterThan(0);
+      expect(seed).toBeLessThanOrEqual(MAX_WORLD_SEED);
+    }
+  });
+
+  it('regenerates when the stored value is invalid (0, negative, or non-integer)', () => {
+    for (const bad of [0, -5, 1.5, NaN, 'abc']) {
+      const seed = resolveWorldSeed(bad, () => 0.5);
+      expect(Number.isInteger(seed)).toBe(true);
+      expect(seed).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('world stability vs run count (spec: level must not change day to day)', () => {
+  // The world a player sees is getRoomAt(<their seed>, gx, gy) over a grid.
+  function worldFor(seed) {
+    const rooms = [];
+    for (let gx = 0; gx < 4; gx++) {
+      for (let gy = 0; gy < 4; gy++) {
+        rooms.push(getRoomAt(seed, gx, gy));
+      }
+    }
+    return rooms;
+  }
+
+  it('keeps the layout identical across days because the seed comes from the save, not the run count', () => {
+    const persisted = 4242;
+    // Whatever day it is, the world is resolved from the persisted seed only.
+    const today = worldFor(resolveWorldSeed(persisted));
+    const tomorrow = worldFor(resolveWorldSeed(persisted));
+    expect(tomorrow).toEqual(today);
+
+    // Regression guard: the old source `seed = runCount + 1` produced a DIFFERENT
+    // world every day. That run-derived world both drifts day-to-day and differs
+    // from the persisted-seed world, so this test fails if the seed source
+    // regresses to the run counter.
+    const oldDay1 = worldFor(1 + 1);
+    const oldDay8 = worldFor(8 + 1);
+    expect(oldDay1).not.toEqual(oldDay8);
+    expect(today).not.toEqual(oldDay1);
+  });
+
+  it('produces different layouts for different players (different persisted seeds)', () => {
+    const a = worldFor(resolveWorldSeed(111));
+    const b = worldFor(resolveWorldSeed(222));
+    const someCellDiffers = a.some((room, i) => room.seed !== b[i].seed);
+    expect(someCellDiffers).toBe(true);
+  });
+});
+
+describe('worldSeed persistence and migration', () => {
+  it('round-trips a world seed through save and load', () => {
+    const shopState = { gold: 0, upgrades: { battery: 0, flashlight: 0, health: 0, speed: 0 } };
+    saveGame(shopState, 3, [], ['store'], 'store', 123456);
+
+    expect(loadGame().worldSeed).toBe(123456);
+  });
+
+  it('returns null worldSeed for an old save that predates the field', () => {
+    const oldData = {
+      version: 3,
+      shopState: { gold: 200, upgrades: { battery: 1, flashlight: 0, health: 0, speed: 0 } },
+      runCount: 4,
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(oldData));
+
+    expect(loadGame().worldSeed).toBeNull();
   });
 });

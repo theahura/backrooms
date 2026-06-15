@@ -56,7 +56,7 @@ export function hasLineOfSight(enemyPos, playerPos, segments, maxRange) {
   return true;
 }
 
-export function generateRoomEnemies(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, furnitureItems, roomId, distance = 0) {
+export function generateRoomEnemies(roomX, roomY, roomWidth, roomHeight, wallThickness, seed, furnitureItems, roomId, distance = 0, keepOut = []) {
   if (roomId === 0) return [];
 
   const rand = mulberry32(seed + 10000);
@@ -71,12 +71,17 @@ export function generateRoomEnemies(roomX, roomY, roomWidth, roomHeight, wallThi
   const placed = [];
   const enemyRadius = 10;
 
+  // Furniture the enemy must not stand in, PLUS caller-supplied keep-out zones
+  // (the stair footprint and the spot below it where the player materializes
+  // after a transition) so the player is never attacked the instant they land.
+  const blockers = [...furnitureItems, ...keepOut];
+
   for (let attempt = 0; attempt < count * 20 && placed.length < count; attempt++) {
     const x = minX + rand() * (maxX - minX);
     const y = minY + rand() * (maxY - minY);
 
     let overlaps = false;
-    for (const f of furnitureItems) {
+    for (const f of blockers) {
       if (
         x >= f.x - enemyRadius &&
         x <= f.x + f.width + enemyRadius &&

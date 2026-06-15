@@ -3621,3 +3621,643 @@ Distance-keyed item COUNT bands in `items.js` only (no weight, price, capacity, 
 - **DEEP (d ≥ 8)**: current `r<0.55→0, r<0.9→1, else 2` → E=0.55 (deep economy untouched; rarity + spitter-band loot carry value).
 - Resulting pacing: d1–3 spawn ≈ 10.7–15.7 g/room (~13 avg) + loot → run 1 ≈ 150–190g, first 200g upgrade end of run 1 / early run 2 (genre target); totals stay monotonic in distance (d3 21→d4 27→…→d7 178→d8 218).
 - NEAR=3 chosen because d≤3 is the all-basic-enemy zone (crawlers start d4), it covers the 24-room early grid a first run actually touches, and d3 is where gold coins first unlock (count tapers exactly as quality arrives).
+
+---
+
+## Known-bugs sweep (APPLICATION_SPEC "Known bugs", 8 items)
+
+Task: fix the eight bugs at the bottom of `APPLICATION_SPEC.md`. Root causes confirmed against the live code (not the noridocs, several of which claim already-fixed for bugs that playtesting still sees).
+
+### Confirmed root causes
+- **Bug 8 (rift flash on wrong door crossing)** — `GameScene.updateRiftCrossing()` (L1507) triggers purely on `player.x > entranceRoom.x + width + 4` with NO Y gate and NO actual edge-crossing check. Any eastward move past that world-X (e.g. a door on another room sharing the store's east-edge X) re-fires the flash/shake/sound. Fix: gate on the player's Y being within `this.riftRect`'s band AND require a real left→right crossing of the edge (track prev X). Extract a pure predicate for unit testing.
+- **Bug 7 (switch on doors/open entrances)** — `GameScene.activateRoomSwitch()` (L726) and the mirror `lightswitch.computeSwitchPosition()` place the switch at the exact wall MIDPOINT with no door-offset check; doors centered near the midpoint collide. Fix: pure `computeSwitchPosition` that, given the wall's doors, picks an offset NOT inside any `[door.offset−clear, door.offset+door.width+clear]` interval (and not the rift); test it; wire both.
+- **Bug 2 + Bug 6 (thin black walls + pitch-black furniture) — SAME root cause.** Perimeter-wall occluder segments sit on the wall band's OUTER face (`room.js createRoomWalls`: north y=room.y, etc.), so the cone already lights the full perimeter band — perimeter walls are NOT the bug. The real cause: `blocksLight` furniture pushes a FULL OUTLINE (`createFurnitureSegments`) into `wallSegments` (GameScene L602), so the ray stops at the near face and the footprint is excluded from the lit polygon; furniture sprite (depth 50) sits below the darkness overlay (depth 100) → footprint renders black. Tall-thin pieces (bookcase 30×80) read as "infinitely-thin tall black walls" (bug 2); boxy hideables (armoire/closet) read as "pitch-black furniture you can hide in" (bug 6). Fix: store `blocksLight` furniture as RECTS and expand per-consumer exactly like `mazeWallRects` — `wallRectOccluders(rect, origin)` (far faces only) for the flashlight, `wallRectSegments(rect)` for enemy LOS. This is the maze-wall thickness fix applied to furniture.
+- **Bug 4 (furniture hitboxes don't match visuals)** — CONFIRMED by inspecting the PNGs: opaque art fills only ~33–72% of each furniture texture (bed 33%W, table 47%H, shelf 50%H, closet 57%W…), but the collision zone (GameScene L593) and `setDisplaySize` (L586) both use the FULL logical rect, so the player collides with transparent padding. Fix: compute each furniture texture's normalized opaque bounding box once (offscreen-canvas scan at runtime), then size the zone + occluder to that visible sub-rect via a pure `visibleFurnitureRect(item, frac)` helper.
+- **Bug 5 (stairs: random drop + instant attack)** — `onStairEnter()` (L1597) lands the player at `getStairLandingPosition` (room-center + 140px below the centered stair) which is correct for standard rooms; the "instant attack" is real: `generateRoomEnemies` (enemy.js L59) has NO stair/landing keep-out and `onStairEnter` grants NO spawn-protection, so an enemy spawned on the landing hits the player the frame the body re-enables. Fix: pass stair+landing keep-out rects to `generateRoomEnemies` (reject spawns inside them) AND grant a short post-stair invulnerability via the existing combat damage-cooldown.
+- **Bug 1 (hiding/stairs/doors inside walls)** — the furniture clearance pipeline (maze rects + door entry zones + landing as obstacles, REJECT-and-resample) and the maze CARVE around stair/door zones already cover most of this. Remaining gaps to verify with an invariant test across many seeds: (a) the stair FOOTPRINT (`stairKeepOut`) is passed to the maze but NOT to `createRoomFurniture` (only `landingKeep` is — the spawn-zone happens to cover the centered stair, but make it explicit); (b) columns-type rooms drop columns only on strict-inequality overlap so a tangent column can touch a keep-out. Write a placement-invariant test FIRST; fix only what it flags.
+- **Bug 3 (player disappears when shot)** — historic `setTintFill` cause already fixed (combat.js comment; now `setTint` multiply + alpha floor 0.85). No static path to invisibility on a non-fatal hit; `update()` early-returns on death before `drawPlayer()` so the last-frame alpha/tint freezes during the death fade. Plan: regression-test `getHurtFlash` (alpha stays visible, never a flat fill), VERIFY via headless playtest screenshot after taking damage, and harden the death path to reset alpha/tint so the sprite can never be left dimmed.
+
+### Web research applied
+- 2D flashlight/visibility: occluders should be back-face-culled closed polygons so the near (lit) face is inside the visibility polygon and only far/silhouette faces cast shadow (slembcke "Fast 2D Hard Shadows"; Catlike Coding top-down 2D; Red Blob "nearest wall"). Confirms the maze-wall `wallRectOccluders` design and that furniture must adopt it.
+- Phaser damage flash: drive blinks with finite yoyo tweens and ALWAYS force-reset alpha/clearTint on completion AND on any early cancel (`stop()` skips `onComplete`); never `setTintFill` for a hit flash (silhouette vanishes vs matching background) — matches the existing combat.js fix.
+- Phaser Arcade bodies are decoupled from `setDisplaySize`; size bodies explicitly and, for static bodies, `refreshBody()` after any transform. For furniture, sizing the zone to the visible-art sub-rect is the correct match.
+- Procedural placement: rejection-sample candidate AABBs against inflated keep-out rects; for wall-flush objects (switches), reduce to a 1-D problem along the wall and exclude the door interval(s).
+
+### Post-sweep verification + Bug 5 full-pipeline regression guard (this session)
+Re-read the spec's 8 Known bugs and independently VERIFIED all 8 hold in the real engine (headless introspection playtest driving the real `window.__game`): Bug 3 player stays visible across the hurt-flash (min alpha 0.85, never invisible); Bug 1 zero of 70 furniture zones embedded >50% in 50 maze walls across 7 rooms; Bug 4 zones sized to visible art (+31 light-blocking occluder rects); Bug 7 zero switches on doorways; Bug 8 the rift Y-band gate fires only THROUGH the opening, not above/below the same edge-X; Bugs 2/6 back-face occluders in use + screenshot shows lit (not pitch-black) player/floor. 8/8 checks, 0 console errors. 885 unit tests green.
+- **Coverage gap found:** Bug 5 (stairs) was the only fix without a FULL-PIPELINE invariant test. `placement.test.js` mirrors `GameScene.activateRoom` for furniture-vs-stair (Bug 1); `enemy.test.js` tests the enemy keep-out with a SYNTHETIC rect (`{x:500,y:350,200,200}`, room 1200×1000, every seed treated as having a stair). Neither asserts that the REAL `[stairKeepOut(room,…,STAIR_KEEPOUT_PAD), stairLandingKeepOut(room)]` rects — assembled exactly as `activateRoomEnemies(room, [...stairKeep, ...landingKeep])` does (GameScene L362) — keep enemies off the stair/landing across the procedural world.
+- **Plan:** extend `placement.test.js` `placeRoom` to also return `landingKeep`, then add an invariant: for every `hasStair` room in a `forEachRoom(8,8)` sweep, call the real `generateRoomEnemies(room.x,…,room.seed, furniture, room.id, 8, [...stairKeep,...landingKeep])` and assert no returned enemy point lies inside `stairKeep[0]` or `landingKeep[0]`.
+- **Research applied:** (a) full-pipeline invariant tests must import the real keep-out functions/constants (no hand-rolled rects) to avoid pipeline drift — mirror placement.test.js exactly. (b) Non-vacuity = "sometimes assertions" (Antithesis): two count guards, `stairs>0` AND `enemiesSeen>0`; the second is the one people forget (an empty enemy set passes the invariant trivially). (c) **`distance` gotcha:** a raw `getRoomAt` room has NO `distance` field; `generateRoomEnemies` defaults `distance=0` which (SAFE_DISTANCE band) spawns ~0 enemies → vacuous. Pass an explicit `distance=8` (as enemy.test.js does) so several enemies spawn. (d) Enemy is a POINT — use point-in-rect containment (`e.x>=k.x && e.x<=k.x+k.width && …`), not the rect-vs-rect `overlaps` helper. (e) RED demonstration (mutation-by-hand, Trail of Bits): temporarily pass `[]` keep-out → enemies land in the zone → test fails; restore the real keep-out → green. Refs: Antithesis "Sometimes Assertions", ProcTHOR generate-then-validate, fast-check/Hypothesis 100-run baseline (here the deterministic grid sweep far exceeds it), roguelike min-distance-from-arrival spawn-safety convention (RogueBasin/roguetemple).
+
+## Stable Per-Save World Seed (Level Stable Day-to-Day) Research
+
+Context: APPLICATION_SPEC binding feedback "the level should not change day to day, so the
+player can build a mental map over time" + main body "rooms ... remain static once generated
+... but also changing from person to person." Current code: `GameScene.init` sets
+`this.levelSeed = runCount + 1`, and `runCount` increments every run, so the entire
+deterministic world (`worldgen.getRoomAt(seed, gx, gy)` -> doors, mazes, furniture, stairs,
+switches) is re-seeded and completely changes every day. This is the exact anti-pattern.
+
+Findings (web research, sources cited inline):
+- The fix is the canonical **map seed** pattern (Minecraft World seed, Dwarf Fortress, Terraria,
+  Factorio): generate ONE random world seed ONCE at save creation, persist it in the save, and
+  reuse it as the top-level seed forever. Identical seed + identical algorithm => identical world.
+  Per-player uniqueness falls out for free (the random seed differs per save). Sources:
+  Minecraft Wiki "World seed" (seed set at creation, auto-filled once from time, then stored);
+  Wikipedia "Map seed" ("without a seed you wouldn't be able to ... guarantee it would be the same
+  world when you load it up again"); DF Wiki advanced worldgen (subsystem seeds derived from one
+  world seed). Caveat: a seed only has meaning relative to the generation ALGORITHM — a worldgen
+  code change is itself a breaking migration (acceptable here; documented).
+- **Generate-once-then-persist, never re-derive from a changing counter.** Re-deriving from
+  `runCount` (or `Date.now()` on every load) silently rerolls the world. Generate exactly once,
+  guarded by "does a persisted seed already exist?", and persist immediately so it freezes.
+- **The seed=0 / falsy trap (the single most likely bug).** `||` and `!seed` treat `0` as missing;
+  use `??` / `Number.isInteger`. MDN nullish-coalescing: `count ?? 42` keeps `0`, `count || 42`
+  replaces it. Mitigation here: we GENERATE seeds in `[1, 2^31-1]` (never 0), and `resolveWorldSeed`
+  uses `Number.isInteger(s) && s > 0` so a stored seed is never clobbered and only a truly absent
+  seed triggers generation. (Empirically, this repo's `mulberry32(0)` and `hashU32(0,...)` are NOT
+  degenerate — the `0x6d2b79f5`/`0x9e3779b9` additive constants save it — but non-zero is still the
+  safe default and avoids the `seed | 0` sign-wrap for seeds >= 2^31.)
+- **Save schema migration**: bump a centralized `SAVE_VERSION` by 1 (3 -> 4); adding an optional
+  field defaulted in the loader is a backward-compatible change. Old saves (no `worldSeed`) must
+  load and default it; the loader already rejects `data.version > SAVE_VERSION`. Idiom (Bugnet web
+  save best-practices, Arcadeon versioned-envelope): `data.field ?? default`. Persist the resolved
+  seed back on first use so migration runs once. We keep `loadGame` pure (returns
+  `worldSeed: data.worldSeed ?? null`) and resolve+persist in `GameScene.init` (which already calls
+  `saveGame` at init), so no `Math.random` leaks into the pure loader/tests.
+- **New game must drop the old seed** or a fresh game reuses the previous world (Jupiter Melon
+  devlog: "world seed is now randomised upon starting a new game"). `clearSave()` removes the whole
+  key; `TitleScene.resetSaveState()` must ALSO null the in-memory registry `worldSeed` so a New
+  Game/Delete Save doesn't carry a stale seed forward.
+- **Seed value range for this repo's 32-bit PRNGs** (cprosche mulberry32, Ettinger gist): valid
+  range `[0, 2^32-1]`; avoid 0 (degenerate in generic mulberry32). `random.js` does `seed | 0` and
+  `worldgen.hashU32` does `(seed | 0) ^ 0x9e3779b9`, so seeds >= 2^31 wrap to negative (still
+  deterministic, but messier). Decision: generate in `[1, 2^31-1]` (positive 31-bit) so `| 0` is a
+  no-op, `floorSeed(floor)=seed+floor*1000` doesn't overflow for any realistic floor count, and
+  `0` is excluded. Entropy (~2.1e9 worlds) is far more than enough for "different per person."
+
+Codebase grounding (code research, file:line):
+- `GameScene.js:129` `this.levelSeed = runCount + 1` is the ONLY seed->world coupling; every
+  consumer routes through `this.levelSeed`/`floorSeed(floor)` (`:244,269,296,720,775,1234,1579`),
+  so replacing line 129 with a persisted `worldSeed` stabilizes the whole world with no other gen
+  edits.
+- `worldgen.js`/`random.js`/`maze.js`/`furniture.js`/... are PURE w.r.t. the seed: no `Date.now`,
+  `performance.now`, `new Date`; all `Math.random()` hits are runtime entity behavior/audio/cosmetics
+  (danger spawn pick, enemy x/y/wander/cooldown, rift glow jitter, loot roll) — none feed layout.
+- `runCount` is safe to decouple from the seed: live difficulty is distance-keyed (`scaling.js`,
+  `getEnemyStats(type, distance)`); `runCount` is otherwise only the first-run tutorial tip gate
+  (`GameScene.js:1382 this.runCount === 0`) and save bookkeeping. `stairs.js getFloorRoomCounts(runCount)`
+  is dead (tests-only).
+- Save plumbing to mirror exactly like `runCount`: `persistence.js saveGame/loadGame`
+  (param+envelope+`?? null`), `main.js:67-71`(registry populate)+`:80`(autosave),
+  `ShopScene.js:47,171,294`(saves), `TitleScene.js:109-116`(reset), `GameScene.js:127-138`(init+save).
+- Tests: `persistence.test.js:40-46` is an exhaustive `toEqual` — must add `worldSeed`. Determinism
+  test pattern to mirror: `worldgen.test.js:14-19` (same seed -> `toEqual`), `furniture.test.js:169-181`
+  (same seed equal / different seed not-equal). New test asserts the resolved seed is independent of
+  the day (no runCount input), so `getRoomAt` is identical across simulated days, and differs across
+  different persisted seeds (person-to-person).
+
+Design (decided): add `generateWorldSeed(rng=Math.random)` -> `[1,2^31-1]` and
+`resolveWorldSeed(saved, rng=Math.random)` -> `Number.isInteger(saved)&&saved>0 ? saved : generate`
+to `persistence.js`; `saveGame(...,worldSeed=null)` + `loadGame` returns `worldSeed: data.worldSeed ?? null`;
+`SAVE_VERSION` 3->4; thread `worldSeed` through registry; `GameScene.init` resolves+persists and sets
+`this.levelSeed = worldSeed`. Docs (`src/docs.md`, `src/scenes/docs.md`, `src/systems/docs.md`) call the
+seed "per-run from runCount" / save shape `{version:3,...}` — update to the persisted worldSeed model.
+
+---
+
+## Known-bugs RE-VERIFICATION (fresh, playtest-driven) + Bug 5 stair-camera root cause
+
+Re-read APPLICATION_SPEC "Known bugs" (8 items, all previously claimed fixed) and re-verified each
+against the LIVE code with the real `playtest.mjs` harness + a throwaway introspection probe driving
+`window.__game`. The spec is a living, playtest-driven doc and the author keeps re-listing these, so
+prior "verified-fixed" claims (using since-deleted scripts) were not trusted.
+
+Hard evidence gathered:
+- **Bug 3 ("player disappears when shot") — GENUINELY FIXED.** Probe set the exact hurt state a real
+  hit produces (hp drop, `damageCooldown=900`, `cameras.main.flash(150,255,0,0)`) and sampled the
+  player sprite for 18 frames: `minAlpha=0.85`, `visible` never false, `tintFill` never set. Code:
+  `drawPlayer` (GameScene.js:2050) is the ONLY place player alpha/tint changes, floors at 0.85, uses
+  multiply `setTint` (never `setTintFill`); no `setVisible(false)`/`destroy`/knockback anywhere. The
+  `flash()` is a whole-screen red overlay (intended damage feedback), not a player vanish. The death
+  path (`onPlayerDeath`) fades the camera to black before RunSummaryScene — that's death, not a bug.
+  NO fix made (YAGNI; fabricating one would violate the spec-author's "do not change verified-clean").
+- **Bugs 2 & 6 (thin black walls / pitch-black furniture) — work for the "light shined on it" case.**
+  Screenshots: furniture INSIDE the flashlight cone is lit (grates, cyan console); maze walls render
+  with a lit near-band via `wallRectOccluders` back-face culling; the perimeter wall shows thickness.
+  Root-cause map (for any future deepening): every world object except player(200)/bullets(150) is
+  drawn BELOW the depth-100 darkness sheet, and lighting is a hard binary mask hole (the visibility
+  polygon) with NO ambient — so geometry OUTSIDE the cone (occluded/clustered pieces, perimeter-wall
+  bodies seen from inside, cone-edge clip, and the hiding state where the flashlight turns fully off)
+  reads black. That is largely the intended pitch-black-backrooms aesthetic; lifting a global ambient
+  would contradict the spec's "the backrooms themselves are all pitch black". Left unchanged.
+- **Bug 5 (stairs) — GENUINELY BROKEN: the camera does not snap on a stair teleport.** Two spec
+  complaints: (A) "dropped in a random place nowhere near the stairs"; (B) "vulnerable... even when
+  the player cannot see the character yet". Root cause for BOTH: `setupCamera` uses
+  `startFollow(player, true, 0.1, 0.1)` (lerp 0.1) and `onStairEnter` (GameScene.js:1648) does
+  `player.body.reset(destX, destY)` across the world (often across the 10000px `FLOOR_Y_OFFSET` band)
+  but never re-centers the camera. Probe (reproducing the no-snap teleport): player is **7668px
+  off-center at frame 0 and still 1274px off at frame 23**, lerping in slowly — i.e. on fade-in the
+  player is rendered far from screen-centre ("random place") and can't see their surroundings yet.
+  Landing geometry itself is correct/deterministic (`getStairLandingPosition` = room centre, +140
+  below the centered stair; `dx=0,dy=140`), so the "random place" is purely the camera lag, not the
+  spawn point. Concern B is otherwise already covered: `onStairEnter` grants
+  `STAIR_SPAWN_PROTECTION_MS=1200` invuln (gated in `applyDamage`), and `activateRoom` passes
+  `[stairKeepOut, stairLandingKeepOut]` to the enemy spawner (guarded by `placement.test.js` Bug-5
+  test). The missing piece is the camera snap.
+
+Fix (canonical pattern; web research): on a TELEPORT (discontinuous move) the camera must SNAP, not
+lerp. Phaser idiom — snap during the black frame: in the `camerafadeoutcomplete` handler, after
+`player.body.reset(destX,destY)`, call `this.cameras.main.centerOn(destX, destY)` so the 300ms
+fade-in reveals the player dead-centre. Probe confirms `centerOn` removes the drift entirely (player
+stable/centered from the first post-teleport frame). Sources: Phaser docs (`startFollow` lerp,
+`centerOn`/`setScroll`), Ourcade fade-transition pattern, "Scroll Back" 2D-camera study (snap on
+discontinuous movement; smooth-follow is for continuous motion only).
+
+Scope decision: fix ONLY the stair-camera snap (the one genuinely-broken, clean, high-confidence
+item). `onStairEnter` line 1695 is the only large cross-world `player.body.reset`; the hiding move
+(line 830) is in-view and the rift crossing is a walk-through (no teleport), so neither needs a snap.
+GameScene wiring is verified by playtest per the codebase split (no clean unit test exists — the only
+computation, `getStairLandingPosition`, is already unit-tested; a "centerOn was called" assertion
+would be a forbidden mock-test). CI is build-only; the durable net is the green vitest suite.
+
+---
+
+# Task: Re-verify the 5 spec "Known bugs"; fix the rift transition replaying on re-entry (Bug 5, current spec)
+
+Re-read the APPLICATION_SPEC "Known bugs" (5 items) and INDEPENDENTLY re-verified each in the real
+engine rather than trusting CURRENT-PROGRESS (which itself warns "claimed-fixes have slipped past
+playtesting"). Chronology that scoped the search: the rift+switch fix `44c87ac` ("rift flash only
+through the opening; light switches avoid doorways", Jun 14 18:12) landed AFTER the author first
+reported the rift/switch items in `f88075a` (17:02), and the prior agent's rift "verification"
+checked "200px above/below the same edge-X" — the WRONG axis for the author's "same horizontal line"
+(same Y). That asymmetry flagged the rift as the prime suspect.
+
+## Verdicts (empirical)
+- **Bug 1 (spawn inside walls)** — FIXED. Keep-outs across furniture/hiding/stairs/doors/pickups +
+  the player landing; `placement.test.js` full-pipeline guards; 895 vitest green.
+- **Bug 2 (player disappears when shot)** — FIXED. `combat.getHurtFlash` returns alpha 0.85 or 1
+  (never 0); `GameScene.drawPlayer` is the only player alpha/tint mutator (hiding=0.3 intentional);
+  no `setVisible(false)`/`destroy` on the player. The hurt state blinks red, never invisible.
+- **Bug 3 (stairs drop player off-screen / enemies on stairs)** — FIXED. `onStairEnter` does
+  `cameras.main.centerOn(destX,destY)` (camera snap), `grantInvulnerability(1200ms)`, and
+  `activateRoom` threads `[stairKeepOut, stairLandingKeepOut]` into the enemy spawner. Playtest guard
+  present (`stair landing offCentre`).
+- **Bug 4 (light switches on doors AND open entrances)** — FIXED. Proved empirically with a pure
+  enumeration (mirrors `activateRoomSwitch`'s RNG + `computeSwitchPosition`): across seeds 1..300,
+  **7543 switches placed, 0 on a door opening, 0 within 30px of a same-wall door**. KEY fact: in
+  `worldgen.getRoomAt`, `room.doors` already contains EVERY opening (east/west/north/south) — there
+  is no separate "open entrance" concept — so `lightswitch.freeWallOffset` (which centers the switch
+  in the largest door-free span with `SWITCH_DOOR_CLEARANCE=30`) inherently avoids doors AND open
+  entrances. Each wall has ≤1 door, so the degenerate `span/2` fallback (which could land on a door)
+  never triggers. (Latent, orthogonal: `lightswitch.createSwitchStates` line 69 `room.id === 0` is
+  dead — worldgen ids are strings "gx,gy" — but `GameScene.activateRoomSwitch` gates the store via
+  numeric id 0 correctly and is the live path; switches never spawn in the store regardless.)
+- **Bug 5 (rift entrance animation replays on a door crossing "on the same horizontal line as the
+  rift entrance")** — **BROKEN.** This is the fix.
+
+## Bug 5 root cause (reproduced deterministically in the real engine)
+`GameScene.updateRiftCrossing` (GameScene.js:1554) latches `this.riftCrossed` and re-arms it with
+`else if (!inBackrooms && this.riftCrossed && this.player.x < edge - 40)`. The forward detection
+`isThroughRift(playerX, playerY, edge+4, riftRect)` is BAND-AWARE (gates on the rift's vertical Y
+band), but the **re-arm is single-axis** (`player.x < edge - 40`) — it ignores Y. The store's east
+edge X (720) is a shared grid line: column-0 rooms directly north (0,-1) / south (0,1) of the store
+— reachable by looping store→rift→(1,0)→(1,-1)→(0,-1) etc. (DOOR_PROB 0.62) — also satisfy
+`x < edge-40`. Stepping into one wrongly re-arms the one-shot; the next time the player re-enters the
+rift's horizontal band anywhere east of the store, the full dimensional-transition (white-out
+`flash(500)` + `shake(250)` + `playSound('stair_transition')`) replays. Repro (real `window.__game`,
+wrapping `cameras.main.flash`): genuine crossing → flash#1; move to (edge-100, y=-300) [room (0,-1),
+NORTH of the store, y∈[-600,0]] → `riftCrossed` wrongly reset to false; re-enter band east → **flash#2
+(spurious)**. Control: a genuine in-store return re-arms and re-crossing legitimately re-flashes. The
+RESEARCH-NOTES Bug-8 entry above already prescribed the missing half of the fix: "require a real
+left→right crossing of the edge … extract a pure predicate"; the shipped fix added only the Y-band
+gate, not a store-scoped re-arm.
+
+## Fix design (root cause, determinism-safe, convention-matching)
+Extract the per-frame decision into a pure `nextRiftCrossing(playerX, playerY, room, riftRect,
+riftCrossed)` in `startroom.js` (beside `isThroughRift`; scalars-first + rect-object style), returning
+`{ riftCrossed, triggered }`. Re-arm ONLY when the player is genuinely back INSIDE the entrance room
+(the store): full Y-containment `playerY ∈ [room.y, room.y+height]` plus `playerX ∈ [room.x,
+edge-40)`. The `edge-40` margin is retained as HYSTERESIS on the crossing axis so jitter at the rift
+edge cannot double-fire (trigger at x>edge+4, re-arm at x<edge-40 → 44px dead-band). `GameScene.
+updateRiftCrossing` becomes a thin call site (pure fn → apply the 3 side effects on `triggered`).
+No PRNG/seed/save-format/level-gen change → worlds byte-identical; `riftCrossed` is a private latch
+read nowhere else (confirmed: 5 sites, all in init + this method).
+
+## Research applied (game-dev consensus, cross-referenced)
+- A single-axis coordinate threshold standing in for region membership is a known anti-pattern: it
+  defines an unbounded half-plane, so every room sharing that grid-line X qualifies. Fix = full
+  **point-in-AABB containment** (BOTH axes) of the specific room, or room-identity (`currentRoomId ===
+  entranceRoom.id`). Refs: MDN AABB / LearnOpenGL collision; RogueBasin grid-room "which rect contains
+  the tile"; Godot Area2D / Unity OnTriggerEnter2D region-overlap is the engine-blessed alternative to
+  hand-rolled coordinate thresholds.
+- Model a one-shot trigger as a 2-state FSM (Armed/Fired) with guarded transitions, firing on the
+  outside→inside transition (entry action) and re-arming on inside→outside — not a bare boolean with
+  an ad-hoc re-arm. Ref: Game Programming Patterns "State" (Nystrom) — the "air-jumping" flag bug is
+  the temporal analogue of this spatial re-fire.
+- **Hysteresis / Schmitt trigger** (two distinct thresholds, enter vs re-arm, with a gap larger than
+  per-frame jitter) is the standard debounce for a body oscillating at a boundary. Keeping `edge-40`
+  vs the `edge+4` trigger IS this. Refs: Schmitt trigger (Wikipedia); Phaser/Nesdev camera-deadzone
+  threads. Half-open-interval boundary ownership (`floor(pos/size)`) is the complementary cure for
+  "adjacent regions share an edge coordinate."
+- Codebase split (RESEARCH-NOTES:3432, docs.md): GameScene wiring verified by `playtest.mjs`; pure
+  `src/systems/*.js` unit-tested. So: unit-test `nextRiftCrossing` in `startroom.test.js` (literal
+  fixtures, boundary assertions, mirror the `isThroughRift` block) AND add a PERMANENT real-engine
+  guard to `playtest.mjs` (drive the bug path, assert no spurious second flash; non-vacuous: assert a
+  genuine in-store return + re-cross DOES re-flash). Precedent: the stair-landing playtest guard.
+
+---
+
+# Rechargeable Battery store upgrade (spec "things to implement": "add a rechargeable battery to the game store (it should be very expensive)")
+
+## Status / why this commit
+All five APPLICATION_SPEC "Known bugs" were independently RE-VERIFIED fixed in the real engine this
+run (playtest.mjs guards: stair offCentre=0px, rift afterCross=1/afterReentry=1/afterRealReentry=2;
+throwaway deep probe: 0 zones embedded in walls across 836 furniture/5 stairs/83 items/27 lore vs 911
+wall rects, hurt minAlpha=0.85 never invisible, 0 of 16 live switches on a door; 0 console errors) and
+each already has a PERMANENT guard (combat.test.js hurt-alpha floor, lightswitch.test.js no-switch-on-
+door across seeds, placement.test.js no-enemy-on-stair, startroom.test.js + playtest.mjs rift). So the
+literal "fix the bugs" task is complete; per YAGNI we do NOT fabricate a fix for a clean area. Next
+appropriate commit = the still-unimplemented spec item. Enemy proximity/attack sounds are already
+wired (audio.js getEnemySoundEvent + getDistanceVolume via GameScene.playSoundAtDistance), so the
+cleanest genuinely-missing item is the rechargeable battery.
+
+## Design (research-backed): recharge while the flashlight is OFF
+The flashlight already drains while ON and can be turned OFF to conserve (spec line 51); a "rechargeable
+battery" most naturally EXTENDS that toggle into off-to-recharge. Web research (Alan Wake, Half-Life 2,
+Lethal Company, Dark Souls stamina, TV Tropes "Ten-Second Flashlight", Lost Garden faucet/drain):
+- Recharge-while-off is a well-established, tension-PRESERVING pattern, BUT only when recharge is
+  SLOWER than drain so the player still spends most time in the dark. The cautionary tale is Alan
+  Wake 2: free illumination + generous auto-recharge "undermines tension." HL2's flashlight (drains
+  fast / recharges ~1:1, forcing you to wait in pitch black) is the canonical good version.
+- Recommended rate: recharge ≈ 1/3 of the drain rate (genre cluster 1/3–1/2; horror skews harsher).
+  At 1/3, every 1s of light regained costs ~3s of darkness (3:1 dark:light) — the tension floor holds
+  and toggle-cheese is impossible (a balanced on/off cycle nets −2/3·drain, always a loss), so NO
+  anti-toggle delay is needed (YAGNI). A full empty→full off-recharge takes ~450s of darkness.
+- A sub-100% cap (e.g. 80%) and a recharge delay were considered and REJECTED per YAGNI: the spec asks
+  only for "a rechargeable battery (very expensive)"; the 3:1 ratio + being blind-while-charging + the
+  natural maxCharge clamp already preserve the threat. Consumable spares (+30, instant) remain useful
+  because waiting 450s in the dark with enemies is far worse than a spare.
+
+## Pricing: "very expensive"
+Meta-progression capstone pricing (Hades Mirror, Rogue Legacy inflation): a strong one-time unlock =
+several full runs of currency. Existing top prices: minimap 3000, startingRifle 2000. Chosen cost
+2500 — clearly "very expensive" (above the starting weapons, below only the minimap), a clear capstone
+goal. One-time unlock modeled like minimap/startingPistol: maxLevel:1, costs:[2500], base:0, perLevel:1.
+
+## Wiring map (code research, all file:line confirmed)
+The upgrade system is fully data-driven, so the change is small and mostly additive:
+1. shop.js UPGRADES: append `{ id:'rechargeBattery', name:'Rechargeable Battery',
+   description:'Battery slowly recharges while the flashlight is off', maxLevel:1, costs:[2500],
+   base:0, perLevel:1 }`. Auto-flows into createShopState (seeds level 0), ShopScene (renders by
+   iterating UPGRADES), persistence (shopState.upgrades saved/loaded wholesale; the {...defaults,
+   ...saved} merge in GameScene.init/ShopScene.init defaults old saves to 0). NO SAVE_VERSION bump
+   (version is 4; bumping would reject old saves). art.js shopIconKey auto-derives shop_icon_
+   rechargeBattery; missing PNG → row renders icon-less, no crash.
+2. battery.js: add `BATTERY_RECHARGE_PER_MS = BATTERY_MAX / 450000` (= BATTERY_DRAIN_PER_MS/3). Reuse
+   existing rechargeBattery(state, amount) (clamps to maxCharge, recomputes isDepleted → recovers a
+   depleted battery).
+3. flashlight.js: extend `updateBatteryWithFlashlight(batteryState, flashlightState, delta,
+   rechargeRatePerMs = 0)` — when NOT lit and rate>0, return rechargeBattery(state, rate*delta); else
+   unchanged; when lit, drain as before. Default param 0 keeps existing callers/tests byte-identical.
+   (Hiding forces the light off, so a hidden player also recharges — consistent with "off = charging".)
+4. GameScene.js: init() reads `this.hasRechargeBattery = (levels.rechargeBattery||0) > 0` (beside the
+   minimap flag); the per-frame battery update (the single updateBatteryWithFlashlight call site) passes
+   `this.hasRechargeBattery ? BATTERY_RECHARGE_PER_MS : 0`. Import BATTERY_RECHARGE_PER_MS.
+5. art.js: add an ART_MANIFEST icon entry for shop_icon_rechargeBattery so the icon is generated at the
+   next build-time `npm run generate-art` (no API call now; AI art is build-time).
+
+## Tests (codebase split: pure fns unit-tested, GameScene wiring playtest-verified)
+- flashlight.test.js: recharges-while-off (rate>0); does NOT recharge while off by default (rate=0,
+  back-compat); recharges while hiding; still drains while ON even with a rate; clamps to maxCharge;
+  recovers a depleted battery. (mirror the existing off/on/hiding tests at flashlight.test.js:47-67)
+- battery.test.js: BATTERY_RECHARGE_PER_MS > 0 AND < BATTERY_DRAIN_PER_MS (the tension invariant).
+- shop.test.js: describe('rechargeable battery upgrade') — cost 2500 @ lvl0, maxLevel 1, MAX after
+  purchase (getUpgradeCost null @ lvl1), canPurchase gated on gold. (mirror minimap block)
+- art/persistence: no new tests needed; existing all-upgrades iteration tests cover it.
+- GameScene wiring verified by playtest.mjs (buy the upgrade via registry, confirm battery fraction
+  rises while off and falls while on).
+
+## 2026-06-14 — Bug: light switches spawn inside interior maze walls
+
+### Independent re-verification of the 5 spec "Known bugs" (real engine)
+Re-ran `scripts/playtest.mjs` against the live game (vite :5199, playwright at
+`/home/amol/code/node_modules`): stair landing `offCentre=0px`, rift re-entry
+`afterCross=1 afterReentry=1 afterRealReentry=2`, recharge `off +0.005 / on -0.013 / gate 0`.
+So bugs 2 (disappear-when-shot, alpha floor 0.85 + combat.test guard), 3 (stairs, camera
+centerOn + dual keep-out + 1200ms invuln + 8800-room placement.test), and 5 (rift 2D
+store-containment re-arm + startroom.test + playtest guard) are genuinely fixed.
+
+### Root cause of the remaining live bug
+`computeSwitchPosition` (lightswitch.js) + `GameScene.activateRoomSwitch` (GameScene.js:777)
+only avoid perimeter DOOR gaps (`freeWallOffset`). Unlike items/lore/weapon/furniture, the
+switch placement is NEVER handed the room's `mazeRects`. In `maze`/`corridor` rooms,
+`subdivisionWallRect` (maze.js:147) EXTENDS interior wall ends that touch the inner bound out to
+the true room edge (`x===inner.x → room.x`, etc.), so a 16px-thick interior wall reaches the
+perimeter band where the switch mounts (inset = WALL_THICKNESS+4 = 20). When the switch's
+along-wall offset aligns with that extended wall, the 20×28 sprite (depth 50, drawn OVER the
+depth-0 wall graphics) sits buried in the wall band.
+
+Deterministic probe (60 level seeds × 13×13 cells, floor 0): **34 / 1499 switches (~2.3%) had
+their CENTER inside an interior maze wall**; 0 inside a door entry zone (perimeter door avoidance
+is solid). Only `maze`/`corridor` types bury switches; `columns`/`storage`/`cubicles` inset rects
+by `margin = WALL_THICKNESS+40 = 56` (far outside the [6,34] switch band).
+
+### Fix design (mirror the items/lore mazeRects pattern)
+- Extend the 1-D largest-free-span search so its `blocked` interval list ALSO contains the
+  along-wall projection of any `mazeRects` overlapping the switch mounting band, inflated by the
+  sprite half-extent along that wall (half-width 10 for N/S, half-height 14 for E/W) + clearance.
+  Then place at the midpoint of the largest clear span — already clear of doors AND maze walls.
+- `computeSwitchPosition(room, wall, wallThickness, mazeRects = [])` — optional 4th param keeps all
+  8 existing 3-arg call sites byte-identical.
+- Add `chooseSwitchWall(room, wallThickness, mazeRects, startWallIndex)` — deterministic fallback:
+  scan the 4 walls from the RNG-chosen start, return the first with an adequate clear span (else the
+  largest), so a wall fully blocked by a maze wall is skipped. Research-recommended "try other walls"
+  fallback (sweep-line / interval-complement; see web research below).
+- Wire `mazeRects` (already in scope at GameScene.js:353) into `activateRoomSwitch(room, mazeRects)`.
+  Keep the `SWITCH_CHANCE` roll unchanged (which rooms get a switch is untouched).
+
+### Sources (web)
+- Merge-intervals / interval-complement (LeetCode 56; Galaxy interval ops; USACO sweep-line):
+  sort blocked spans, sweep to largest uncovered gap, place at midpoint.
+- AABB / point-vs-rect boundary pitfalls (noonat Intersection Tests 2D): inflate obstacle by the
+  placed object's half-extent (Minkowski) and test the FOOTPRINT, not just the center, with a
+  consistent inclusive convention — embedding happens when only the center is tested.
+- Phaser depth: higher depth renders in front (switch 50 > roomGfx 0) — confirms the embedded
+  switch is visible-on-wall, a geometry bug, not a z-order one.
+
+### Tests
+- placement.test.js: new guard — across many seeds/cells, the live switch (placed exactly as
+  GameScene does: per-room RNG → chooseSwitchWall → computeSwitchPosition with mazeRects) never has
+  its center/footprint inside any mazeRect. Anti-vacuous: assert switches were actually placed, and
+  that the OLD door-only placement produced > 0 embedded (RED proof).
+- lightswitch.test.js: computeSwitchPosition with a mazeRects arg moves the switch off an interior
+  wall that meets the chosen wall; without mazeRects it stays byte-identical (back-compat).
+
+## 2026-06-14 — Bug (regression-guard gap): light switches "on doors and open entrances" unguarded on the LIVE path
+
+### Independent re-verification of the two current spec "Known bugs" (real engine)
+Re-ran `scripts/playtest.mjs` (vite :5199, playwright at `/home/amol/code/node_modules`):
+`stair landing offCentre=0px`, rift re-entry `1/1/2`, recharge `off +0.005 / on -0.015 / gate 0`,
+`doorOnRift=false`, 0 console/page errors. Then drove the REAL generation pipeline with a throwaway
+deterministic probe (`/tmp/probe-bugs-loop.mjs`, since deleted) across **300 seeds × 11×11 cells =
+36,300 rooms**, mirroring `GameScene.activateRoom`'s obstacle assembly exactly:
+- **Light switches (live path: `chooseSwitchWall` + maze-aware `computeSwitchPosition`):** 5391 placed
+  (2295 in `maze`/`corridor` rooms — the only types whose interior walls reach the perimeter band),
+  **0 embedded in a maze wall, 0 on a `doorEntryZones` rect, 0 with a footprint outside the room.**
+- **Stairs (Bug 1): 2650 stairs / 6694 stair-adjacent enemies** from the real `generateRoomEnemies`
+  with the real `[stairKeepOut, stairLandingKeepOut]`: **0 enemies on the stair, 0 on the landing,
+  0 landings embedded in a maze wall, 0 landings out of room bounds.**
+So BOTH listed bugs are genuinely fixed behaviorally; per YAGNI no behavioral change is warranted.
+
+### The genuine gap (the actual change this commit makes — a permanent regression guard)
+The spec bug text is literally "light switches can spawn on **doors and open entrances**". The LIVE
+runtime switch path has a permanent full-pipeline guard ONLY for maze-wall embedding
+(`placement.test.js` → `placeSwitchLive`, asserts footprint ∉ `mazeRects`). The only door-avoidance
+PERMANENT test (`lightswitch.test.js` → `'createSwitchStates door avoidance'`) exercises the **dead**
+`createSwitchStates` path (random wall, 3-arg maze-blind `computeSwitchPosition`, synthetic rooms with
+centered doors) — NOT the path the game runs (`activateRoomSwitch`), NOT real worldgen rooms, and it
+checks the raw door gap, not the `doorEntryZones` rectangle. So a future change to `chooseSwitchWall` /
+`freeWallSpan`'s door folding / `computeSwitchPosition` could regress "switch on a doorway" on the live
+path and every committed test would still pass. This commit closes that with a live-path,
+real-worldgen, `doorEntryZones` guard.
+
+### Geometry (why the live path clears doorways — confirmed by code research)
+- A door is `{wall, offset, width: DOOR_WIDTH=80}` (worldgen.js). `doorEntryZones`/`getDoorZone`
+  (maze.js) expand it to a rect `entryDepth = 80 + wallThickness = 96`px deep, spanning the door's
+  `[offset, offset+80]` along the wall and hugging that perimeter edge.
+- `freeWallSpan` (lightswitch.js) folds each same-wall door into a blocked interval
+  `[offset - SWITCH_DOOR_CLEARANCE(30), offset + width + 30]`, then centers the switch in the largest
+  clear gap. The switch is inset `wallThickness+4 = 20`px from the perimeter; footprint half-extents
+  10×14. Since the switch center sits outside `[offset-30, offset+110]`, the footprint edge
+  (`±10` along the wall) clears the door span `[offset, offset+80]` by ≥20px → footprint ∉ entry zone.
+- "Open entrance" == doorway: `room.doors` already contains EVERY opening (worldgen has no separate
+  "open entrance" concept). The store rift opening is on room id 0, which `activateRoomSwitch` skips,
+  and a wall-mounted switch (≤34px deep) can never reach a centered stair (≥100px from every edge,
+  `STAIR_MARGIN`), so "doors and open entrances" reduces exactly to `doorEntryZones`.
+
+### Non-vacuity (the key test-design point from research)
+Metatesting / mutation-in-harness (G-Research "Metatesting Your PBTs"; Wikipedia "Mutation testing"):
+a passing invariant guard must be PROVEN to fail under the regressed algorithm. CAUTION surfaced by
+code research: the existing `placeSwitchOld` (3-arg `computeSwitchPosition`) is only **maze-blind** — it
+STILL calls the door-aware `freeWallSpan`, so it does NOT bury switches on doors and CANNOT prove a
+door guard non-vacuous. The non-vacuous proof needs a **truly door-blind** placement = the historically
+accurate pre-fix inline `GameScene` formula (bare wall midpoint at the inset, no `freeWallSpan`):
+`{x: room.x + span/2, y: room.y + inset}` etc. The wall midpoint (x=360 N/S, y=300 E/W) lands inside a
+door's `[offset, offset+80]` whenever `offset ∈ [280,360]` (N/S) / `[220,300]` (E/W) — a real subset of
+the door offset range `[100, dim-180]` — so a door-blind midpoint DOES land switches on doorways in a
+meaningful fraction of rooms, proving the guard bites.
+
+### Test plan (added to placement.test.js, beside the maze-wall live-path guard)
+- Add a `placeSwitchDoorBlind` helper (bare wall midpoint, no door/maze awareness) — the faithful
+  pre-fix path, used ONLY for the non-vacuous proof.
+- New guard: across `forEachRoom` (real worldgen rooms), the LIVE switch footprint never overlaps any
+  `doorEntryZones(room, WALL_THICKNESS)` rect; anti-vacuous asserts: switches actually placed (>0) AND
+  some were placed on walls that have a door (the at-risk population >0). Sibling proof: the door-blind
+  midpoint path produces >0 footprints overlapping a door entry zone (RED proof of non-vacuity).
+- Sweep size: a few hundred seeds (PBT consensus: 100 baseline, hundreds–thousands for a strong
+  invariant), kept deterministic (fixed seed loop) and fast.
+
+### Sources (web)
+- fast-check / Hypothesis: numRuns/max_examples default 100; deterministic seeded sweeps; hundreds–
+  thousands for strong invariant guards; pin the seed list.
+- G-Research "Metatesting Your Property-Based Tests"; Wikipedia "Mutation testing"; Criteo "Intro to
+  PBT": run the OLD buggy algorithm in the harness + coverage/population assertions to prove non-vacuity.
+- gdbooks AABB-AABB; Hamaluik/MDN Minkowski difference; noonat Intersection Tests 2D: test the FOOTPRINT
+  via half-extent inflation, not the center; inclusive/exclusive boundary convention is a deliberate choice.
+- Merge-intervals / sweep-line (LeetCode 56; USACO; Dilip Kumar): largest-free-gap edge cases — fully
+  covering interval (degenerate fallback), end gaps (corner margins), touching intervals.
+
+## 2026-06-14 — Bug: "being shot makes the player fully disappear" (spec-added mid-session)
+
+### Root cause (systematic-debugging; reproduced in the real engine)
+The player SPRITE render is fine (`drawPlayer` floors hurt alpha at 0.85, multiply
+`setTint`, never `setTintFill`/`setVisible(false)`; player depth 200 > darkness 100).
+The disappearance is the DAMAGE FEEDBACK: both damage handlers
+(`onEnemyBulletHitPlayer`, the enemy-contact handler) called
+`cameras.main.flash(150, 255, 0, 0)`. Phaser's camera Flash overlay alpha =
+`(1 − progress)` from the configured max (1.0) → **fully opaque red at the first
+frame**, fading over 150ms, covering the WHOLE main camera. In the near-black
+backrooms that solid red erases everything incl. the player; only the HUD
+(separate uiCamera) survives. Headless probe: flash `rgb [255,0,0]`, alpha tracking
+`(1−progress)`; a held-peak screenshot showed the player invisible under solid red
+while `player.alpha=0.85, player.visible=true` (sprite fine, overlay the culprit).
+
+### Fix: capped-opacity red tint BELOW the player (never covers it)
+- `combat.js`: pure `getDamageFlashAlpha(remainingMs, duration, peak)` +
+  `DAMAGE_FLASH_PEAK_ALPHA=0.45`, `DAMAGE_FLASH_DURATION_MS=200`. Linear fade from
+  the capped peak to 0; clamped `[0, peak]`. Peak ≪ 1 ⇒ tints but never hides.
+- `GameScene`: `damageFlashGraphics` at depth 190 (BELOW player 200, above world /
+  darkness) — a world object the zoomed main camera draws and uiCamera ignores;
+  `triggerDamageFlash()` arms it, `updateDamageFlash(delta)` fills `cameras.main.worldView`
+  (same pattern as the darkness) at the fading alpha each frame. Both damage
+  handlers call `triggerDamageFlash()` instead of the opaque camera flash; shake
+  unchanged; green pickup + rift/day-complete flashes untouched.
+
+### Why this split (codebase convention)
+Pure fade curve is unit-tested (combat.test.js, 4 tests incl. the `0 < peak < 1`
+invariant). GameScene rendering (depth-below-player, worldView fill) is verified by
+the real-engine playtest — the repo has no scene unit tests; a mock-based wiring
+test would be a forbidden mock-test. Added a PERMANENT playtest.mjs guard: real hit
+⇒ capped tint fires, NO full-screen camera flash, player visible (non-vacuous:
+hpDropped proves a real hit).
+
+### Camera-flash mechanics (reference)
+Phaser `Camera.flash(duration, r, g, b)` has no max-alpha cap — the overlay always
+starts fully opaque and fades. To cap opacity you must draw your own overlay (here a
+depth-ordered Graphics filling the worldView), which also lets it sit BELOW the
+player so the player is never covered — the key to "never disappears".
+
+## Stair-Landing Safe Zone (Known bug: instant attack on stair arrival)
+
+### The bug, root-caused
+Spec "Known bugs": *"stairs ... the player ... become vulnerable to attack
+immediately after spawning even when the player cannot see the character yet. I
+think there should be a limitation on enemies spawning or being near stairs."*
+
+Prior work resolved the *"dropped in a random place"* half (centered landing via
+`getStairLandingPosition`, camera snap in 3885ecf) and added a 1200ms arrival
+invulnerability + a 60px enemy spawn keep-out (99f6d70). What remained: the
+keep-out only stops enemies *spawning* on the tiny 60px landing footprint at
+room-activation time. Enemies **move**, so by the time the player materializes an
+enemy can be standing right next to the landing and deals contact damage the
+instant the 1.2s invuln expires — while the flashlight still faces away. The
+spec's word *"being"* (not just "spawning") near stairs is the unaddressed half.
+
+### External research (how games handle teleport/stair arrival safety)
+Two-layer industry pattern: **placement-time exclusion** (no enemy near the
+landing) + **arrival-time enforcement** (sweep the landing on teleport, relocate
+drifters). Plus an optional short **grace/invuln window** (0.3-2.5s, cancel-on-
+attack) as a safety net.
+- **Relocate, don't delete.** Nuclear Throne portals instant-kill all enemies on
+  transition — clean, but only because the portal is a level-clear *reward*. For
+  freely-usable stairs, deleting enemies = a free "clear the room" exploit. Push
+  offenders radially out instead; the encounter is preserved.
+- **Reset aggro on arrival.** Even after relocating, an enemy that already has the
+  player targeted re-closes immediately. Reset relocated enemies to idle so they
+  must re-acquire LOS — mirrors "the player can't see them yet, the enemy
+  shouldn't have perfect knowledge either." (Cogmind's opt-in entry "spawn
+  protection / breathing room"; BoI anchors spawns to geometry never on the
+  player; classic roguelikes use rejection-sampling with a distance check.)
+- **Radial-push geometry:** `d = e - c`; if `|d| >= R` skip; else `e' = c + (d/|d|)*R`;
+  clamp `e'` per-axis to room interior. Edge cases that break naive code: (a)
+  `|d| == 0` (divide-by-zero) → deterministic fallback direction; (b) room too
+  small in the push direction → after clamping `e'` is still inside R → fall back
+  to the farthest interior corner from `c`.
+
+### Codebase mechanics (verified by code-reader subagents)
+- `update()` early-returns while `this.isTeleporting` (GameScene.js:2674), so
+  `updateEnemies` is frozen for the whole teleport. Relocating enemies inside the
+  `camerafadeoutcomplete` callback (isTeleporting still true), right after
+  `player.body.reset(destX, destY)` (GameScene.js:1695), is safe and sticks.
+- `updateEnemies` overwrites `es.x/es.y` from `es.sprite.x/es.sprite.y` at the top
+  of every frame (GameScene.js:1941-1942). So you must move the **sprite**:
+  `es.sprite.body.reset(x, y)` (same call the player landing uses); setting only
+  `es.x/es.y` is clobbered next frame.
+- Select destination-room enemies with `isPointInRoom(destRoom, es.sprite.x,
+  es.sprite.y)` (lightswitch.js:171, already imported in GameScene). `currentRoomId`
+  is stale during the teleport freeze; the point-in-room test on live sprite coords
+  is authoritative. Floors are offset by FLOOR_Y_OFFSET=10000 so other-floor
+  enemies are naturally excluded.
+- `updateEnemyAI` idle→chase fires next frame if player within DETECTION_RANGE=300
+  with LOS (enemy.js:7,134). So `state='idle'` alone is not a safety guarantee —
+  the **spatial push** is the real protection; idle reset just drops in-progress
+  chase + stale nav. Combined with maze-wall LOS breaks + the 1200ms invuln, robust.
+- Interior clamp box matches `generateRoomEnemies`: `WALL_THICKNESS=16`
+  (GameScene.js:51) + margin 40 (enemy.js:63). Clamp relocated enemies to
+  `[x+56, x+W-56] × [y+56, y+H-56]`.
+- For a 720x600 room the landing sits at center+140 (y), so downward clearance is
+  only ~104px — enemies directly below the landing hit the farthest-corner
+  fallback; enemies in the dominant directions push cleanly within radius.
+
+### Decision
+Pure helpers in `stairs.js` (`STAIR_LANDING_SAFE_RADIUS`, `pushOutsideRadius`,
+`roomInteriorBounds`, `relocateEnemyFromLanding` with the corner fallback) —
+unit-tested like the existing landing helpers. Scene wiring in `onStairEnter`
+relocates + idles dest-room enemies inside the safe radius. Keep the existing
+centered landing, camera snap, spawn keep-out, and 1200ms invuln (the time-based
+safety net layered under the new spatial fix). Radius is a named constant for
+playtest tuning (start ~160).
+
+---
+
+## Automatic fluorescent lamps / ceiling lights (loop session 2026-06-15)
+
+**Context:** The 3 spec "Known bugs" (stairs landing/safe-zone, light switches on doors/open
+entrances, being-shot-disappears) are all verified-fixed on `loop` at three layers — 933 unit
+tests, the real-engine Playwright playtest (every bug guard passes), and line-by-line review.
+They remain *listed* only because the fixes live on the unmerged `loop` branch (PR #10) while
+the spec is hand-edited. Next commit per workflow: the clearest unimplemented, bug-adjacent spec
+item — **automatic lamps / fluorescent lights** ("areas that do provide light automatically in
+some rooms"), which also advances the binding "never anything pitch-black under the flashlight".
+
+### Code research (authoritative for implementation)
+- **LIVE world generator is `worldgen.js`** (rooms 720x600, infinite streaming via
+  `getRoomAt(seed, gx, gy)`), NOT legacy `level.js`/`stairs.js` (1200x1000, unused for the live
+  world). `WALL_THICKNESS = 16` (GameScene.js:51, module-local).
+- **Seed-offset registry** (all in use): enemies +10000, items +20000, doors +30000, switches
+  +40000, stairs +50000, weapons +60000, maze +70000, level +80000, lore +90000, alt-exit
+  +100000, roomVibes +130000. **FREE: +110000 and +120000.** No "traps" offset exists. → use
+  `LAMP_SEED_OFFSET = 110000` (named-constant style, like lore/maze/locations/roomVibes).
+- **Pure placement template** = `lightswitch.js createSwitchStates`: `mulberry32(seed + OFFSET)`,
+  iterate rooms, `if (room.id === 0) continue`, `if (rand() >= CHANCE) continue`, push state.
+  Ceiling lamps need NO furniture-overlap avoidance (overhead), so single deterministic position
+  like the switch (no retry loop).
+- **GameScene per-room activation**: `activateRoom(room)` (GameScene.js:324) calls a fixed
+  sequence of `activateRoom*` helpers (≈364-370), guarded by `activatedRoomIds`. Streams rooms
+  one at a time, so each helper RE-SEEDS per cell:
+  `mulberry32(this.floorSeed(room.floor) + OFFSET + room.gridX*131 + room.gridY*977)`
+  (`activateRoomSwitch`, GameScene.js:777). `this.floorSeed(f) = this.levelSeed + f*1000`.
+  Add `activateRoomLamps(room)` + init `this.lampStates = []` in an infra method.
+- **Render hook**: `updateDarkness(time)` (GameScene.js:2619). Lit rooms + spill zones draw into
+  BOTH `maskGraphics` (reveal, 0xffffff) and `lightGraphics` (warm tint 0xffffcc) BEFORE the
+  flashlight early-return `if (!isFlashlightLit(...)) return;` (line 2656). Drawing lamp pools
+  there = always-on regardless of battery. Reuse `drawRadialGlow(gfx,x,y,radius,steps,color,ringAlpha)`
+  (GameScene.js:2612) — stacked concentric `fillCircle`s, centre alpha accumulates bright.
+  Player near-field already calls it twice (mask 0xffffff@0.09, light 0xffffcc@0.003), lines
+  2693-2696. Cull lamps to `cameras.main.worldView`. Other floors are offset +10000 in world-Y
+  so the viewport cull excludes them naturally.
+- **Depth registry**: stairGlow 1, stair/crack 2, items/lore 5, exit 10, furniture/doors/switch
+  50, enemies 60, crackGlow 95 (ADD blend), lightGraphics 99, darkGraphics 100 (masked), bullets
+  150, damageFlash 190, player 200, HUD 1000. → draw lamp fixture as a world graphic at depth ~55
+  (above furniture, below enemies); it sits inside its own pool so the mask reveals it.
+- **Room theme** = `getRoomVibe(room.seed)` (roomVibes.js:206, offset +130000), cached in
+  `this.roomThemes` (GameScene.js:331). 6 vibes: furnitureStore, library, office, spaceship,
+  forest, warehouse. Use vibe to pick a cool vs warm lamp tint (harmonize, avoid monotone).
+- **Determinism/persistence**: world seed minted once per save, persisted (SAVE_VERSION 4). Lamps
+  derive purely from seed → stable day-to-day, NO save-format change, NO version bump. Do NOT
+  seed placement from time/mutable state — only `floorSeed + offset + grid coords`.
+- **Test conventions** (`__tests__/lightswitch.test.js`): vitest `describe/it/expect`; room
+  fixture `{ id, gridX, gridY, x, y, width, height, doors:[], seed }`; assert room-0 skip,
+  determinism (same seed → `toEqual`), different seeds → different, bounds, spawn-rate band over
+  many seeds, NON-VACUOUS (`length > 0` before asserting properties).
+
+### Web research (aesthetic + safety)
+- **Backrooms canon = mono-yellow warm fluorescent** ("fluorescent lights at maximum hum-buzz").
+  Warm lamp emissive ≈ `0xfbf3c8`–`0xf5e6a0`; cast/tint ≈ `0xe8d88a`/`0xffffcc`. Cool clinical
+  white (`0xeaf2ff`) reads as hospital/office — use cool for office/spaceship vibes, warm for the
+  rest, for variety.
+- **Flicker = Quake/Valve light-style string stepped at 10 fps (100ms/char)**. Brightness
+  `(char-'a')/('m'-'a')`, 'a'=0..'m'=1. Canonical fluorescent string
+  `"mmamammmmammamamaaamammma"` = mostly full-bright with rare brief dips. Lerp between chars for
+  smoothness. Make MOST lamps steady; only ~25-30% (the "one bad tube") flicker.
+- **Accessibility (hard rules)**: seizure danger band 3–55 Hz; never strobe >3 flashes/sec over
+  large area. Our model is safe: 10fps steps, rare shallow dips, and a BRIGHTNESS FLOOR (never to
+  black). Keep dips shallow and slow.
+- **Perf**: stacked-circle glow is O(steps) path tessellation/frame ×2 layers; fine for a
+  viewport's worth of lamps with viewport culling. Pre-baked radial texture is the optimization
+  if profiling ever shows a hotspot — NOT needed now (YAGNI).
+
+### Design decisions
+- Pure `src/systems/lamps.js`: `generateRoomLamps(rooms, seed, opts)` → `[{id,roomId,x,y,radius,
+  flicker,phase}]` (one central-ish lamp per lamp-room, seeded inner-box position, `LAMP_CHANCE
+  ≈ 0.3`, `LAMP_RADIUS ≈ 200`, `LAMP_FLICKER_CHANCE ≈ 0.3`). And pure `lampBrightness(lamp,
+  timeMs)` → [FLICKER_FLOOR, 1] (1 when not flickering; Quake string lerped at 100ms otherwise;
+  FLICKER_FLOOR ≈ 0.4). Both deterministic, time only enters brightness (cosmetic), never placement.
+- GameScene: `activateRoomLamps(room)` (re-seed per cell, push lampState, draw static fixture
+  bar at depth 55, tint from vibe); render pools in `updateDarkness` before the flashlight
+  early-return (cull to viewport, ring alpha × `lampBrightness`); lamps provide LIGHT ONLY (no
+  enemy-spawn suppression — that stays the light switch's special property).
+- Playtest guard: position camera/player on a current-floor lamp, force flashlight OFF, spy
+  `drawRadialGlow` → assert it is still called for the lamp position (lamps light regardless of
+  battery), plus a screenshot. Non-vacuous (`lampStates.length > 0`).

@@ -67,6 +67,49 @@ export function generateCrackPoints(startX, startY, length, segments, vertical =
   return points;
 }
 
+// True only when the player is past the rift's east edge AND within the rift
+// opening's vertical band. The band check is essential: without it, ANY eastward
+// crossing of the store's east-edge x triggers the rift transition, including a
+// door one room north or south that happens to share that x (the "rift fires on
+// an unrelated door crossing" bug).
+export function isThroughRift(playerX, playerY, edgeX, riftRect) {
+  const inBand = playerY >= riftRect.y && playerY <= riftRect.y + riftRect.height;
+  return playerX > edgeX && inBand;
+}
+
+// One frame of the rift-crossing state machine. The dimensional transition (a
+// white-out flash + jolt + crackle) fires once when the player passes THROUGH
+// the rift opening into the backrooms, and re-arms only when the player is
+// genuinely back INSIDE the entrance room (the store).
+//
+// Re-arming on a bare `playerX < edge - 40` (the crossing axis alone) is the bug:
+// a column-0 room directly north or south of the store shares the store's
+// east-edge x, so looping through one re-armed the one-shot and replayed the
+// transition the next time the player re-entered the rift's horizontal band.
+// Requiring full containment in the store's vertical extent fixes that; the
+// `edge - 40` margin stays as hysteresis against the `edge + 4` trigger so jitter
+// at the rift edge cannot double-fire. The trigger uses the rift BAND (a slice of
+// the east wall); the re-arm uses the whole store rect -- two Y regions on
+// purpose. Returns { riftCrossed, triggered }: the next latch state and whether
+// to play the transition this frame.
+export function nextRiftCrossing(playerX, playerY, room, riftRect, riftCrossed) {
+  const edge = room.x + room.width;
+  const inBackrooms = isThroughRift(playerX, playerY, edge + 4, riftRect);
+
+  if (inBackrooms && !riftCrossed) {
+    return { riftCrossed: true, triggered: true };
+  }
+
+  const backInStore =
+    playerX >= room.x && playerX < edge - 40 &&
+    playerY >= room.y && playerY <= room.y + room.height;
+  if (!inBackrooms && riftCrossed && backInStore) {
+    return { riftCrossed: false, triggered: false };
+  }
+
+  return { riftCrossed, triggered: false };
+}
+
 export function getExitPosition(room, wallThickness) {
   return {
     x: room.x + wallThickness + 40,

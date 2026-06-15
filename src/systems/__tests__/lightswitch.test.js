@@ -5,10 +5,24 @@ import {
   findNearestSwitch,
   getLitRoomIds,
   isPointInRoom,
+  computeSwitchPosition,
+  chooseSwitchWall,
   SWITCH_INTERACT_RANGE,
+  SWITCH_HALF_W,
+  SWITCH_HALF_H,
 } from '../lightswitch.js';
 
 const WALL_THICKNESS = 16;
+
+// The switch sprite footprint, derived from the module's own half-extents so the
+// tests track the real sprite size rather than hardcoding it.
+const switchFootprint = pos => ({
+  x: pos.x - SWITCH_HALF_W, y: pos.y - SWITCH_HALF_H,
+  width: SWITCH_HALF_W * 2, height: SWITCH_HALF_H * 2,
+});
+const rectsOverlap = (a, b) =>
+  a.x < b.x + b.width && a.x + a.width > b.x &&
+  a.y < b.y + b.height && a.y + a.height > b.y;
 
 function makeRoom(id, x, y, overrides = {}) {
   return {
@@ -78,6 +92,153 @@ describe('createSwitchStates', () => {
       expect(s.x).toBeLessThanOrEqual(room.x + room.width);
       expect(s.y).toBeGreaterThanOrEqual(room.y);
       expect(s.y).toBeLessThanOrEqual(room.y + room.height);
+    }
+  });
+});
+
+describe('computeSwitchPosition (door-aware)', () => {
+  const W = WALL_THICKNESS;
+
+  it('does not place a north-wall switch inside a centered north doorway', () => {
+    const room = makeRoom(1, 0, 0, { doors: [{ wall: 'north', offset: 560, width: 80 }] });
+    const pos = computeSwitchPosition(room, 'north', W);
+    // switch x must be clear of the door gap [560, 640]
+    expect(pos.x >= 560 && pos.x <= 640).toBe(false);
+  });
+
+  it('does not place an east-wall switch inside a centered east doorway', () => {
+    const room = makeRoom(1, 0, 0, { doors: [{ wall: 'east', offset: 460, width: 80 }] });
+    const pos = computeSwitchPosition(room, 'east', W);
+    // switch y must be clear of the door gap [460, 540]
+    expect(pos.y >= 460 && pos.y <= 540).toBe(false);
+  });
+
+  it('avoids every door gap when a wall has multiple doors', () => {
+    const room = makeRoom(1, 0, 0, {
+      doors: [
+        { wall: 'south', offset: 200, width: 80 },
+        { wall: 'south', offset: 700, width: 80 },
+      ],
+    });
+    const pos = computeSwitchPosition(room, 'south', W);
+    expect(pos.x >= 200 && pos.x <= 280).toBe(false);
+    expect(pos.x >= 700 && pos.x <= 780).toBe(false);
+  });
+
+  it('keeps the switch flush against the chosen wall', () => {
+    const room = makeRoom(1, 0, 0, { doors: [{ wall: 'north', offset: 560, width: 80 }] });
+    const north = computeSwitchPosition(room, 'north', W);
+    expect(north.y).toBeLessThan(room.y + 4 * W); // pinned near the north wall
+    const west = computeSwitchPosition(room, 'west', W);
+    expect(west.x).toBeLessThan(room.x + 4 * W); // pinned near the west wall
+  });
+
+  it('stays within the room bounds', () => {
+    const room = makeRoom(1, 0, 0, { doors: [{ wall: 'north', offset: 560, width: 80 }] });
+    const pos = computeSwitchPosition(room, 'north', W);
+    expect(pos.x).toBeGreaterThanOrEqual(room.x);
+    expect(pos.x).toBeLessThanOrEqual(room.x + room.width);
+  });
+});
+
+describe('computeSwitchPosition (maze-aware)', () => {
+  const W = WALL_THICKNESS;
+
+  it('moves the switch off an interior maze wall that meets the chosen wall', () => {
+    const room = makeRoom(1, 0, 0); // 1200x1000, no doors
+    // Where the door-only placement would sit (wall centre).
+    const bare = computeSwitchPosition(room, 'north', W);
+    // A 16px-thick interior wall reaching the north perimeter right under it.
+    const mazeRects = [{ x: bare.x - 8, y: room.y, width: 16, height: 200 }];
+
+    // The buggy (maze-blind) placement overlaps the wall...
+    expect(rectsOverlap(switchFootprint(bare), mazeRects[0])).toBe(true);
+    // ...the maze-aware placement does not.
+    const pos = computeSwitchPosition(room, 'north', W, mazeRects);
+    expect(rectsOverlap(switchFootprint(pos), mazeRects[0])).toBe(false);
+    expect(pos.y).toBe(bare.y); // still flush against the north wall
+  });
+
+  it('is byte-identical to the 3-arg call when no maze rects are supplied (back-compat)', () => {
+    const room = makeRoom(1, 0, 0, { doors: [{ wall: 'north', offset: 560, width: 80 }] });
+    expect(computeSwitchPosition(room, 'north', W, [])).toEqual(computeSwitchPosition(room, 'north', W));
+    expect(computeSwitchPosition(room, 'east', W, [])).toEqual(computeSwitchPosition(room, 'east', W));
+  });
+
+  it('still avoids the door gap when both a door and a maze wall are present', () => {
+    const room = makeRoom(1, 0, 0, { doors: [{ wall: 'north', offset: 200, width: 80 }] });
+    const mazeRects = [{ x: 900, y: room.y, width: 16, height: 200 }];
+    const pos = computeSwitchPosition(room, 'north', W, mazeRects);
+    expect(pos.x >= 200 && pos.x <= 280).toBe(false); // clear of the door gap
+    expect(rectsOverlap(switchFootprint(pos), mazeRects[0])).toBe(false); // clear of the maze wall
+  });
+});
+
+describe('chooseSwitchWall', () => {
+  const W = WALL_THICKNESS;
+
+  it('skips the starting wall when an interior maze wall has buried it and picks a clear wall', () => {
+    const room = makeRoom(1, 0, 0); // 1200x1000, no doors
+    // A maze wall spanning the entire north mounting band -> north has no clear span.
+    const mazeRects = [{ x: room.x, y: room.y, width: room.width, height: 40 }];
+    const wall = chooseSwitchWall(room, W, mazeRects, 0); // start at 'north'
+    expect(wall).not.toBe('north');
+    // The switch placed on the chosen wall is clear of the maze wall.
+    const pos = computeSwitchPosition(room, wall, W, mazeRects);
+    expect(mazeRects.some(r => rectsOverlap(switchFootprint(pos), r))).toBe(false);
+  });
+
+  it('still returns one of the four walls when every wall is buried (graceful fallback)', () => {
+    const room = makeRoom(1, 0, 0);
+    const mazeRects = [
+      { x: room.x, y: room.y, width: room.width, height: 40 },                       // north band
+      { x: room.x, y: room.y + room.height - 40, width: room.width, height: 40 },    // south band
+      { x: room.x, y: room.y, width: 40, height: room.height },                      // west band
+      { x: room.x + room.width - 40, y: room.y, width: 40, height: room.height },    // east band
+    ];
+    const wall = chooseSwitchWall(room, W, mazeRects, 2);
+    expect(['north', 'south', 'east', 'west']).toContain(wall);
+  });
+});
+
+describe('createSwitchStates door avoidance', () => {
+  it('never places a switch inside a door gap across many seeds', () => {
+    const rooms = [];
+    for (let i = 1; i <= 60; i++) {
+      // Each room has a door centered on every wall -- the worst case for the
+      // old midpoint placement.
+      rooms.push({
+        id: i, gridX: 0, gridY: 0, x: i * 1200, y: 0, width: 1200, height: 1000, seed: i,
+        doors: [
+          { wall: 'north', offset: 560, width: 80 },
+          { wall: 'south', offset: 560, width: 80 },
+          { wall: 'east', offset: 460, width: 80 },
+          { wall: 'west', offset: 460, width: 80 },
+        ],
+      });
+    }
+    for (let seed = 1; seed <= 8; seed++) {
+      const states = createSwitchStates(rooms, seed, WALL_THICKNESS);
+      for (const s of states) {
+        const room = rooms.find(r => r.id === s.roomId);
+        for (const d of room.doors) {
+          if (d.wall === 'north' || d.wall === 'south') {
+            const onWall = d.wall === 'north'
+              ? s.y < room.y + 40
+              : s.y > room.y + room.height - 40;
+            if (onWall) {
+              expect(s.x >= room.x + d.offset && s.x <= room.x + d.offset + d.width).toBe(false);
+            }
+          } else {
+            const onWall = d.wall === 'east'
+              ? s.x > room.x + room.width - 40
+              : s.x < room.x + 40;
+            if (onWall) {
+              expect(s.y >= room.y + d.offset && s.y <= room.y + d.offset + d.width).toBe(false);
+            }
+          }
+        }
+      }
     }
   });
 });

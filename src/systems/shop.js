@@ -107,6 +107,15 @@ export const UPGRADES = [
     base: 0,
     perLevel: 1,
   },
+  {
+    id: 'rechargeBattery',
+    name: 'Rechargeable Battery',
+    description: 'Battery slowly recharges while the flashlight is off',
+    maxLevel: 1,
+    costs: [2500],
+    base: 0,
+    perLevel: 1,
+  },
 ];
 
 export function createShopState() {

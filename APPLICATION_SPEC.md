@@ -52,6 +52,7 @@ Other details (from playtesting):
 - zombies and other enemies should not follow the player once they lose line of sight. That includes walls and hiding state.
 - gunfire should go over tables and desks and low furniture, should be blocked by armoires and other furniture
 - difficulty should scale based on distance from the starting room
+- Furniture should block light but should be illuminated. In general there should never be ANTTHING -- walls furniture enemies whatever -- that is pitch black when the flashlight is shined right on it
 
 # Dev notes
 
@@ -60,22 +61,16 @@ To create pixel art, use gemini nano banana. There is a key in the .env file at 
 # Things that still need to be implemented
 
 Feedback from me (DO NOT CHANGE):
-- most of the pixel art is not facing the right direction (e.g. the armoire is also front facing instead of top down)
-- and it is all basically way too small. What kind of sprite is 18x18! that is so small the player cant really make it out at all
-- I think the player character view should be top down -- we should see the top of the head, the shoulders, and the flashlight with arm stuck out. Similar for all the other sprites.
 - enemies should make sounds that get louder as they get closer and have attack sounds
-- the level should not change day to day, so the player can build a mental map over time
+- picking up a gun should be automatic
+  - we should have a change in the player sprite + animations for when they pick up a gun
+- 'room state' should remain from day to day. If the player picks up an item, or picks up treasure or ammo or health, or kills an enemy, that should all remain from one day to the next. Right now it resets
+- upgrade the aesthetics that are using. Look through https://commons.wikimedia.org/wiki/Category:Liminal_spaces. Download some of the images and get a sense for what we are going for. Note the variety but the common theme: unsettling. Then, use nano banana to generate a wide range of sprites, backgrounds, and wall textures to make a variety of liminal space rooms. It's difficult because we are working in a top down genre, so rely heavily on sprites rendering in 2.5d like the main player character and the enemies (e.g. with a front and a back) so the player can get a sense of what they are walking through. Canonical examples would be malls, classrooms, hospitals, warehouses, storerooms, lockers, sewers, hotels, train stations, etc. Think: the shining. Rooms that should be filled with tons of people that are empty. Weird symmetry. Claustrophia. Based on these, put together procedurally generated maps that can fit together. This may require rethinking our current room approach entirely, which is acceptable -- it would be very cool to have a large mall composed of multiple rooms that hooks directly into a hospital of multiple rooms etc. Be creative! Do fun things that you think would make sense, like adding an escalator for a mall section or going to nanobanana to get interesting sprites
 - the rooms themselves should have sounds for various things in them. We should have more variety (and more detail) for the various kinds of things that can be in given rooms, and some of them should make sounds of their own
-- we should add lamps / lights to the game, areas that do provide light automatically in some rooms
+- we should add lamps / flourescent lights to the game, areas that do provide light automatically in some rooms
+  - note: the lamp light should be limited to the room it is in. It should not leak over walls into rooms that the player has not yet been to, for example
+  - the lamps and lights can also be _glows_ that come from things that should glow
 - add a rechargeable battery to the game store (it should be very expensive)
-- in rooms with lights, the light switch shouldnt always be on the outer wall. It can sometimes be on the inner wall
 
 Known bugs:
-- Hiding places, stairs, and doors will often spawn inside walls
-- Some of the walls do not look like they have any width sometimes (just infinitely thin infinitely tall black walls). All walls should have 'thickness'
-- Getting shot makes the player character disappear
-- many of the sprite hitboxes for furniture do not match visually where they are
-- stairs do not work as expected -- the player is often dropped in a random place nowhere near the stairs themselves, and they become vulnerable to attack immediately after spawning even when the player cannot see the character yet. I think there should be a limitation on enemies spawning or being near stairs, especially when the player goes up / down them
-- there seems to be some furniture that blocks light fully. Naively it looks like a table maybe? The player can hide in it, but it looks pitch black, so it is quite confusing. Furniture should block light but should be illuminated. In general there should never be ANTTHING -- walls furniture enemies whatever -- that is pitch black when the flashlight is shined right on it
-- light switches can spawn on doors and open entrances, which should not happen
-- when the player goes through any door boundary from left to right that is on the same horizontal line as the rift entrance, the rift entrance animation plays even though it shouldnt
+- NA

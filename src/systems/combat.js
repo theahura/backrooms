@@ -33,6 +33,24 @@ export function getHurtFlash(cooldownRemaining) {
   return flash ? { alpha: 0.85, tint: HURT_TINT } : { alpha: 1, tint: null };
 }
 
+// Screen-wide red tint shown the instant the player is shot. The peak alpha is
+// capped well below 1 so the tint reads as "I got hit" without ever fully
+// obscuring the view -- the player stays visible through it. (The old damage
+// feedback used a full-opacity camera flash that erased the whole screen,
+// player included: the "being shot makes the player fully disappear" bug.)
+export const DAMAGE_FLASH_PEAK_ALPHA = 0.45;
+export const DAMAGE_FLASH_DURATION_MS = 200;
+
+// The damage-tint alpha for a given amount of flash time remaining: a linear
+// fade from the capped peak down to 0 over DAMAGE_FLASH_DURATION_MS. Clamped so
+// it is never negative and never exceeds the peak (even if more time than the
+// duration is somehow remaining).
+export function getDamageFlashAlpha(remainingMs, duration = DAMAGE_FLASH_DURATION_MS, peak = DAMAGE_FLASH_PEAK_ALPHA) {
+  if (remainingMs <= 0) return 0;
+  const frac = Math.min(remainingMs, duration) / duration;
+  return peak * frac;
+}
+
 export function createCombatState(maxHp = PLAYER_MAX_HP) {
   return {
     hp: maxHp,
@@ -73,6 +91,14 @@ export function getHealthFraction(state) {
 
 export function isInvulnerable(state) {
   return state.damageCooldown > 0;
+}
+
+// Grants a temporary invulnerability window (e.g. spawn protection after a stair
+// transition) by extending the damage cooldown. Never shortens an existing
+// longer cooldown, and never revives a dead player.
+export function grantInvulnerability(state, ms) {
+  if (state.isDead) return state;
+  return { ...state, damageCooldown: Math.max(state.damageCooldown, ms) };
 }
 
 export function applyEnemyDamage(health, damage) {

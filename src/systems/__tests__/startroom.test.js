@@ -3,6 +3,8 @@ import {
   generateStoreLayout,
   generateCrackPoints,
   getExitPosition,
+  isThroughRift,
+  nextRiftCrossing,
 } from '../startroom.js';
 
 const WALL_THICKNESS = 16;
@@ -97,6 +99,89 @@ describe('startroom', () => {
       expect(allSame).toBe(false);
     });
 
+  });
+
+  describe('isThroughRift', () => {
+    // The rift opening sits in the store's east wall. edgeX is the store's east
+    // edge; riftRect is the opening's world rect (a band on the east wall).
+    const edgeX = 720;
+    const riftRect = { x: 700, y: 240, width: 40, height: 120 }; // opening spans y 240..360
+
+    it('is true when the player is east of the edge AND within the rift band', () => {
+      expect(isThroughRift(740, 300, edgeX, riftRect)).toBe(true);
+    });
+
+    it('is false east of the edge but OUTSIDE the rift band (an aligned door one room away)', () => {
+      // Same eastward crossing X, but a full room south of the rift opening.
+      expect(isThroughRift(740, 900, edgeX, riftRect)).toBe(false);
+      // And one room north.
+      expect(isThroughRift(740, 60, edgeX, riftRect)).toBe(false);
+    });
+
+    it('is false when the player is still west of the edge (inside the store)', () => {
+      expect(isThroughRift(700, 300, edgeX, riftRect)).toBe(false);
+    });
+
+    it('is true exactly at the band edges, false just outside them', () => {
+      expect(isThroughRift(740, 240, edgeX, riftRect)).toBe(true);
+      expect(isThroughRift(740, 360, edgeX, riftRect)).toBe(true);
+      expect(isThroughRift(740, 239, edgeX, riftRect)).toBe(false);
+      expect(isThroughRift(740, 361, edgeX, riftRect)).toBe(false);
+    });
+  });
+
+  describe('nextRiftCrossing', () => {
+    // The store (entrance room) is the only opening into the backrooms (the rift
+    // in its east wall). The transition fires once when the player passes through
+    // the opening, and re-arms only when the player is genuinely back in the store.
+    const room = { x: 0, y: 0, width: 720, height: 600 }; // east edge = 720
+    const riftRect = { x: 700, y: 240, width: 40, height: 120 }; // band spans y 240..360
+
+    it('fires the transition once when the player passes through the rift into the backrooms', () => {
+      // Still inside the store: nothing fires.
+      const inStore = nextRiftCrossing(100, 300, room, riftRect, false);
+      expect(inStore).toEqual({ riftCrossed: false, triggered: false });
+      // Step east through the opening: fires.
+      const crossed = nextRiftCrossing(740, 300, room, riftRect, false);
+      expect(crossed).toEqual({ riftCrossed: true, triggered: true });
+    });
+
+    it('does not re-fire while the player keeps moving deeper into the backrooms', () => {
+      expect(nextRiftCrossing(800, 300, room, riftRect, true).triggered).toBe(false);
+      expect(nextRiftCrossing(1500, 300, room, riftRect, true).triggered).toBe(false);
+    });
+
+    it('does NOT re-arm in a room north or south of the store that shares its east-edge X', () => {
+      // (0,-1): west of the store's east edge but ABOVE the store's vertical extent.
+      expect(nextRiftCrossing(620, -300, room, riftRect, true).riftCrossed).toBe(true);
+      // (0,1): west of the edge but BELOW the store.
+      expect(nextRiftCrossing(620, 900, room, riftRect, true).riftCrossed).toBe(true);
+    });
+
+    it('does not replay the transition after looping through a column-0 neighbor of the store', () => {
+      // Player loops to the room north of the store -- must NOT re-arm...
+      const looped = nextRiftCrossing(620, -300, room, riftRect, true);
+      expect(looped.riftCrossed).toBe(true);
+      // ...so re-entering the rift's band east of the store does NOT fire again.
+      const reentry = nextRiftCrossing(740, 300, room, riftRect, looped.riftCrossed);
+      expect(reentry.triggered).toBe(false);
+    });
+
+    it('re-arms when the player genuinely returns inside the store, so a real re-entry fires again', () => {
+      const returned = nextRiftCrossing(100, 300, room, riftRect, true);
+      expect(returned.riftCrossed).toBe(false);
+      const reCross = nextRiftCrossing(740, 300, room, riftRect, returned.riftCrossed);
+      expect(reCross.triggered).toBe(true);
+    });
+
+    it('re-arms within the store rect with hysteresis on the crossing axis', () => {
+      // Y extent is inclusive of the store's far wall, exclusive just beyond it.
+      expect(nextRiftCrossing(100, 600, room, riftRect, true).riftCrossed).toBe(false);
+      expect(nextRiftCrossing(100, 601, room, riftRect, true).riftCrossed).toBe(true);
+      // X re-arm sits 40px inside the east edge (hysteresis vs the +4 trigger).
+      expect(nextRiftCrossing(680, 300, room, riftRect, true).riftCrossed).toBe(true);
+      expect(nextRiftCrossing(679, 300, room, riftRect, true).riftCrossed).toBe(false);
+    });
   });
 
   describe('getExitPosition', () => {

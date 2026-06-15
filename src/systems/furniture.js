@@ -18,7 +18,55 @@ export const FURNITURE_TYPES = {
   // Spaceship vibe: derelict control bay.
   console: { width: 96, height: 40, color: 0x2a3a40, canHide: false, blocksLight: true },
   pod: { width: 56, height: 88, color: 0x4a5a60, canHide: true, blocksLight: false },
+  // 2.5D upright billboard props -- rendered as front-elevation standees that
+  // rise above a small floor footprint (the width/height here). `spriteWidth`/
+  // `spriteHeight` are the VISUAL size; placement, collision and light occlusion
+  // all use the footprint, so a tall standee never becomes a tall wall.
+  // spriteHeight is sized against the ~48px player (a person): a vending machine
+  // and lockers stand about person-height, a tall ficus a little over, while a
+  // water cooler, payphone and shopping cart are clearly shorter than a person.
+  // spriteWidth keeps the cropped art's aspect so nothing is stretched; the
+  // footprint (width/height) is the floor the prop occupies for collision.
+  vending_machine: { width: 22, height: 14, color: 0x39506a, canHide: false, blocksLight: true, upright: true, spriteWidth: 25, spriteHeight: 52 },
+  lockers: { width: 44, height: 14, color: 0x5d7064, canHide: false, blocksLight: true, upright: true, spriteWidth: 47, spriteHeight: 50 },
+  water_cooler: { width: 15, height: 12, color: 0x9ab2c2, canHide: false, blocksLight: false, upright: true, spriteWidth: 15, spriteHeight: 36 },
+  potted_plant: { width: 18, height: 16, color: 0x4a5a36, canHide: false, blocksLight: false, upright: true, spriteWidth: 19, spriteHeight: 56 },
+  payphone: { width: 13, height: 10, color: 0x46464f, canHide: false, blocksLight: false, upright: true, spriteWidth: 13, spriteHeight: 40 },
+  shopping_cart: { width: 24, height: 16, color: 0x8a8a92, canHide: false, blocksLight: false, upright: true, spriteWidth: 25, spriteHeight: 34 },
 };
+
+// Draw-order key for an upright billboard prop. Props sort among themselves by
+// the world-Y of their base ("feet"): one further south (larger feetY) draws in
+// front. The result stays in the band [50, 60) -- above flat furniture (depth
+// 50), below enemies (60) and the darkness layer (100) -- so billboards are
+// revealed by the flashlight like all other world art and never hide an enemy.
+// Depth tracks position WITHIN the floor band (feetY - floorBaseY), with
+// headroom for rooms north of the origin; rooms far beyond the headroom clamp
+// together but are never on screen at the same time.
+const BILLBOARD_DEPTH_BASE = 50;
+const BILLBOARD_DEPTH_SPAN = 9.99;
+const BILLBOARD_DEPTH_HEADROOM = 30000;
+
+export function billboardDepth(feetY, floorBaseY) {
+  const local = feetY - floorBaseY + BILLBOARD_DEPTH_HEADROOM;
+  const clamped = Math.min(99900, Math.max(0, local));
+  return BILLBOARD_DEPTH_BASE + Math.min(BILLBOARD_DEPTH_SPAN, clamped * 0.0001);
+}
+
+// The player is pinned above the darkness/damage layers, so it can't be lowered
+// into the billboard band. Instead, an upright prop draws OVER the player (and
+// thus occludes them) exactly when the player stands behind it and overlaps it
+// on screen -- i.e. the player's feet point falls inside the prop's standee box
+// AND is north of (above) the prop's base. `prop` is { cx, baseY, spriteWidth,
+// spriteHeight }. playerFeetY is the player's ground contact point.
+const PLAYER_OVERLAP_MARGIN = 16;
+
+export function shouldPropDrawOverPlayer(prop, playerX, playerFeetY, playerHalfWidth = PLAYER_OVERLAP_MARGIN) {
+  const halfW = prop.spriteWidth / 2 + playerHalfWidth;
+  const overlapsX = Math.abs(playerX - prop.cx) < halfW;
+  const behindAndOverlapping = playerFeetY < prop.baseY && playerFeetY > prop.baseY - prop.spriteHeight;
+  return overlapsX && behindAndOverlapping;
+}
 
 // Furniture is placed as semantic clusters -- recognizable arrangements left
 // behind by whoever furnished these rooms -- rather than uniform scatter.
@@ -93,6 +141,44 @@ const WALL_MARGIN = 56;
 export function blocksBullets(type) {
   const def = FURNITURE_TYPES[type];
   return !!(def && def.blocksLight);
+}
+
+// The AI-generated furniture PNGs carry transparent padding, so the visible art
+// fills only part of the texture. opaqueBounds scans an RGBA pixel buffer and
+// returns the bounding box of the non-transparent pixels (or null if fully
+// transparent). Used to shrink a furniture piece's collision body and light
+// occluder to where the art actually is, so the hitbox matches the visuals.
+export function opaqueBounds(data, width, height, threshold = 16) {
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (data[(y * width + x) * 4 + 3] > threshold) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) return null;
+  return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+}
+
+// Maps a furniture piece's NORMALIZED opaque-art box (fractions of the texture,
+// 0..1) onto its world rect, yielding the rectangle the art actually occupies on
+// screen. The sprite is still drawn stretched to the full logical rect; this is
+// the sub-rect used for the collision body and the light occluder so they line
+// up with the visible art instead of the transparent padding.
+export function visibleFurnitureRect(item, frac) {
+  return {
+    x: item.x + frac.x * item.width,
+    y: item.y + frac.y * item.height,
+    width: frac.width * item.width,
+    height: frac.height * item.height,
+  };
 }
 
 export function createFurnitureSegments(x, y, width, height) {

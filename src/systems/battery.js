@@ -2,6 +2,12 @@ export const BATTERY_MAX = 100;
 export const BATTERY_DRAIN_PER_MS = BATTERY_MAX / 150000;
 export const FLICKER_THRESHOLD = 0.25;
 
+// Recharge rate granted by the "Rechargeable Battery" store upgrade while the
+// flashlight is off. Deliberately a third of the drain rate: regaining a second
+// of light costs roughly three seconds in the dark, so the upgrade eases battery
+// anxiety without ever letting the player keep the light on indefinitely.
+export const BATTERY_RECHARGE_PER_MS = BATTERY_DRAIN_PER_MS / 3;
+
 export function createBatteryState(maxCharge = BATTERY_MAX) {
   return {
     charge: maxCharge,

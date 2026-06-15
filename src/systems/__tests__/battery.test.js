@@ -8,7 +8,16 @@ import {
   rechargeBattery,
   getBatteryHint,
   BATTERY_RECHARGE_AMOUNT,
+  BATTERY_RECHARGE_PER_MS,
+  BATTERY_DRAIN_PER_MS,
 } from '../battery.js';
+
+describe('BATTERY_RECHARGE_PER_MS', () => {
+  it('recharges slower than the flashlight drains, so the light can never stay on forever', () => {
+    expect(BATTERY_RECHARGE_PER_MS).toBeGreaterThan(0);
+    expect(BATTERY_RECHARGE_PER_MS).toBeLessThan(BATTERY_DRAIN_PER_MS);
+  });
+});
 
 describe('createBatteryState', () => {
   it('starts fully charged and not depleted', () => {

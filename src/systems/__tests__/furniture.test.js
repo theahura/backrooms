@@ -1,9 +1,106 @@
 import { describe, it, expect } from 'vitest';
-import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES, blocksBullets } from '../furniture.js';
-import { generateMazeWalls } from '../maze.js';
+import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES, blocksBullets, opaqueBounds, visibleFurnitureRect, billboardDepth, shouldPropDrawOverPlayer } from '../furniture.js';
+import { generateMazeWalls, wallRectSegments, wallRectOccluders } from '../maze.js';
 import { getFlashlightPolygon } from '../visibility.js';
 import { createRoomWalls } from '../room.js';
 import { findNearestHideable } from '../hiding.js';
+
+describe('opaqueBounds', () => {
+  // Build a flat RGBA buffer where a sub-rectangle is opaque and the rest is
+  // transparent, mirroring an AI furniture PNG with transparent padding.
+  function buildImage(width, height, opaque) {
+    const data = new Uint8Array(width * height * 4);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const inside = x >= opaque.x && x < opaque.x + opaque.width &&
+          y >= opaque.y && y < opaque.y + opaque.height;
+        data[(y * width + x) * 4 + 3] = inside ? 255 : 0;
+      }
+    }
+    return data;
+  }
+
+  it('finds the bounding box of the opaque pixels (transparent padding ignored)', () => {
+    const data = buildImage(10, 10, { x: 3, y: 2, width: 4, height: 5 });
+    expect(opaqueBounds(data, 10, 10)).toEqual({ x: 3, y: 2, width: 4, height: 5 });
+  });
+
+  it('returns the full image when every pixel is opaque', () => {
+    const data = buildImage(8, 6, { x: 0, y: 0, width: 8, height: 6 });
+    expect(opaqueBounds(data, 8, 6)).toEqual({ x: 0, y: 0, width: 8, height: 6 });
+  });
+
+  it('returns null when the image is fully transparent', () => {
+    const data = new Uint8Array(4 * 4 * 4); // all zero alpha
+    expect(opaqueBounds(data, 4, 4)).toBeNull();
+  });
+});
+
+describe('light-blocking furniture illumination (Bug 6 / Bug 2)', () => {
+  // Standard even-odd point-in-polygon test.
+  function pointInPolygon(px, py, poly) {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const xi = poly[i].x, yi = poly[i].y;
+      const xj = poly[j].x, yj = poly[j].y;
+      const intersect = (yi > py) !== (yj > py) &&
+        px < ((xj - xi) * (py - yi)) / (yj - yi) + xi;
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+
+  it('lights the near face of a light-blocking furniture piece (sized to its visible art) instead of leaving it black', () => {
+    // A real light-blocking, tall furniture type. Its occluder is the VISIBLE
+    // art sub-rect (the same rect GameScene pushes for blocksLight furniture),
+    // derived here via visibleFurnitureRect from the furniture module.
+    const type = 'bookcase';
+    expect(FURNITURE_TYPES[type].blocksLight).toBe(true);
+    const def = FURNITURE_TYPES[type];
+    const item = { type, x: 200, y: 100, width: def.width, height: def.height };
+    const frac = { x: 0.2, y: 0.18, width: 0.6, height: 0.65 }; // padded art
+    const occ = visibleFurnitureRect(item, frac);
+
+    const origin = { x: occ.x - 100, y: occ.y + occ.height / 2 }; // to its left, facing it
+    const aim = 0;
+    const cone = Math.PI / 4;
+    const nearFace = { x: occ.x + 2, y: origin.y }; // just inside the near (left) face
+
+    // Old behavior: the full outline blocks the ray at the near face, so the
+    // footprint falls OUTSIDE the lit polygon (renders black).
+    const polyFull = getFlashlightPolygon(origin, aim, cone, wallRectSegments(occ), 300);
+    expect(pointInPolygon(nearFace.x, nearFace.y, polyFull)).toBe(false);
+
+    // New behavior: back-face culling drops the near face, so the cone reaches
+    // across the piece to its far face and the near surface is lit.
+    const polyCulled = getFlashlightPolygon(origin, aim, cone, wallRectOccluders(occ, origin), 300);
+    expect(pointInPolygon(nearFace.x, nearFace.y, polyCulled)).toBe(true);
+  });
+});
+
+describe('visibleFurnitureRect', () => {
+  it('maps a normalized opaque box onto the furniture world rect', () => {
+    const item = { x: 100, y: 200, width: 80, height: 40 };
+    const frac = { x: 0.25, y: 0.25, width: 0.5, height: 0.5 };
+    expect(visibleFurnitureRect(item, frac)).toEqual({ x: 120, y: 210, width: 40, height: 20 });
+  });
+
+  it('returns the full furniture rect when the art fills its texture', () => {
+    const item = { x: 0, y: 0, width: 60, height: 160 };
+    const frac = { x: 0, y: 0, width: 1, height: 1 };
+    expect(visibleFurnitureRect(item, frac)).toEqual({ x: 0, y: 0, width: 60, height: 160 });
+  });
+
+  it('keeps the visible rect strictly inside the furniture rect for padded art', () => {
+    const item = { x: 500, y: 300, width: 100, height: 120 };
+    const frac = { x: 0.22, y: 0.175, width: 0.58, height: 0.667 };
+    const r = visibleFurnitureRect(item, frac);
+    expect(r.x).toBeGreaterThan(item.x);
+    expect(r.y).toBeGreaterThan(item.y);
+    expect(r.x + r.width).toBeLessThan(item.x + item.width);
+    expect(r.y + r.height).toBeLessThan(item.y + item.height);
+  });
+});
 
 describe('createFurnitureSegments', () => {
   it('returns 4 segments forming a closed boundary', () => {
@@ -334,10 +431,12 @@ describe('new vibe furniture types', () => {
 describe('blocksBullets', () => {
   // Low furniture you shoot across -- the spec's "tables and desks and low
   // furniture" that gunfire goes over.
-  const LOW = ['table', 'desk', 'bed', 'vent', 'couch', 'bush', 'pod'];
+  const LOW = ['table', 'desk', 'bed', 'vent', 'couch', 'bush', 'pod',
+    'water_cooler', 'potted_plant', 'payphone', 'shopping_cart'];
   // Tall/solid cover -- the spec's "armoires and other furniture" that stops
   // gunfire.
-  const TALL = ['armoire', 'closet', 'bookcase', 'shelf', 'counter', 'tree', 'rock', 'console'];
+  const TALL = ['armoire', 'closet', 'bookcase', 'shelf', 'counter', 'tree', 'rock', 'console',
+    'vending_machine', 'lockers'];
 
   it('lets gunfire pass over low furniture', () => {
     for (const type of LOW) {
@@ -361,5 +460,105 @@ describe('blocksBullets', () => {
     // gunfire passes over it -- the hand-authored LOW/TALL lists above are the
     // ground truth and must cover the whole catalogue.
     expect([...LOW, ...TALL].sort()).toEqual(Object.keys(FURNITURE_TYPES).sort());
+  });
+});
+
+describe('billboardDepth', () => {
+  it('keeps every billboard in the band above flat furniture and below enemies', () => {
+    for (const feetY of [-50000, -600, 0, 600, 12345, 99999, 500000]) {
+      const d = billboardDepth(feetY, 0);
+      expect(d).toBeGreaterThanOrEqual(50);
+      expect(d).toBeLessThan(60);
+    }
+  });
+
+  it('draws a prop further south in front of one to the north', () => {
+    expect(billboardDepth(1600, 0)).toBeGreaterThan(billboardDepth(1000, 0));
+  });
+
+  it('never sorts a more-northern prop in front of a more-southern one', () => {
+    let prev = -Infinity;
+    for (let feetY = -2000; feetY <= 20000; feetY += 250) {
+      const d = billboardDepth(feetY, 0);
+      expect(d).toBeGreaterThanOrEqual(prev);
+      prev = d;
+    }
+  });
+
+  it('is deterministic', () => {
+    expect(billboardDepth(4321, 0)).toBe(billboardDepth(4321, 0));
+  });
+
+  it('sorts by position within the floor band, independent of which floor it is', () => {
+    const FLOOR_BAND = 5_000_000;
+    expect(billboardDepth(600 + FLOOR_BAND, FLOOR_BAND)).toBe(billboardDepth(600, 0));
+  });
+});
+
+describe('upright billboard props', () => {
+  const UPRIGHT = ['vending_machine', 'lockers', 'water_cooler', 'potted_plant', 'payphone', 'shopping_cart'];
+
+  it('stand taller than the footprint they occupy on the floor', () => {
+    for (const type of UPRIGHT) {
+      const def = FURNITURE_TYPES[type];
+      expect(def, type).toBeDefined();
+      expect(def.upright, type).toBe(true);
+      expect(def.spriteHeight, type).toBeGreaterThan(def.height);
+    }
+  });
+
+  it('place without overlap and keep their footprints inside the room', () => {
+    const profile = {
+      clusters: [[
+        { type: 'vending_machine', dx: 0, dy: 0 },
+        { type: 'lockers', dx: 140, dy: 0 },
+      ]],
+      singletons: ['water_cooler', 'potted_plant', 'payphone', 'shopping_cart'],
+    };
+    const items = generateRoomFurniture(0, 0, 720, 600, 16, 99, profile);
+    expect(items.length).toBeGreaterThan(0);
+    const overlaps = (a, b) =>
+      a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+    for (let i = 0; i < items.length; i++) {
+      const piece = items[i];
+      expect(piece.x).toBeGreaterThanOrEqual(0);
+      expect(piece.y).toBeGreaterThanOrEqual(0);
+      expect(piece.x + piece.width).toBeLessThanOrEqual(720);
+      expect(piece.y + piece.height).toBeLessThanOrEqual(600);
+      for (let j = i + 1; j < items.length; j++) {
+        expect(overlaps(piece, items[j]), `${piece.type} vs ${items[j].type}`).toBe(false);
+      }
+    }
+  });
+
+  it('treats solid upright props as cover that stops gunfire', () => {
+    expect(blocksBullets('vending_machine')).toBe(true);
+    expect(blocksBullets('lockers')).toBe(true);
+  });
+});
+
+describe('shouldPropDrawOverPlayer', () => {
+  // A tall prop whose floor base is at y=400, standing 120px upward, 100px wide,
+  // centered at x=300. The "occluder zone" is the screen box it covers.
+  const prop = { cx: 300, baseY: 400, spriteWidth: 100, spriteHeight: 120 };
+
+  it('draws over the player when the player stands behind and overlaps it', () => {
+    expect(shouldPropDrawOverPlayer(prop, 300, 350)).toBe(true);
+  });
+
+  it('does NOT draw over the player standing in front of (south of) the base', () => {
+    expect(shouldPropDrawOverPlayer(prop, 300, 450)).toBe(false);
+  });
+
+  it('does NOT draw over a player who is entirely north of the prop top', () => {
+    expect(shouldPropDrawOverPlayer(prop, 300, 250)).toBe(false);
+  });
+
+  it('does NOT draw over a player far to the side (no horizontal overlap)', () => {
+    expect(shouldPropDrawOverPlayer(prop, 500, 350)).toBe(false);
+  });
+
+  it('does NOT draw over a player standing exactly at the front base edge', () => {
+    expect(shouldPropDrawOverPlayer(prop, 300, 400)).toBe(false);
   });
 });

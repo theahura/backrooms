@@ -1,30 +1,32 @@
 import Phaser from 'phaser';
 import { calculateVelocity } from '../systems/movement.js';
-import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES, blocksBullets } from '../systems/furniture.js';
+import { generateRoomFurniture, FURNITURE_TYPES, blocksBullets, opaqueBounds, visibleFurnitureRect, billboardDepth, shouldPropDrawOverPlayer } from '../systems/furniture.js';
 import { generateMazeWalls, wallRectSegments, wallRectOccluders, doorEntryZones } from '../systems/maze.js';
 import { getRoomVibe } from '../systems/roomVibes.js';
+import { getZoneAt } from '../systems/zones.js';
+import { rollRoomLamp, lampBrightness, LAMP_SEED_OFFSET } from '../systems/lamps.js';
 import { getFlashlightPolygon, filterSegmentsNear, filterRectsNear, FLASHLIGHT_RANGE } from '../systems/visibility.js';
 import { createRoomWalls } from '../systems/room.js';
-import { STAIR_SIZE, STAIR_MARGIN, getStairTopLeft, stairKeepOut, getStairLandingPosition, stairLandingKeepOut } from '../systems/stairs.js';
+import { STAIR_SIZE, STAIR_MARGIN, getStairTopLeft, stairKeepOut, getStairLandingPosition, stairLandingKeepOut, STAIR_LANDING_SAFE_RADIUS, roomInteriorBounds, relocateEnemyFromLanding } from '../systems/stairs.js';
 import { getRoomAt, roomsWithinRadius, hasStairDown, localDistance, isRiftDoor, ROOM_WIDTH, ROOM_HEIGHT } from '../systems/worldgen.js';
 import { mulberry32 } from '../systems/random.js';
 import { generateRoomEnemies, updateEnemyAI, ENEMY_SPEED_CHASE, DETECTION_RANGE } from '../systems/enemy.js';
-import { createCombatState, applyDamage, applyHeal, updateCombat, getHealthFraction, isInvulnerable, applyEnemyDamage, isEnemyDead, getHurtFlash, ENEMY_CONTACT_DAMAGE, ENEMY_MAX_HP, CRAWLER_MAX_HP, SPITTER_MAX_HP, CRAWLER_CONTACT_DAMAGE, SPITTER_CONTACT_DAMAGE, SPITTER_PROJECTILE_DAMAGE, CORPSE_TINT, CORPSE_ALPHA, CORPSE_ANGLE, CORPSE_DEPTH, MEDKIT_HEAL_AMOUNT } from '../systems/combat.js';
+import { createCombatState, applyDamage, applyHeal, updateCombat, getHealthFraction, isInvulnerable, grantInvulnerability, applyEnemyDamage, isEnemyDead, getHurtFlash, getDamageFlashAlpha, DAMAGE_FLASH_DURATION_MS, ENEMY_CONTACT_DAMAGE, ENEMY_MAX_HP, CRAWLER_MAX_HP, SPITTER_MAX_HP, CRAWLER_CONTACT_DAMAGE, SPITTER_CONTACT_DAMAGE, SPITTER_PROJECTILE_DAMAGE, CORPSE_TINT, CORPSE_ALPHA, CORPSE_ANGLE, CORPSE_DEPTH, MEDKIT_HEAL_AMOUNT } from '../systems/combat.js';
 import { createFlashlightState, toggleFlashlight, setFlashlightHiding, isFlashlightLit, updateBatteryWithFlashlight } from '../systems/flashlight.js';
 import { calculateBulletVelocity, calculateShotgunSpread, canFire, updateFireCooldown, isBulletExpired, getBulletVelocityFromAngle, SPITTER_PROJECTILE_SPEED, SPITTER_PROJECTILE_RANGE } from '../systems/shooting.js';
 import { getMoveVelocity, resolveAimAngle, resolveFireIntent, resolveMoveVelocity, detectTouchPrimary, computeTouchLayout } from '../systems/touchControls.js';
 import { WEAPON_TYPES, createWeaponState, switchWeapon, pickupWeapon, getActiveWeapon, getEffectiveStats, generateRoomWeapon, hasAmmo, consumeAmmo, addAmmo, AMMO_PER_PICKUP } from '../systems/weapons.js';
 import { getEnemyHP, getEnemyDamage } from '../systems/scaling.js';
-import { createBatteryState, getBatteryFraction, getFlashlightConeAngle, shouldFlicker, rechargeBattery, getBatteryHint, BATTERY_RECHARGE_AMOUNT } from '../systems/battery.js';
+import { createBatteryState, getBatteryFraction, getFlashlightConeAngle, shouldFlicker, rechargeBattery, getBatteryHint, BATTERY_RECHARGE_AMOUNT, BATTERY_RECHARGE_PER_MS } from '../systems/battery.js';
 import { generateRoomItems, ITEM_TYPES } from '../systems/items.js';
 import { createInventoryState, pickupItem, useBattery, canPickupItem } from '../systems/inventory.js';
 import { getUpgradeValue, createShopState } from '../systems/shop.js';
 import { toggleDoor, getDoorCenter, findNearestDoor, DOOR_INTERACT_RANGE } from '../systems/doors.js';
-import { toggleSwitch, findNearestSwitch, getLitRoomIds, isPointInRoom, SWITCH_INTERACT_RANGE } from '../systems/lightswitch.js';
+import { toggleSwitch, findNearestSwitch, getLitRoomIds, isPointInRoom, computeSwitchPosition, chooseSwitchWall, SWITCH_INTERACT_RANGE } from '../systems/lightswitch.js';
 import { createHidingState, enterHiding, exitHiding, findNearestHideable, HIDE_INTERACT_RANGE, HIDING_SPEED_MULTIPLIER } from '../systems/hiding.js';
-import { saveGame } from '../systems/persistence.js';
+import { saveGame, resolveWorldSeed } from '../systems/persistence.js';
 import { createExplorationState, updateExploration, getWindowedMinimapData, getCurrentRoom, MINIMAP_COLORS, MINIMAP_WINDOW_CELLS } from '../systems/exploration.js';
-import { generateCrackPoints } from '../systems/startroom.js';
+import { generateCrackPoints, nextRiftCrossing } from '../systems/startroom.js';
 import { getLocation, getLocationLayout, getLocationExitPosition } from '../systems/locations.js';
 import { generateRoomLore } from '../systems/lore.js';
 import { buildRoomGraph, getRoomDistance, getDoorwayCenter, DOORWAY_SEEK_CHANCE, ROOM_TRANSITION_COOLDOWN, MAX_ROOM_DISTANCE, MAX_ROOM_ENEMIES } from '../systems/pathfinding.js';
@@ -49,9 +51,25 @@ const SPRITE_PNGS = import.meta.glob('../assets/sprites/*.png', {
 });
 
 const WALL_THICKNESS = 16;
+// Zone floor/wall textures (when generated) overlay the flat colour base. They
+// sit below furniture (depth 50) and the darkness layer (depth 100), so the
+// flashlight reveals and the darkness hides them exactly like the flat colours.
+const FLOOR_TEX_DEPTH = 1;
+const WALL_TEX_DEPTH = 2;
+// The player is pinned at depth 200 (above the darkness/damage layers so it is
+// never erased). An upright prop the player is standing BEHIND is bumped just
+// above the player so it occludes them; otherwise it sits in its billboard band.
+const PLAYER_DEPTH = 200;
+const BILLBOARD_OVER_PLAYER_DEPTH = PLAYER_DEPTH + 1;
+// Player ground-contact point relative to its center (48px display) for y-sort.
+const PLAYER_FOOT_Y_OFFSET = 18;
 // Breathing room carved out of maze walls around a room's centered stair, so
 // the stair square is never embedded in (or flush against) an internal wall.
 const STAIR_KEEPOUT_PAD = 16;
+// Invulnerability granted the moment the player materializes after a stair
+// transition, so an enemy that wandered near the landing cannot hit them before
+// they can see and react (paired with the enemy stair/landing keep-out).
+const STAIR_SPAWN_PROTECTION_MS = 1200;
 
 // Floors are stacked as non-overlapping horizontal bands in one physics world.
 // The offset is enormous so unbounded floors never collide in world space.
@@ -81,6 +99,19 @@ const FLASHLIGHT_MUZZLE_OFFSET = 16;
 // instead of the beam stabbing from a single hard apex point.
 const FLASHLIGHT_NEARFIELD_RADIUS = 50;
 const FLASHLIGHT_NEARFIELD_STEPS = 26;
+
+// Automatic ceiling lamps: a soft circular pool drawn into the reveal mask (so it
+// reads as a hole in the darkness) and the warm-tint layer. Stacked fading rings
+// like the player near-field. Mask alpha is tuned so the pool centre is nearly
+// fully revealed (always-on light) and fades smoothly to the rim.
+const LAMP_GLOW_STEPS = 30;
+const LAMP_MASK_RING_ALPHA = 0.10;
+const LAMP_LIGHT_RING_ALPHA = 0.004;
+// Cool fluorescent tubes for the clinical/institutional zones, warm sconce light
+// for the hotel (the Overlook's corridors are never daylit).
+const LAMP_TINT_COOL = 0xeaf2ff;
+const LAMP_TINT_WARM = 0xfff2d2;
+const LAMP_COOL_VIBES = new Set(['office', 'hospital', 'mall', 'warehouse']);
 
 export class GameScene extends Phaser.Scene {
   constructor() {
@@ -113,6 +144,7 @@ export class GameScene extends Phaser.Scene {
     const hasStartingShotgun = (levels.startingShotgun || 0) > 0;
     const hasStartingRifle = (levels.startingRifle || 0) > 0;
     this.hasMinimap = (levels.minimap || 0) > 0;
+    this.hasRechargeBattery = (levels.rechargeBattery || 0) > 0;
     this.weaponState = createWeaponState({
       startingPistol: hasStartingPistol,
       startingShotgun: hasStartingShotgun,
@@ -122,7 +154,12 @@ export class GameScene extends Phaser.Scene {
 
     const runCount = this.registry.get('runCount') ?? 0;
     this.registry.set('runCount', runCount + 1);
-    this.levelSeed = runCount + 1;
+    // The world seed is persisted per save and reused every run, so the level
+    // stays stable day-to-day (the player can build a mental map) while still
+    // differing between players. It is minted once on the first run of a save.
+    const worldSeed = resolveWorldSeed(this.registry.get('worldSeed'));
+    this.registry.set('worldSeed', worldSeed);
+    this.levelSeed = worldSeed;
     this.runCount = runCount;
     this.collectedLore = new Set(this.registry.get('collectedLore') ?? []);
     this.activeLocation = this.registry.get('activeLocation') ?? 'store';
@@ -131,7 +168,7 @@ export class GameScene extends Phaser.Scene {
     this.dangerState = createDangerState();
     this.runStats = createRunStats();
     this.audioSettings = this.registry.get('audioSettings') || createDefaultSettings();
-    saveGame(shopState || createShopState(), runCount + 1, [...this.collectedLore], this.unlockedLocations, this.activeLocation);
+    saveGame(shopState || createShopState(), runCount + 1, [...this.collectedLore], this.unlockedLocations, this.activeLocation, worldSeed);
   }
 
   updateWeaponStats() {
@@ -165,6 +202,14 @@ export class GameScene extends Phaser.Scene {
     // the flashlight can light their near face (visible thickness) via back-face
     // culling, while enemy line-of-sight still expands them to full outlines.
     this.mazeWallRects = [];
+    // Light-blocking furniture occludes the SAME way as maze walls: as solid
+    // rects expanded to far faces only for the flashlight (back-face culling, so
+    // the lit cone reaches the piece's near face instead of leaving it pitch
+    // black) and to full outlines for enemy line-of-sight. Sized to the visible
+    // art, not the padded logical rect.
+    this.furnitureOccluderRects = [];
+    // Per-furniture-texture normalized opaque-art box, computed once and cached.
+    this.furnitureArtFrac = new Map();
 
     this.roomFurniture = new Map();
     this.combatState = createCombatState(this.maxHp);
@@ -204,6 +249,7 @@ export class GameScene extends Phaser.Scene {
     this.createRoomGraphics();
     this.createDoorInfra();
     this.createSwitchInfra();
+    this.createLampInfra();
     this.createItems();
     this.createLoreItems();
     this.createEnemies();
@@ -310,7 +356,9 @@ export class GameScene extends Phaser.Scene {
     this.level.rooms.push(room);
     this.roomsById.set(room.id, room);
 
-    const theme = room.id === 0 ? this.activeLocationData : getRoomVibe(room.seed);
+    const zoneId = room.id === 0 ? 'store' : getZoneAt(this.floorSeed(room.floor), room.gridX, room.gridY);
+    room.zoneId = zoneId;
+    const theme = room.id === 0 ? this.activeLocationData : getRoomVibe(zoneId, room.seed);
     this.roomThemes.set(room.id, theme);
 
     this.drawRoom(this.roomGfx, room, theme);
@@ -342,12 +390,14 @@ export class GameScene extends Phaser.Scene {
       this.renderRoomMaze(this.roomGfx, mazeRects, theme);
     }
     this.drawRoomDoorways(this.roomGfx, room, theme);
+    this.applyRoomTextures(room, theme, mazeRects);
 
     this.activateRoomDoors(room);
-    this.activateRoomSwitch(room);
+    this.activateRoomSwitch(room, mazeRects);
+    this.activateRoomLamps(room);
     this.activateRoomItems(room, mazeRects);
     this.activateRoomLore(room, mazeRects);
-    this.activateRoomEnemies(room);
+    this.activateRoomEnemies(room, [...stairKeep, ...landingKeep]);
     this.activateRoomWeapon(room, mazeRects);
     this.activateRoomStairs(room);
 
@@ -497,6 +547,73 @@ export class GameScene extends Phaser.Scene {
     this.roomGfx = this.add.graphics();
     this.furnitureGfx = this.add.graphics();
     this.furnitureGfx.setDepth(50);
+    // Contact shadows for upright billboard props, drawn just below the props
+    // (depth 49) and above the floor textures so they ground the standees.
+    this.shadowGfx = this.add.graphics();
+    this.shadowGfx.setDepth(49);
+    // Upright props that the player can stand behind -- their depth is updated
+    // each frame so they occlude the player when stood behind (see update()).
+    this.billboardProps = [];
+    // Per-room floor/wall texture overlays (TileSprites). Like every other
+    // per-room object (furniture sprites, wall zones), these are never freed --
+    // rooms stay generated for the run. Unlike the single batched roomGfx this is
+    // one object per textured rect, so the count grows with exploration; if long
+    // sessions ever bog down, bake each room's textures into one RenderTexture.
+    this.roomTileSprites = [];
+  }
+
+  // Wall-band rectangles for a room's four perimeter edges, split at doorways so
+  // the gaps stay open (the floor texture shows through them). Mirrors the
+  // door-aware split used for physics walls.
+  wallBandRects(room) {
+    const t = WALL_THICKNESS;
+    const rects = [];
+    const split = (length, doors) => {
+      const sorted = [...doors].sort((a, b) => a.offset - b.offset);
+      const segs = [];
+      let cursor = 0;
+      for (const d of sorted) {
+        if (d.offset > cursor) segs.push([cursor, d.offset - cursor]);
+        cursor = d.offset + d.width;
+      }
+      if (cursor < length) segs.push([cursor, length - cursor]);
+      return segs;
+    };
+    const north = room.doors.filter(d => d.wall === 'north');
+    const south = room.doors.filter(d => d.wall === 'south');
+    const east = room.doors.filter(d => d.wall === 'east');
+    const west = room.doors.filter(d => d.wall === 'west');
+    for (const [s, len] of split(room.width, north)) rects.push({ x: room.x + s, y: room.y, width: len, height: t });
+    for (const [s, len] of split(room.width, south)) rects.push({ x: room.x + s, y: room.y + room.height - t, width: len, height: t });
+    for (const [s, len] of split(room.height, west)) rects.push({ x: room.x, y: room.y + s, width: t, height: len });
+    for (const [s, len] of split(room.height, east)) rects.push({ x: room.x + room.width - t, y: room.y + s, width: t, height: len });
+    return rects;
+  }
+
+  // Overlay the zone's tileable floor/wall textures on top of the flat-colour
+  // base drawn by drawRoom/renderRoomMaze. Tiling is aligned to world space so a
+  // multi-room zone reads as one continuous floor. No-ops (leaving the flat
+  // colours) when a zone has no generated texture, so it degrades gracefully.
+  applyRoomTextures(room, theme, mazeRects) {
+    const floorKey = theme.floorTextureKey;
+    const wallKey = theme.wallTextureKey;
+    const hasFloor = floorKey && this.textures.exists(floorKey);
+    const hasWall = wallKey && this.textures.exists(wallKey);
+    if (!hasFloor && !hasWall) return;
+
+    const tile = (key, x, y, w, h, depth) => {
+      const ts = this.add.tileSprite(x, y, w, h, key).setOrigin(0, 0).setDepth(depth);
+      ts.setTilePosition(x, y);
+      this.roomTileSprites.push(ts);
+    };
+
+    if (hasFloor) {
+      tile(floorKey, room.x, room.y, room.width, room.height, FLOOR_TEX_DEPTH);
+    }
+    if (hasWall) {
+      for (const r of this.wallBandRects(room)) tile(wallKey, r.x, r.y, r.width, r.height, WALL_TEX_DEPTH);
+      for (const r of mazeRects) tile(wallKey, r.x, r.y, r.width, r.height, WALL_TEX_DEPTH);
+    }
   }
 
   drawRoom(gfx, room, theme) {
@@ -577,7 +694,43 @@ export class GameScene extends Phaser.Scene {
 
     for (const item of furniture) {
       const spriteKey = `furniture_${item.type}`;
-      if (this.textures.exists(spriteKey)) {
+      // The collision body and light occluder track the VISIBLE art, not the
+      // padded logical rect. For a PNG the visible art fills only part of the
+      // texture (transparent margins); the procedural fallback fills the whole
+      // rect, so its visible rect is the full rect.
+      const def = FURNITURE_TYPES[item.type];
+      // Collision body / light occluder track the VISIBLE art for flat top-down
+      // furniture; for upright billboards they track the small floor FOOTPRINT
+      // (item rect) instead, so a tall standee never becomes a tall wall.
+      let visible = { x: item.x, y: item.y, width: item.width, height: item.height };
+      if (def && def.upright && this.textures.exists(spriteKey)) {
+        const cx = item.x + item.width / 2;
+        const baseY = item.y + item.height; // the standee plants on the footprint's near edge
+        // Soft contact shadow sized to the VISIBLE base width (cropped art lands
+        // the prop's feet on baseY), so it grounds the standee without the wide
+        // smear the old footprint-based ellipse produced.
+        const shadowW = def.spriteWidth * 0.9;
+        const shadowH = Math.max(7, def.spriteWidth * 0.32);
+        this.shadowGfx.fillStyle(0x000000, 0.3);
+        this.shadowGfx.fillEllipse(cx, baseY, shadowW, shadowH);
+        const sprite = this.add.sprite(cx, baseY, spriteKey);
+        sprite.setOrigin(0.5, 1);
+        sprite.setDisplaySize(def.spriteWidth, def.spriteHeight);
+        const baseDepth = billboardDepth(baseY, room.floor * FLOOR_Y_OFFSET);
+        sprite.setDepth(baseDepth);
+        this.billboardProps.push({ sprite, cx, baseY, spriteWidth: def.spriteWidth, spriteHeight: def.spriteHeight, baseDepth });
+        // Clip the standee where it would rise past the room's interior so a tall
+        // prop against the north wall never pokes through into the next room. The
+        // crop is in texture space (before display scaling); the base stays put.
+        const interiorTop = room.y + WALL_THICKNESS;
+        const overflow = interiorTop - (baseY - def.spriteHeight);
+        if (overflow > 0) {
+          const frameH = sprite.frame.height;
+          const cropTop = Math.min(frameH, overflow * frameH / def.spriteHeight);
+          sprite.setCrop(0, cropTop, sprite.frame.width, frameH - cropTop);
+        }
+        // visible stays the footprint rect (collision/occluder use the base)
+      } else if (this.textures.exists(spriteKey)) {
         const sprite = this.add.sprite(
           item.x + item.width / 2,
           item.y + item.height / 2,
@@ -585,25 +738,53 @@ export class GameScene extends Phaser.Scene {
         );
         sprite.setDisplaySize(item.width, item.height);
         sprite.setDepth(50);
+        visible = visibleFurnitureRect(item, this.getFurnitureArtFrac(spriteKey));
       } else {
         gfx.fillStyle(item.color, 1);
         gfx.fillRect(item.x, item.y, item.width, item.height);
       }
 
       const zone = this.add.zone(
-        item.x + item.width / 2,
-        item.y + item.height / 2,
-        item.width,
-        item.height
+        visible.x + visible.width / 2,
+        visible.y + visible.height / 2,
+        visible.width,
+        visible.height
       );
       zone.setData('blocksBullets', blocksBullets(item.type));
       this.furnitureGroup.add(zone);
 
+      // Light-blocking furniture occludes as a back-face-culled rect (like maze
+      // walls) sized to the visible art, so the cone lights its near face
+      // (visible thickness) instead of leaving the footprint pitch black.
       if (FURNITURE_TYPES[item.type] && FURNITURE_TYPES[item.type].blocksLight) {
-        const segments = createFurnitureSegments(item.x, item.y, item.width, item.height);
-        this.wallSegments.push(...segments);
+        this.furnitureOccluderRects.push(visible);
       }
     }
+  }
+
+  // Normalized opaque-art bounding box for a furniture texture (fractions of the
+  // texture, 0..1), computed once via an offscreen scan and cached. Falls back
+  // to the full rect if the texture cannot be inspected.
+  getFurnitureArtFrac(key) {
+    if (this.furnitureArtFrac.has(key)) return this.furnitureArtFrac.get(key);
+    let frac = { x: 0, y: 0, width: 1, height: 1 };
+    const tex = this.textures.get(key);
+    const src = tex && tex.getSourceImage && tex.getSourceImage();
+    if (src && src.width && src.height && typeof document !== 'undefined') {
+      const w = src.width;
+      const h = src.height;
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(src, 0, 0);
+      const bounds = opaqueBounds(ctx.getImageData(0, 0, w, h).data, w, h);
+      if (bounds) {
+        frac = { x: bounds.x / w, y: bounds.y / h, width: bounds.width / w, height: bounds.height / h };
+      }
+    }
+    this.furnitureArtFrac.set(key, frac);
+    return frac;
   }
 
   renderRoomMaze(gfx, mazeRects, theme) {
@@ -723,20 +904,19 @@ export class GameScene extends Phaser.Scene {
     this.switchSprites = new Map();
   }
 
-  activateRoomSwitch(room) {
+  activateRoomSwitch(room, mazeRects = []) {
     if (room.id === 0) return;
     const SWITCH_CHANCE = 0.15;
     const WALLS = ['north', 'south', 'east', 'west'];
     const rand = mulberry32(this.floorSeed(room.floor) + 40000 + room.gridX * 131 + room.gridY * 977);
     if (rand() >= SWITCH_CHANCE) return;
 
-    const wall = WALLS[Math.floor(rand() * WALLS.length)];
-    const inset = WALL_THICKNESS + 4;
-    let x, y;
-    if (wall === 'north') { x = room.x + room.width / 2; y = room.y + inset; }
-    else if (wall === 'south') { x = room.x + room.width / 2; y = room.y + room.height - inset; }
-    else if (wall === 'east') { x = room.x + room.width - inset; y = room.y + room.height / 2; }
-    else { x = room.x + inset; y = room.y + room.height / 2; }
+    // Place the switch flush to a wall but clear of any doorway AND of any
+    // interior maze wall on it (the door- and maze-aware free-span search lives
+    // in lightswitch.js). chooseSwitchWall skips a wall a maze wall has buried.
+    const startWall = Math.floor(rand() * WALLS.length);
+    const wall = chooseSwitchWall(room, WALL_THICKNESS, mazeRects, startWall);
+    const { x, y } = computeSwitchPosition(room, wall, WALL_THICKNESS, mazeRects);
 
     const sw = { id: this.nextSwitchId++, roomId: room.id, x, y, isOn: false };
     this.switchStates.push(sw);
@@ -749,6 +929,43 @@ export class GameScene extends Phaser.Scene {
   onToggleSwitch(switchId) {
     this.switchStates = toggleSwitch(this.switchStates, switchId);
     this.playSound('switch_click');
+  }
+
+  createLampInfra() {
+    this.lampStates = [];
+    this.nextLampId = 0;
+  }
+
+  // Automatic ceiling lamp for this room (rare-ish, seeded per cell so the world
+  // is stable day-to-day). A lamp lights a local pool on its own -- unlike a
+  // light switch it provides light only and does not suppress enemy spawns.
+  // Seeds a per-cell PRNG (offset + grid coords, like activateRoomSwitch) and
+  // defers to the shared rollRoomLamp placement, so the live streamed path uses
+  // the exact formula the pure lamps module's unit tests cover.
+  activateRoomLamps(room) {
+    if (room.id === 0) return;
+    const rand = mulberry32(this.floorSeed(room.floor) + LAMP_SEED_OFFSET + room.gridX * 131 + room.gridY * 977);
+    const placement = rollRoomLamp(room, rand);
+    if (!placement) return;
+
+    const vibe = this.roomThemes.get(room.id);
+    const tint = vibe && LAMP_COOL_VIBES.has(vibe.id) ? LAMP_TINT_COOL : LAMP_TINT_WARM;
+
+    this.lampStates.push({ id: this.nextLampId++, roomId: room.id, ...placement, tint });
+    this.drawLampFixture(placement.x, placement.y, tint);
+  }
+
+  // The fixture itself: a dark troffer housing with two bright fluorescent tubes,
+  // drawn once above the furniture layer. It sits inside its own light pool, so
+  // the darkness mask always reveals it.
+  drawLampFixture(x, y, tint) {
+    const gfx = this.add.graphics();
+    gfx.setDepth(55);
+    gfx.fillStyle(0x26282c, 0.92);
+    gfx.fillRoundedRect(x - 34, y - 11, 68, 22, 4);
+    gfx.fillStyle(tint, 0.9);
+    gfx.fillRoundedRect(x - 30, y - 6, 28, 12, 2);
+    gfx.fillRoundedRect(x + 2, y - 6, 28, 12, 2);
   }
 
   onToggleDoor(doorId) {
@@ -1030,7 +1247,7 @@ export class GameScene extends Phaser.Scene {
     const playerY = spawnRoom.y + spawnRoom.height / 2;
 
     this.player = this.physics.add.sprite(playerX, playerY, 'player_down');
-    this.player.setDepth(200);
+    this.player.setDepth(PLAYER_DEPTH);
     // Directional 64px PNG displayed at 48px (scale 0.75). Arcade bodies are
     // multiplied by the sprite's display scale, so 32 yields a ~24px effective
     // hitbox -- unchanged from the pre-directional 40px/19 player.
@@ -1116,11 +1333,11 @@ export class GameScene extends Phaser.Scene {
     this.physics.add.collider(this.enemyGroup, this.enemyGroup);
   }
 
-  activateRoomEnemies(room) {
+  activateRoomEnemies(room, keepOut = []) {
     const furniture = this.roomFurniture.get(room.id) || [];
     const spawnPoints = generateRoomEnemies(
       room.x, room.y, room.width, room.height,
-      WALL_THICKNESS, room.seed, furniture, room.id, room.distance
+      WALL_THICKNESS, room.seed, furniture, room.id, room.distance, keepOut
     );
 
     for (const spawn of spawnPoints) {
@@ -1230,7 +1447,7 @@ export class GameScene extends Phaser.Scene {
     if (this.combatState.hp < before.hp) {
       this.playSound('player_damage');
       this.cameras.main.shake(100, 0.01);
-      this.cameras.main.flash(150, 255, 0, 0);
+      this.triggerDamageFlash();
 
       if (this.combatState.isDead) {
         this.onPlayerDeath();
@@ -1506,15 +1723,16 @@ export class GameScene extends Phaser.Scene {
   // Re-arms when the player returns to the store so every entry transitions.
   updateRiftCrossing() {
     if (this.currentFloor !== 0) return;
-    const room = this.entranceRoom;
-    const inBackrooms = this.player.x > room.x + room.width + 4;
-    if (inBackrooms && !this.riftCrossed) {
-      this.riftCrossed = true;
+    // The one-shot transition fires only when the player passes THROUGH the rift
+    // opening into the backrooms, and re-arms only once they are genuinely back
+    // inside the store (not merely west of its east edge -- see nextRiftCrossing).
+    const { riftCrossed, triggered } = nextRiftCrossing(
+      this.player.x, this.player.y, this.entranceRoom, this.riftRect, this.riftCrossed);
+    this.riftCrossed = riftCrossed;
+    if (triggered) {
       this.cameras.main.flash(500, 235, 225, 190);
       this.cameras.main.shake(250, 0.006);
       this.playSound('stair_transition');
-    } else if (!inBackrooms && this.riftCrossed && this.player.x < room.x + room.width - 40) {
-      this.riftCrossed = false;
     }
   }
 
@@ -1643,6 +1861,19 @@ export class GameScene extends Phaser.Scene {
 
       player.body.reset(destX, destY);
       player.body.enable = true;
+      // Clear a safe zone around the landing: relocate any enemy standing near
+      // the spot the player materializes on, so they are never attacked the
+      // instant they arrive while still facing away (the spawn keep-out only
+      // covers spawning; enemies wander). Runs inside the teleport freeze, so
+      // moving the sprite bodies sticks.
+      this.clearLandingZone(destRoom, destX, destY);
+      // Snap the camera onto the landing while the screen is still black.
+      // The camera smooth-follows the player (startFollow lerp 0.1); without an
+      // explicit snap it would ease in across the (huge, cross-floor) teleport
+      // distance, so the fade-in would reveal the player far off-centre --
+      // "dropped in a random place nowhere near the stairs".
+      this.cameras.main.centerOn(destX, destY);
+      this.combatState = grantInvulnerability(this.combatState, STAIR_SPAWN_PROTECTION_MS);
       this.runStats = updateMaxFloor(this.runStats, destFloor);
 
       this.cameras.main.fadeIn(300, 0, 0, 0);
@@ -1651,6 +1882,40 @@ export class GameScene extends Phaser.Scene {
         this.isTeleporting = false;
       });
     });
+  }
+
+  // Push any enemy currently inside the stair-landing safe radius out to its
+  // boundary (clamped into the room interior), so the player never materializes
+  // within attack range of an enemy. The spatial push is the actual protection
+  // (an idle enemy with line of sight re-chases next frame, so resetting to idle
+  // only cancels in-progress chase/stale navigation, it is not a safety
+  // guarantee). isPointInRoom is floor-safe because floors are offset by a large
+  // world-Y gap, so other-floor enemies never match destRoom. The pure relocation
+  // geometry lives in stairs.js; here we apply it to the live sprite bodies. Move
+  // the sprite via body.reset -- updateEnemies overwrites enemyState.x/y from the
+  // sprite each frame, so setting only the state would be clobbered.
+  clearLandingZone(destRoom, landingX, landingY) {
+    const landing = { x: landingX, y: landingY };
+    const bounds = roomInteriorBounds(destRoom, WALL_THICKNESS);
+    for (const es of this.enemyStates) {
+      if (!isPointInRoom(destRoom, es.sprite.x, es.sprite.y)) continue;
+      const moved = relocateEnemyFromLanding(
+        { x: es.sprite.x, y: es.sprite.y }, landing, bounds, STAIR_LANDING_SAFE_RADIUS
+      );
+      if (moved.x === es.sprite.x && moved.y === es.sprite.y) continue;
+      es.sprite.body.reset(moved.x, moved.y);
+      es.x = moved.x;
+      es.y = moved.y;
+      es.lastKnownX = moved.x;
+      es.lastKnownY = moved.y;
+      es.velocityX = 0;
+      es.velocityY = 0;
+      es.state = 'idle';
+      es.searchTimer = 0;
+      es.wanderTimer = 0;
+      es.targetDoorway = null;
+      es.currentRoomId = destRoom.id;
+    }
   }
 
   onDayComplete(newLocation) {
@@ -1807,7 +2072,7 @@ export class GameScene extends Phaser.Scene {
     if (this.combatState.hp < before.hp) {
       this.playSound('player_damage');
       this.cameras.main.shake(100, 0.01);
-      this.cameras.main.flash(150, 255, 0, 0);
+      this.triggerDamageFlash();
 
       if (this.combatState.isDead) {
         this.onPlayerDeath();
@@ -1852,6 +2117,7 @@ export class GameScene extends Phaser.Scene {
     const losSegments = [
       ...filterSegmentsNear(playerPos, DETECTION_RANGE + 60, this.wallSegments),
       ...filterRectsNear(playerPos, DETECTION_RANGE + 60, this.mazeWallRects).flatMap(wallRectSegments),
+      ...filterRectsNear(playerPos, DETECTION_RANGE + 60, this.furnitureOccluderRects).flatMap(wallRectSegments),
     ];
     const litRoomIds = getLitRoomIds(this.switchStates);
     if (!litRoomIds.includes(0)) litRoomIds.push(0);
@@ -2016,6 +2282,21 @@ export class GameScene extends Phaser.Scene {
 
     const isMoving = this.player.body.velocity.x !== 0 || this.player.body.velocity.y !== 0;
     this.applyDirectionalFrame(this.player, 'player', this.playerAngle || 0, isMoving);
+  }
+
+  // Y-sort upright props against the player: a prop the player is standing behind
+  // (and overlapping on screen) is bumped above the player so it occludes them;
+  // otherwise it stays in its billboard band below the darkness. Only the prop(s)
+  // the player actually overlaps are lifted, so they sit in the player's own lit
+  // near-field rather than glowing in the dark.
+  updateBillboardOcclusion() {
+    if (!this.player || !this.billboardProps.length) return;
+    const px = this.player.x;
+    const pFeetY = this.player.y + PLAYER_FOOT_Y_OFFSET;
+    for (const prop of this.billboardProps) {
+      const over = shouldPropDrawOverPlayer(prop, px, pFeetY);
+      prop.sprite.setDepth(over ? BILLBOARD_OVER_PLAYER_DEPTH : prop.baseDepth);
+    }
   }
 
   drawHUD() {
@@ -2467,6 +2748,34 @@ export class GameScene extends Phaser.Scene {
     const bitmapMask = new Phaser.Display.Masks.BitmapMask(this, this.maskGraphics);
     bitmapMask.invertAlpha = true;
     this.darkGraphics.setMask(bitmapMask);
+
+    // Red damage tint shown when the player is shot. Depth 190 keeps it BELOW the
+    // player (200) so it reddens the world for feedback but never covers the
+    // player -- a world object the main camera draws and the HUD camera ignores.
+    this.damageFlashGraphics = this.add.graphics();
+    this.damageFlashGraphics.setDepth(190);
+    this.damageFlashRemaining = 0;
+  }
+
+  // Start the red damage tint (replaces the old full-opacity camera flash that
+  // erased the whole screen, player included, on every hit).
+  triggerDamageFlash() {
+    this.damageFlashRemaining = DAMAGE_FLASH_DURATION_MS;
+  }
+
+  // Repaint the damage tint each frame as it decays. Fills the camera's world
+  // view (so it covers the viewport at any zoom/scroll, like the darkness) at the
+  // capped, fading alpha from getDamageFlashAlpha -- never fully opaque.
+  updateDamageFlash(delta) {
+    this.damageFlashGraphics.clear();
+    if (this.damageFlashRemaining <= 0) return;
+    this.damageFlashRemaining = Math.max(0, this.damageFlashRemaining - delta);
+    const alpha = getDamageFlashAlpha(this.damageFlashRemaining);
+    if (alpha <= 0) return;
+    const v = this.cameras.main.worldView;
+    const pad = 100;
+    this.damageFlashGraphics.fillStyle(0xff0000, alpha);
+    this.damageFlashGraphics.fillRect(v.x - pad, v.y - pad, v.width + pad * 2, v.height + pad * 2);
   }
 
   drawPolygon(gfx, polygon) {
@@ -2526,6 +2835,19 @@ export class GameScene extends Phaser.Scene {
       this.lightGraphics.fillRect(zone.x, zone.y, zone.width, zone.height);
     }
 
+    // Automatic ceiling lamps light a local pool regardless of the flashlight or
+    // battery, so they are drawn BEFORE the flashlight early-return. Cull to the
+    // viewport; other floors sit far away in world-Y and fall outside it.
+    for (const lamp of this.lampStates) {
+      if (lamp.x + lamp.radius < view.x || lamp.x - lamp.radius > view.x + view.width ||
+          lamp.y + lamp.radius < view.y || lamp.y - lamp.radius > view.y + view.height) continue;
+      const b = lampBrightness(lamp, time);
+      this.drawRadialGlow(this.maskGraphics, lamp.x, lamp.y, lamp.radius,
+        LAMP_GLOW_STEPS, 0xffffff, LAMP_MASK_RING_ALPHA * b);
+      this.drawRadialGlow(this.lightGraphics, lamp.x, lamp.y, lamp.radius,
+        LAMP_GLOW_STEPS, lamp.tint, LAMP_LIGHT_RING_ALPHA * b);
+    }
+
     if (!isFlashlightLit(this.flashlightState)) return;
 
     const coneAngle = getFlashlightConeAngle(this.batteryState, this.flashlightAngle);
@@ -2542,6 +2864,7 @@ export class GameScene extends Phaser.Scene {
     const occluders = [
       ...filterSegmentsNear(origin, FLASHLIGHT_RANGE, this.wallSegments),
       ...filterRectsNear(origin, FLASHLIGHT_RANGE, this.mazeWallRects).flatMap(r => wallRectOccluders(r, origin)),
+      ...filterRectsNear(origin, FLASHLIGHT_RANGE, this.furnitureOccluderRects).flatMap(r => wallRectOccluders(r, origin)),
     ];
     const polygon = getFlashlightPolygon(
       origin,
@@ -2638,7 +2961,7 @@ export class GameScene extends Phaser.Scene {
     this.player.setVelocity(velocity.x, velocity.y);
 
     this.combatState = updateCombat(this.combatState, delta);
-    this.batteryState = updateBatteryWithFlashlight(this.batteryState, this.flashlightState, delta);
+    this.batteryState = updateBatteryWithFlashlight(this.batteryState, this.flashlightState, delta, this.hasRechargeBattery ? BATTERY_RECHARGE_PER_MS : 0);
     this.fireCooldown = updateFireCooldown(this.fireCooldown, delta);
 
     const fireButtonDown = this.touchMode ? this.isFireHeld() : false;
@@ -2692,7 +3015,9 @@ export class GameScene extends Phaser.Scene {
     this.updateEnemyBullets();
     this.updateEnemies(delta);
     this.drawPlayer();
+    this.updateBillboardOcclusion();
     this.updateDarkness(time);
+    this.updateDamageFlash(delta);
     this.updateCrackGlow(time);
     this.updateStairGlow(time);
     this.drawDoors();
