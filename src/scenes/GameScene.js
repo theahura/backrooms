@@ -24,7 +24,7 @@ import { toggleSwitch, findNearestSwitch, getLitRoomIds, isPointInRoom, computeS
 import { createHidingState, enterHiding, exitHiding, findNearestHideable, HIDE_INTERACT_RANGE, HIDING_SPEED_MULTIPLIER } from '../systems/hiding.js';
 import { saveGame, resolveWorldSeed } from '../systems/persistence.js';
 import { createExplorationState, updateExploration, getWindowedMinimapData, getCurrentRoom, MINIMAP_COLORS, MINIMAP_WINDOW_CELLS } from '../systems/exploration.js';
-import { generateCrackPoints, isThroughRift } from '../systems/startroom.js';
+import { generateCrackPoints, nextRiftCrossing } from '../systems/startroom.js';
 import { getLocation, getLocationLayout, getLocationExitPosition } from '../systems/locations.js';
 import { generateRoomLore } from '../systems/lore.js';
 import { buildRoomGraph, getRoomDistance, getDoorwayCenter, DOORWAY_SEEK_CHANCE, ROOM_TRANSITION_COOLDOWN, MAX_ROOM_DISTANCE, MAX_ROOM_ENEMIES } from '../systems/pathfinding.js';
@@ -1553,19 +1553,16 @@ export class GameScene extends Phaser.Scene {
   // Re-arms when the player returns to the store so every entry transitions.
   updateRiftCrossing() {
     if (this.currentFloor !== 0) return;
-    const room = this.entranceRoom;
-    const edge = room.x + room.width;
-    // Only a crossing THROUGH the rift opening (east of the edge AND within the
-    // rift's vertical band) counts -- otherwise any eastward door crossing that
-    // shares the store's east-edge x would spuriously replay the transition.
-    const inBackrooms = isThroughRift(this.player.x, this.player.y, edge + 4, this.riftRect);
-    if (inBackrooms && !this.riftCrossed) {
-      this.riftCrossed = true;
+    // The one-shot transition fires only when the player passes THROUGH the rift
+    // opening into the backrooms, and re-arms only once they are genuinely back
+    // inside the store (not merely west of its east edge -- see nextRiftCrossing).
+    const { riftCrossed, triggered } = nextRiftCrossing(
+      this.player.x, this.player.y, this.entranceRoom, this.riftRect, this.riftCrossed);
+    this.riftCrossed = riftCrossed;
+    if (triggered) {
       this.cameras.main.flash(500, 235, 225, 190);
       this.cameras.main.shake(250, 0.006);
       this.playSound('stair_transition');
-    } else if (!inBackrooms && this.riftCrossed && this.player.x < edge - 40) {
-      this.riftCrossed = false;
     }
   }
 
