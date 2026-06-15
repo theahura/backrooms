@@ -3780,3 +3780,88 @@ item). `onStairEnter` line 1695 is the only large cross-world `player.body.reset
 GameScene wiring is verified by playtest per the codebase split (no clean unit test exists — the only
 computation, `getStairLandingPosition`, is already unit-tested; a "centerOn was called" assertion
 would be a forbidden mock-test). CI is build-only; the durable net is the green vitest suite.
+
+---
+
+# Task: Re-verify the 5 spec "Known bugs"; fix the rift transition replaying on re-entry (Bug 5, current spec)
+
+Re-read the APPLICATION_SPEC "Known bugs" (5 items) and INDEPENDENTLY re-verified each in the real
+engine rather than trusting CURRENT-PROGRESS (which itself warns "claimed-fixes have slipped past
+playtesting"). Chronology that scoped the search: the rift+switch fix `44c87ac` ("rift flash only
+through the opening; light switches avoid doorways", Jun 14 18:12) landed AFTER the author first
+reported the rift/switch items in `f88075a` (17:02), and the prior agent's rift "verification"
+checked "200px above/below the same edge-X" — the WRONG axis for the author's "same horizontal line"
+(same Y). That asymmetry flagged the rift as the prime suspect.
+
+## Verdicts (empirical)
+- **Bug 1 (spawn inside walls)** — FIXED. Keep-outs across furniture/hiding/stairs/doors/pickups +
+  the player landing; `placement.test.js` full-pipeline guards; 895 vitest green.
+- **Bug 2 (player disappears when shot)** — FIXED. `combat.getHurtFlash` returns alpha 0.85 or 1
+  (never 0); `GameScene.drawPlayer` is the only player alpha/tint mutator (hiding=0.3 intentional);
+  no `setVisible(false)`/`destroy` on the player. The hurt state blinks red, never invisible.
+- **Bug 3 (stairs drop player off-screen / enemies on stairs)** — FIXED. `onStairEnter` does
+  `cameras.main.centerOn(destX,destY)` (camera snap), `grantInvulnerability(1200ms)`, and
+  `activateRoom` threads `[stairKeepOut, stairLandingKeepOut]` into the enemy spawner. Playtest guard
+  present (`stair landing offCentre`).
+- **Bug 4 (light switches on doors AND open entrances)** — FIXED. Proved empirically with a pure
+  enumeration (mirrors `activateRoomSwitch`'s RNG + `computeSwitchPosition`): across seeds 1..300,
+  **7543 switches placed, 0 on a door opening, 0 within 30px of a same-wall door**. KEY fact: in
+  `worldgen.getRoomAt`, `room.doors` already contains EVERY opening (east/west/north/south) — there
+  is no separate "open entrance" concept — so `lightswitch.freeWallOffset` (which centers the switch
+  in the largest door-free span with `SWITCH_DOOR_CLEARANCE=30`) inherently avoids doors AND open
+  entrances. Each wall has ≤1 door, so the degenerate `span/2` fallback (which could land on a door)
+  never triggers. (Latent, orthogonal: `lightswitch.createSwitchStates` line 69 `room.id === 0` is
+  dead — worldgen ids are strings "gx,gy" — but `GameScene.activateRoomSwitch` gates the store via
+  numeric id 0 correctly and is the live path; switches never spawn in the store regardless.)
+- **Bug 5 (rift entrance animation replays on a door crossing "on the same horizontal line as the
+  rift entrance")** — **BROKEN.** This is the fix.
+
+## Bug 5 root cause (reproduced deterministically in the real engine)
+`GameScene.updateRiftCrossing` (GameScene.js:1554) latches `this.riftCrossed` and re-arms it with
+`else if (!inBackrooms && this.riftCrossed && this.player.x < edge - 40)`. The forward detection
+`isThroughRift(playerX, playerY, edge+4, riftRect)` is BAND-AWARE (gates on the rift's vertical Y
+band), but the **re-arm is single-axis** (`player.x < edge - 40`) — it ignores Y. The store's east
+edge X (720) is a shared grid line: column-0 rooms directly north (0,-1) / south (0,1) of the store
+— reachable by looping store→rift→(1,0)→(1,-1)→(0,-1) etc. (DOOR_PROB 0.62) — also satisfy
+`x < edge-40`. Stepping into one wrongly re-arms the one-shot; the next time the player re-enters the
+rift's horizontal band anywhere east of the store, the full dimensional-transition (white-out
+`flash(500)` + `shake(250)` + `playSound('stair_transition')`) replays. Repro (real `window.__game`,
+wrapping `cameras.main.flash`): genuine crossing → flash#1; move to (edge-100, y=-300) [room (0,-1),
+NORTH of the store, y∈[-600,0]] → `riftCrossed` wrongly reset to false; re-enter band east → **flash#2
+(spurious)**. Control: a genuine in-store return re-arms and re-crossing legitimately re-flashes. The
+RESEARCH-NOTES Bug-8 entry above already prescribed the missing half of the fix: "require a real
+left→right crossing of the edge … extract a pure predicate"; the shipped fix added only the Y-band
+gate, not a store-scoped re-arm.
+
+## Fix design (root cause, determinism-safe, convention-matching)
+Extract the per-frame decision into a pure `nextRiftCrossing(playerX, playerY, room, riftRect,
+riftCrossed)` in `startroom.js` (beside `isThroughRift`; scalars-first + rect-object style), returning
+`{ riftCrossed, triggered }`. Re-arm ONLY when the player is genuinely back INSIDE the entrance room
+(the store): full Y-containment `playerY ∈ [room.y, room.y+height]` plus `playerX ∈ [room.x,
+edge-40)`. The `edge-40` margin is retained as HYSTERESIS on the crossing axis so jitter at the rift
+edge cannot double-fire (trigger at x>edge+4, re-arm at x<edge-40 → 44px dead-band). `GameScene.
+updateRiftCrossing` becomes a thin call site (pure fn → apply the 3 side effects on `triggered`).
+No PRNG/seed/save-format/level-gen change → worlds byte-identical; `riftCrossed` is a private latch
+read nowhere else (confirmed: 5 sites, all in init + this method).
+
+## Research applied (game-dev consensus, cross-referenced)
+- A single-axis coordinate threshold standing in for region membership is a known anti-pattern: it
+  defines an unbounded half-plane, so every room sharing that grid-line X qualifies. Fix = full
+  **point-in-AABB containment** (BOTH axes) of the specific room, or room-identity (`currentRoomId ===
+  entranceRoom.id`). Refs: MDN AABB / LearnOpenGL collision; RogueBasin grid-room "which rect contains
+  the tile"; Godot Area2D / Unity OnTriggerEnter2D region-overlap is the engine-blessed alternative to
+  hand-rolled coordinate thresholds.
+- Model a one-shot trigger as a 2-state FSM (Armed/Fired) with guarded transitions, firing on the
+  outside→inside transition (entry action) and re-arming on inside→outside — not a bare boolean with
+  an ad-hoc re-arm. Ref: Game Programming Patterns "State" (Nystrom) — the "air-jumping" flag bug is
+  the temporal analogue of this spatial re-fire.
+- **Hysteresis / Schmitt trigger** (two distinct thresholds, enter vs re-arm, with a gap larger than
+  per-frame jitter) is the standard debounce for a body oscillating at a boundary. Keeping `edge-40`
+  vs the `edge+4` trigger IS this. Refs: Schmitt trigger (Wikipedia); Phaser/Nesdev camera-deadzone
+  threads. Half-open-interval boundary ownership (`floor(pos/size)`) is the complementary cure for
+  "adjacent regions share an edge coordinate."
+- Codebase split (RESEARCH-NOTES:3432, docs.md): GameScene wiring verified by `playtest.mjs`; pure
+  `src/systems/*.js` unit-tested. So: unit-test `nextRiftCrossing` in `startroom.test.js` (literal
+  fixtures, boundary assertions, mirror the `isThroughRift` block) AND add a PERMANENT real-engine
+  guard to `playtest.mjs` (drive the bug path, assert no spurious second flash; non-vacuous: assert a
+  genuine in-store return + re-cross DOES re-flash). Precedent: the stair-landing playtest guard.
