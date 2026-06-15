@@ -3723,3 +3723,60 @@ to `persistence.js`; `saveGame(...,worldSeed=null)` + `loadGame` returns `worldS
 `SAVE_VERSION` 3->4; thread `worldSeed` through registry; `GameScene.init` resolves+persists and sets
 `this.levelSeed = worldSeed`. Docs (`src/docs.md`, `src/scenes/docs.md`, `src/systems/docs.md`) call the
 seed "per-run from runCount" / save shape `{version:3,...}` — update to the persisted worldSeed model.
+
+---
+
+## Known-bugs RE-VERIFICATION (fresh, playtest-driven) + Bug 5 stair-camera root cause
+
+Re-read APPLICATION_SPEC "Known bugs" (8 items, all previously claimed fixed) and re-verified each
+against the LIVE code with the real `playtest.mjs` harness + a throwaway introspection probe driving
+`window.__game`. The spec is a living, playtest-driven doc and the author keeps re-listing these, so
+prior "verified-fixed" claims (using since-deleted scripts) were not trusted.
+
+Hard evidence gathered:
+- **Bug 3 ("player disappears when shot") — GENUINELY FIXED.** Probe set the exact hurt state a real
+  hit produces (hp drop, `damageCooldown=900`, `cameras.main.flash(150,255,0,0)`) and sampled the
+  player sprite for 18 frames: `minAlpha=0.85`, `visible` never false, `tintFill` never set. Code:
+  `drawPlayer` (GameScene.js:2050) is the ONLY place player alpha/tint changes, floors at 0.85, uses
+  multiply `setTint` (never `setTintFill`); no `setVisible(false)`/`destroy`/knockback anywhere. The
+  `flash()` is a whole-screen red overlay (intended damage feedback), not a player vanish. The death
+  path (`onPlayerDeath`) fades the camera to black before RunSummaryScene — that's death, not a bug.
+  NO fix made (YAGNI; fabricating one would violate the spec-author's "do not change verified-clean").
+- **Bugs 2 & 6 (thin black walls / pitch-black furniture) — work for the "light shined on it" case.**
+  Screenshots: furniture INSIDE the flashlight cone is lit (grates, cyan console); maze walls render
+  with a lit near-band via `wallRectOccluders` back-face culling; the perimeter wall shows thickness.
+  Root-cause map (for any future deepening): every world object except player(200)/bullets(150) is
+  drawn BELOW the depth-100 darkness sheet, and lighting is a hard binary mask hole (the visibility
+  polygon) with NO ambient — so geometry OUTSIDE the cone (occluded/clustered pieces, perimeter-wall
+  bodies seen from inside, cone-edge clip, and the hiding state where the flashlight turns fully off)
+  reads black. That is largely the intended pitch-black-backrooms aesthetic; lifting a global ambient
+  would contradict the spec's "the backrooms themselves are all pitch black". Left unchanged.
+- **Bug 5 (stairs) — GENUINELY BROKEN: the camera does not snap on a stair teleport.** Two spec
+  complaints: (A) "dropped in a random place nowhere near the stairs"; (B) "vulnerable... even when
+  the player cannot see the character yet". Root cause for BOTH: `setupCamera` uses
+  `startFollow(player, true, 0.1, 0.1)` (lerp 0.1) and `onStairEnter` (GameScene.js:1648) does
+  `player.body.reset(destX, destY)` across the world (often across the 10000px `FLOOR_Y_OFFSET` band)
+  but never re-centers the camera. Probe (reproducing the no-snap teleport): player is **7668px
+  off-center at frame 0 and still 1274px off at frame 23**, lerping in slowly — i.e. on fade-in the
+  player is rendered far from screen-centre ("random place") and can't see their surroundings yet.
+  Landing geometry itself is correct/deterministic (`getStairLandingPosition` = room centre, +140
+  below the centered stair; `dx=0,dy=140`), so the "random place" is purely the camera lag, not the
+  spawn point. Concern B is otherwise already covered: `onStairEnter` grants
+  `STAIR_SPAWN_PROTECTION_MS=1200` invuln (gated in `applyDamage`), and `activateRoom` passes
+  `[stairKeepOut, stairLandingKeepOut]` to the enemy spawner (guarded by `placement.test.js` Bug-5
+  test). The missing piece is the camera snap.
+
+Fix (canonical pattern; web research): on a TELEPORT (discontinuous move) the camera must SNAP, not
+lerp. Phaser idiom — snap during the black frame: in the `camerafadeoutcomplete` handler, after
+`player.body.reset(destX,destY)`, call `this.cameras.main.centerOn(destX, destY)` so the 300ms
+fade-in reveals the player dead-centre. Probe confirms `centerOn` removes the drift entirely (player
+stable/centered from the first post-teleport frame). Sources: Phaser docs (`startFollow` lerp,
+`centerOn`/`setScroll`), Ourcade fade-transition pattern, "Scroll Back" 2D-camera study (snap on
+discontinuous movement; smooth-follow is for continuous motion only).
+
+Scope decision: fix ONLY the stair-camera snap (the one genuinely-broken, clean, high-confidence
+item). `onStairEnter` line 1695 is the only large cross-world `player.body.reset`; the hiding move
+(line 830) is in-view and the rift crossing is a walk-through (no teleport), so neither needs a snap.
+GameScene wiring is verified by playtest per the codebase split (no clean unit test exists — the only
+computation, `getStairLandingPosition`, is already unit-tested; a "centerOn was called" assertion
+would be a forbidden mock-test). CI is build-only; the durable net is the green vitest suite.

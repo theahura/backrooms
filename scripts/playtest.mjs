@@ -198,5 +198,55 @@ const finalState = await gameEval(page, () => {
 log(`final: ${JSON.stringify(finalState)}`);
 if (finalState.doorOnRift) log('FAIL: a closable door spawned on the rift');
 
+// Stair transition: the camera must SNAP onto the landing so the player is
+// revealed dead-centre, never "dropped in a random place nowhere near the
+// stairs" (it smooth-follows otherwise, easing across the cross-floor gap).
+const stairCheck = await gameEval(page, async () => {
+  const s = window.__game.scene.getScene('GameScene');
+  const cam = s.cameras.main;
+  const cx = cam.width / 2, cy = cam.height / 2;
+
+  // Find the nearest floor-0 cell with a down-stair and activate it.
+  let target = null;
+  for (let r = 1; r <= 8 && !target; r++) {
+    for (let gx = 0; gx <= r && !target; gx++) {
+      for (let gy = 0; gy <= r && !target; gy++) {
+        if (s.roomStairDirection({ floor: 0, gridX: gx, gridY: gy }) === 'down') target = { gx, gy };
+      }
+    }
+  }
+  if (!target) return { skipped: 'no down-stair this seed' };
+  s.ensureRoomsAround(0, target.gx, target.gy);
+  const zone = s.stairZones.find(z =>
+    z.getData('direction') === 'down' && z.getData('gx') === target.gx && z.getData('gy') === target.gy);
+  if (!zone) return { skipped: 'down-stair not activated' };
+
+  // Step onto the stair and let the REAL physics overlap fire onStairEnter.
+  // Only assert centring once a transition ACTUALLY fires -- placing the player
+  // onto a far freshly-activated zone does not always trigger the overlap, and
+  // that setup miss must not masquerade as a centring failure.
+  s.player.body.reset(zone.getData('glowX') + 30, zone.getData('glowY') + 30);
+  const t0 = Date.now();
+  let fired = false;
+  while (Date.now() - t0 < 2000) {
+    if (s.isTeleporting) { fired = true; break; }
+    await new Promise(r => setTimeout(r, 16));
+  }
+  if (!fired) return { skipped: 'overlap did not fire after reset (setup miss)' };
+  while (s.isTeleporting && Date.now() - t0 < 4000) await new Promise(r => setTimeout(r, 30));
+
+  const sx = (s.player.x - cam.scrollX - cx) * cam.zoom + cx;
+  const sy = (s.player.y - cam.scrollY - cy) * cam.zoom + cy;
+  return { floor: s.currentFloor, offCentrePx: Math.round(Math.hypot(sx - cx, sy - cy)) };
+});
+if (stairCheck.skipped) {
+  log(`stair check skipped (${stairCheck.skipped})`);
+} else {
+  log(`stair landing: floor=${stairCheck.floor} offCentre=${stairCheck.offCentrePx}px`);
+  if (stairCheck.offCentrePx > 20) {
+    log(`FAIL: after a stair the player is ${stairCheck.offCentrePx}px off-centre (camera did not snap)`);
+  }
+}
+
 await browser.close();
 log('done');

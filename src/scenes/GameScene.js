@@ -1694,6 +1694,12 @@ export class GameScene extends Phaser.Scene {
 
       player.body.reset(destX, destY);
       player.body.enable = true;
+      // Snap the camera onto the landing while the screen is still black.
+      // The camera smooth-follows the player (startFollow lerp 0.1); without an
+      // explicit snap it would ease in across the (huge, cross-floor) teleport
+      // distance, so the fade-in would reveal the player far off-centre --
+      // "dropped in a random place nowhere near the stairs".
+      this.cameras.main.centerOn(destX, destY);
       this.combatState = grantInvulnerability(this.combatState, STAIR_SPAWN_PROTECTION_MS);
       this.runStats = updateMaxFloor(this.runStats, destFloor);
 
