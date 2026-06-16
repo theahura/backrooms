@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES, blocksBullets, opaqueBounds, visibleFurnitureRect, billboardDepth, shouldPropDrawOverPlayer } from '../furniture.js';
+import { createFurnitureSegments, generateRoomFurniture, FURNITURE_TYPES, blocksBullets, opaqueBounds, visibleFurnitureRect, billboardDepth, shouldPropDrawOverPlayer, propVariantKey, planScene } from '../furniture.js';
 import { generateMazeWalls, wallRectSegments, wallRectOccluders } from '../maze.js';
 import { getFlashlightPolygon } from '../visibility.js';
 import { createRoomWalls } from '../room.js';
 import { findNearestHideable } from '../hiding.js';
+import { ART_MANIFEST } from '../art.js';
+import { ZONES } from '../roomVibes.js';
 
 describe('opaqueBounds', () => {
   // Build a flat RGBA buffer where a sub-rectangle is opaque and the rest is
@@ -432,11 +434,15 @@ describe('blocksBullets', () => {
   // Low furniture you shoot across -- the spec's "tables and desks and low
   // furniture" that gunfire goes over.
   const LOW = ['table', 'desk', 'bed', 'vent', 'couch', 'bush', 'pod',
-    'water_cooler', 'potted_plant', 'payphone', 'shopping_cart'];
+    'water_cooler', 'potted_plant', 'payphone', 'shopping_cart',
+    'mall_bench', 'trash_can', 'mannequin', 'wheelchair', 'iv_stand',
+    'hospital_chairs', 'supply_cart', 'luggage_cart', 'office_chair', 'oil_barrel'];
   // Tall/solid cover -- the spec's "armoires and other furniture" that stops
   // gunfire.
   const TALL = ['armoire', 'closet', 'bookcase', 'shelf', 'counter', 'tree', 'rock', 'console',
-    'vending_machine', 'lockers'];
+    'vending_machine', 'lockers',
+    'mall_directory', 'reception_desk', 'ice_machine', 'filing_cabinet',
+    'cubicle_partition', 'pallet_rack', 'forklift'];
 
   it('lets gunfire pass over low furniture', () => {
     for (const type of LOW) {
@@ -464,11 +470,18 @@ describe('blocksBullets', () => {
 });
 
 describe('billboardDepth', () => {
-  it('keeps every billboard in the band above flat furniture and below enemies', () => {
+  // The darkness overlay sits at depth 100; props must render ABOVE it so the
+  // flashlight can light their full upright height instead of leaving the body a
+  // black silhouette. The band stays narrow ([110,120)) and below the player
+  // (200) so an unoccluded prop never covers the player.
+  const DARKNESS_DEPTH = 100;
+
+  it('keeps every billboard above the darkness layer so the flashlight lights its full height', () => {
     for (const feetY of [-50000, -600, 0, 600, 12345, 99999, 500000]) {
       const d = billboardDepth(feetY, 0);
-      expect(d).toBeGreaterThanOrEqual(50);
-      expect(d).toBeLessThan(60);
+      expect(d).toBeGreaterThan(DARKNESS_DEPTH);
+      expect(d).toBeGreaterThanOrEqual(110);
+      expect(d).toBeLessThan(120);
     }
   });
 
@@ -496,7 +509,9 @@ describe('billboardDepth', () => {
 });
 
 describe('upright billboard props', () => {
-  const UPRIGHT = ['vending_machine', 'lockers', 'water_cooler', 'potted_plant', 'payphone', 'shopping_cart'];
+  const UPRIGHT = Object.entries(FURNITURE_TYPES)
+    .filter(([, def]) => def.upright)
+    .map(([type]) => type);
 
   it('stand taller than the footprint they occupy on the floor', () => {
     for (const type of UPRIGHT) {
@@ -560,5 +575,175 @@ describe('shouldPropDrawOverPlayer', () => {
 
   it('does NOT draw over a player standing exactly at the front base edge', () => {
     expect(shouldPropDrawOverPlayer(prop, 300, 400)).toBe(false);
+  });
+});
+
+describe('propVariantKey', () => {
+  it('uses the plain furniture key for a type with no variants', () => {
+    expect(propVariantKey('vending_machine', 100, 200, 1)).toBe('furniture_vending_machine');
+    expect(propVariantKey('vending_machine', 100, 200)).toBe('furniture_vending_machine');
+  });
+
+  it('selects one of the numbered variant keys for a type with variants', () => {
+    const key = propVariantKey('mannequin', 100, 200, 3);
+    expect(['furniture_mannequin_0', 'furniture_mannequin_1', 'furniture_mannequin_2']).toContain(key);
+  });
+
+  it('is deterministic for the same position', () => {
+    expect(propVariantKey('mannequin', 137, 251, 3)).toBe(propVariantKey('mannequin', 137, 251, 3));
+  });
+
+  it('reaches every variant across a spread of positions', () => {
+    const seen = new Set();
+    for (let i = 0; i < 60; i++) seen.add(propVariantKey('mannequin', i * 17, i * 29, 3));
+    expect(seen.size).toBe(3);
+  });
+});
+
+describe('furniture registry wiring', () => {
+  it('declares every furniture type that a zone places', () => {
+    for (const [zoneId, zone] of Object.entries(ZONES)) {
+      const types = [
+        ...zone.furniture.ambient,
+        ...zone.furniture.scenes.flatMap((scene) => scene.pieces.map((piece) => piece.type)),
+      ];
+      for (const type of types) {
+        expect(FURNITURE_TYPES[type], `zone ${zoneId} places unknown type ${type}`).toBeTruthy();
+      }
+    }
+  });
+
+  it('has a generated art entry for every upright prop, including each variant', () => {
+    const artKeys = new Set(ART_MANIFEST.flatMap((entry) => entry.keys));
+    for (const [type, def] of Object.entries(FURNITURE_TYPES)) {
+      if (!def.upright) continue;
+      const count = def.variants || 1;
+      if (count <= 1) {
+        expect(artKeys.has(`furniture_${type}`), `missing art for ${type}`).toBe(true);
+      } else {
+        for (let i = 0; i < count; i++) {
+          expect(artKeys.has(`furniture_${type}_${i}`), `missing art for ${type} variant ${i}`).toBe(true);
+        }
+      }
+    }
+  });
+});
+
+describe('planScene', () => {
+  const W = 720;
+  const H = 600;
+  const WALL = 16;
+  // Two coherent set pieces (a reception desk flanked by a plant; a row of beds).
+  const SCENES = [
+    { name: 'reception', pieces: [{ type: 'reception_desk', dx: 0, dy: 0 }, { type: 'potted_plant', dx: 70, dy: 0 }] },
+    { name: 'ward', pieces: [{ type: 'bed', dx: 0, dy: 0 }, { type: 'bed', dx: 0, dy: 90 }, { type: 'iv_stand', dx: 100, dy: 10 }] },
+  ];
+
+  const overlaps = (a, b) =>
+    a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+  const contains = (outer, inner) =>
+    inner.x >= outer.x && inner.y >= outer.y &&
+    inner.x + inner.width <= outer.x + outer.width && inner.y + inner.height <= outer.y + outer.height;
+
+  it('places exactly the pieces of one of the scenes', () => {
+    const { items } = planScene(0, 0, W, H, WALL, 7, SCENES);
+    expect(items.length).toBeGreaterThan(0);
+    const names = SCENES.map(s => s.pieces.map(p => p.type).sort().join(','));
+    const got = items.map(i => i.type).sort().join(',');
+    expect(names).toContain(got);
+  });
+
+  it('keeps every placed item inside the room interior', () => {
+    for (let seed = 0; seed < 60; seed++) {
+      const { items } = planScene(0, 0, W, H, WALL, seed, SCENES);
+      for (const item of items) {
+        expect(item.x, `seed ${seed}`).toBeGreaterThanOrEqual(WALL);
+        expect(item.y, `seed ${seed}`).toBeGreaterThanOrEqual(WALL);
+        expect(item.x + item.width).toBeLessThanOrEqual(W - WALL);
+        expect(item.y + item.height).toBeLessThanOrEqual(H - WALL);
+      }
+    }
+  });
+
+  it('never overlaps its own pieces', () => {
+    for (let seed = 0; seed < 60; seed++) {
+      const { items } = planScene(0, 0, W, H, WALL, seed, SCENES);
+      for (let i = 0; i < items.length; i++) {
+        for (let j = i + 1; j < items.length; j++) {
+          expect(overlaps(items[i], items[j]), `seed ${seed}`).toBe(false);
+        }
+      }
+    }
+  });
+
+  it('returns a clearing that encloses every placed item', () => {
+    for (let seed = 0; seed < 60; seed++) {
+      const { items, clearing } = planScene(0, 0, W, H, WALL, seed, SCENES);
+      expect(clearing, `seed ${seed}`).not.toBeNull();
+      for (const item of items) {
+        expect(contains(clearing, item), `seed ${seed} ${item.type}`).toBe(true);
+      }
+    }
+  });
+
+  it('places the scene and its clearing clear of reserved zones (doorways, stairs)', () => {
+    const reserved = [{ x: 300, y: 0, width: 120, height: H }]; // a vertical no-go band
+    for (let seed = 0; seed < 80; seed++) {
+      const { items, clearing } = planScene(0, 0, W, H, WALL, seed, SCENES, reserved);
+      if (!clearing) continue;
+      for (const r of reserved) {
+        expect(overlaps(clearing, r), `seed ${seed} clearing`).toBe(false);
+        for (const item of items) expect(overlaps(item, r), `seed ${seed} item`).toBe(false);
+      }
+    }
+  });
+
+  it('is deterministic for the same inputs', () => {
+    const a = planScene(0, 0, W, H, WALL, 33, SCENES);
+    const b = planScene(0, 0, W, H, WALL, 33, SCENES);
+    expect(a).toEqual(b);
+  });
+
+  it('returns no scene when there are none to place', () => {
+    expect(planScene(0, 0, W, H, WALL, 1, [])).toEqual({ items: [], clearing: null });
+  });
+
+  it('returns no scene when the room is too small to hold any', () => {
+    const { items, clearing } = planScene(0, 0, 120, 120, WALL, 1, SCENES);
+    expect(items).toEqual([]);
+    expect(clearing).toBeNull();
+  });
+});
+
+describe('ambient scatter (cluster-free profile)', () => {
+  it('scatters only the given singleton types and respects the count cap', () => {
+    const items = generateRoomFurniture(0, 0, 720, 600, 16, 5, { clusters: [], singletons: ['trash_can', 'oil_barrel'] }, [], 4);
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.length).toBeLessThanOrEqual(4);
+    for (const item of items) expect(['trash_can', 'oil_barrel']).toContain(item.type);
+  });
+
+  it('does not change the default area-based density when no cap is given', () => {
+    const items = generateRoomFurniture(0, 0, 720, 600, 16, 5);
+    expect(items.length).toBeGreaterThanOrEqual(8);
+  });
+});
+
+describe('a scene clearing opens a pocket in the maze', () => {
+  const overlaps = (a, b) =>
+    a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+
+  it('leaves the clearing free of maze walls when passed as a keep-out', () => {
+    const W = 720, H = 600, WALL = 16;
+    const SCENES = [{ name: 's', pieces: [{ type: 'reception_desk', dx: 0, dy: 0 }, { type: 'mall_bench', dx: 0, dy: 40 }] }];
+    const doors = [{ wall: 'east', offset: 260, width: 80, targetRoomId: 1 }];
+    for (let seed = 0; seed < 80; seed++) {
+      const { clearing } = planScene(0, 0, W, H, WALL, seed, SCENES);
+      if (!clearing) continue;
+      const walls = generateMazeWalls(0, 0, W, H, WALL, seed, doors, [clearing]);
+      for (const wall of walls) {
+        expect(overlaps(wall, clearing), `seed ${seed}`).toBe(false);
+      }
+    }
   });
 });

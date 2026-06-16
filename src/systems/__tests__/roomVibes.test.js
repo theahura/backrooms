@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ZONES, getRoomVibe } from '../roomVibes.js';
 import { ZONE_IDS } from '../zones.js';
-import { FURNITURE_TYPES, generateRoomFurniture } from '../furniture.js';
+import { FURNITURE_TYPES, planScene } from '../furniture.js';
 
 describe('ZONES catalogue', () => {
   it('defines a zone for every backrooms zone id', () => {
@@ -16,41 +16,54 @@ describe('ZONES catalogue', () => {
     expect(ZONE_IDS).toContain('hotel');
   });
 
-  it('every zone profile actually furnishes a room', () => {
+  it('every zone places a coherent scene into a room', () => {
     for (const id of ZONE_IDS) {
-      const items = generateRoomFurniture(0, 0, 720, 600, 16, 7, ZONES[id].furniture);
+      const { items, clearing } = planScene(0, 0, 720, 600, 16, 7, ZONES[id].furniture.scenes);
       expect(items.length, id).toBeGreaterThan(0);
+      expect(clearing, id).not.toBeNull();
     }
   });
 
   it('only references furniture types that exist', () => {
     for (const id of ZONE_IDS) {
       const profile = ZONES[id].furniture;
-      for (const cluster of profile.clusters) {
-        for (const piece of cluster) {
-          expect(FURNITURE_TYPES[piece.type], `${id} cluster type ${piece.type}`).toBeDefined();
+      for (const scene of profile.scenes) {
+        for (const piece of scene.pieces) {
+          expect(FURNITURE_TYPES[piece.type], `${id} scene ${scene.name} type ${piece.type}`).toBeDefined();
         }
       }
-      for (const type of profile.singletons) {
-        expect(FURNITURE_TYPES[type], `${id} singleton type ${type}`).toBeDefined();
+      for (const type of profile.ambient) {
+        expect(FURNITURE_TYPES[type], `${id} ambient type ${type}`).toBeDefined();
       }
     }
   });
 
-  it('cluster pieces never overlap their own template siblings', () => {
+  it('never lets a scene overlap its own pieces (footprints)', () => {
     const overlaps = (a, b) =>
       a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
     for (const id of ZONE_IDS) {
-      for (const cluster of ZONES[id].furniture.clusters) {
-        const rects = cluster.map(p => ({
+      for (const scene of ZONES[id].furniture.scenes) {
+        const rects = scene.pieces.map(p => ({
           x: p.dx, y: p.dy,
           w: FURNITURE_TYPES[p.type].width, h: FURNITURE_TYPES[p.type].height,
         }));
         for (let i = 0; i < rects.length; i++) {
           for (let j = i + 1; j < rects.length; j++) {
-            expect(overlaps(rects[i], rects[j]), `${id} template self-overlap`).toBe(false);
+            expect(overlaps(rects[i], rects[j]), `${id} scene ${scene.name} self-overlap`).toBe(false);
           }
         }
+      }
+    }
+  });
+
+  it('keeps hero set-piece props out of the ambient scatter pool', () => {
+    // Big structural props must only appear inside a designed scene, never
+    // scattered alone -- a lone reception desk in a random spot reads as broken.
+    const HERO = new Set(['reception_desk', 'forklift', 'pallet_rack', 'cubicle_partition',
+      'ice_machine', 'mall_directory', 'bed', 'counter', 'lockers']);
+    for (const id of ZONE_IDS) {
+      for (const type of ZONES[id].furniture.ambient) {
+        expect(HERO.has(type), `${id} scatters hero prop ${type}`).toBe(false);
       }
     }
   });
