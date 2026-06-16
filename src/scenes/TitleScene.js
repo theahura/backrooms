@@ -116,6 +116,9 @@ export class TitleScene extends Phaser.Scene {
     // Drop any seed left in the registry so a new game mints a fresh world
     // instead of reusing the deleted save's layout.
     this.registry.set('worldSeed', null);
+    // Clear persisted per-room state (looted items, bodies, light on/off) so a
+    // new game starts in a pristine, fully-stocked, fully-lit world.
+    this.registry.set('roomState', null);
   }
 
   onMenuSelect(key) {

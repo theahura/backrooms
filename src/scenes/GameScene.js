@@ -26,6 +26,7 @@ import { toggleDoor, getDoorCenter, findNearestDoor, DOOR_INTERACT_RANGE } from 
 import { toggleSwitch, findNearestSwitch, getLitRoomIds, isPointInRoom, computeSwitchPosition, chooseSwitchWall, SWITCH_INTERACT_RANGE } from '../systems/lightswitch.js';
 import { createHidingState, enterHiding, exitHiding, findNearestHideable, HIDE_INTERACT_RANGE, HIDING_SPEED_MULTIPLIER } from '../systems/hiding.js';
 import { saveGame, resolveWorldSeed } from '../systems/persistence.js';
+import { createRoomState, isItemConsumed, markItemConsumed, addCorpse, getCorpses, trackLamp, isLampOn, trackSwitch, setSwitchOn, isSwitchOn, flipLights, daySpawnSeed } from '../systems/roomState.js';
 import { createExplorationState, updateExploration, getWindowedMinimapData, getCurrentRoom, MINIMAP_COLORS, MINIMAP_WINDOW_CELLS } from '../systems/exploration.js';
 import { generateCrackPoints, nextRiftCrossing } from '../systems/startroom.js';
 import { getLocation, getLocationLayout, getLocationExitPosition } from '../systems/locations.js';
@@ -62,6 +63,10 @@ const WALL_TEX_DEPTH = 2;
 // above the player so it occludes them; otherwise it sits in its billboard band.
 const PLAYER_DEPTH = 200;
 const BILLBOARD_OVER_PLAYER_DEPTH = PLAYER_DEPTH + 1;
+// A lit ceiling lamp's fixture hangs overhead, so it draws ABOVE the player (the
+// player passes beneath it). Its light pool stays on the floor/darkness layer
+// below the player, so standing under a lamp never washes the player out.
+const LAMP_FIXTURE_DEPTH = PLAYER_DEPTH + 5;
 // Upright props render ABOVE the darkness overlay (depth 100), so each is tinted
 // per-frame by the light at its base instead of being revealed by the floor mask.
 // An unlit prop is darkened to this fraction of its art so it reads as a faint
@@ -180,7 +185,20 @@ export class GameScene extends Phaser.Scene {
     this.dangerState = createDangerState();
     this.runStats = createRunStats();
     this.audioSettings = this.registry.get('audioSettings') || createDefaultSettings();
-    saveGame(shopState || createShopState(), runCount + 1, [...this.collectedLore], this.unlockedLocations, this.activeLocation, worldSeed);
+
+    // Per-room state (looted items, dead bodies, light on/off) persists day-to-day.
+    // The first GameScene of a fresh day flips every known light once -- some go
+    // dark, some come back on -- so the world drifts and a lit room is never a
+    // permanent guarantee. Done before any room is streamed in so activation reads
+    // the post-flip state.
+    this.roomState = this.registry.get('roomState') ?? createRoomState();
+    if (this.runCount > this.roomState.lastDayProcessed) {
+      flipLights(this.roomState, mulberry32(this.levelSeed + 70000 + this.runCount));
+      this.roomState.lastDayProcessed = this.runCount;
+    }
+    this.registry.set('roomState', this.roomState);
+
+    saveGame(shopState || createShopState(), runCount + 1, [...this.collectedLore], this.unlockedLocations, this.activeLocation, worldSeed, this.roomState);
   }
 
   updateWeaponStats() {
@@ -441,6 +459,7 @@ export class GameScene extends Phaser.Scene {
     this.activateRoomLamps(room);
     this.activateRoomItems(room, mazeRects);
     this.activateRoomLore(room, mazeRects);
+    this.activateRoomCorpses(room);
     this.activateRoomEnemies(room, [...stairKeep, ...landingKeep]);
     this.activateRoomWeapon(room, mazeRects);
     this.activateRoomStairs(room);
@@ -965,7 +984,11 @@ export class GameScene extends Phaser.Scene {
     const wall = chooseSwitchWall(room, WALL_THICKNESS, mazeRects, startWall);
     const { x, y } = computeSwitchPosition(room, wall, WALL_THICKNESS, mazeRects);
 
-    const sw = { id: this.nextSwitchId++, roomId: room.id, x, y, isOn: false };
+    // A switch keeps the on/off state the player left it in across days. Restore
+    // that persisted state here (the between-days flip may have changed it).
+    const cellKey = this.cellKey(room.floor, room.gridX, room.gridY);
+    trackSwitch(this.roomState, cellKey);
+    const sw = { id: this.nextSwitchId++, roomId: room.id, x, y, isOn: isSwitchOn(this.roomState, cellKey), cellKey };
     this.switchStates.push(sw);
 
     const sprite = this.add.sprite(sw.x, sw.y, sw.isOn ? 'switch_on' : 'switch_off');
@@ -976,6 +999,11 @@ export class GameScene extends Phaser.Scene {
   onToggleSwitch(switchId) {
     this.switchStates = toggleSwitch(this.switchStates, switchId);
     this.playSound('switch_click');
+    const sw = this.switchStates.find(s => s.id === switchId);
+    if (sw && sw.cellKey) {
+      setSwitchOn(this.roomState, sw.cellKey, sw.isOn);
+      this.registry.set('roomState', this.roomState);
+    }
   }
 
   createLampInfra() {
@@ -995,6 +1023,13 @@ export class GameScene extends Phaser.Scene {
     const placement = rollRoomLamp(room, rand);
     if (!placement) return;
 
+    // Track the lamp so the between-days flip can turn it off (or back on). A lamp
+    // the player finds dark contributes no light AND draws no fixture -- an off
+    // ceiling light is simply not there.
+    const cellKey = this.cellKey(room.floor, room.gridX, room.gridY);
+    trackLamp(this.roomState, cellKey);
+    if (!isLampOn(this.roomState, cellKey)) return;
+
     const vibe = this.roomThemes.get(room.id);
     const tint = vibe && LAMP_COOL_VIBES.has(vibe.id) ? LAMP_TINT_COOL : LAMP_TINT_WARM;
 
@@ -1002,12 +1037,12 @@ export class GameScene extends Phaser.Scene {
     this.drawLampFixture(placement.x, placement.y, tint);
   }
 
-  // The fixture itself: a dark troffer housing with two bright fluorescent tubes,
-  // drawn once above the furniture layer. It sits inside its own light pool, so
-  // the darkness mask always reveals it.
+  // The fixture itself: a dark troffer housing with two bright fluorescent tubes.
+  // It draws at LAMP_FIXTURE_DEPTH (above the player and the darkness layer) so it
+  // reads as an overhead ceiling light the player passes beneath.
   drawLampFixture(x, y, tint) {
     const gfx = this.add.graphics();
-    gfx.setDepth(55);
+    gfx.setDepth(LAMP_FIXTURE_DEPTH);
     gfx.fillStyle(0x26282c, 0.92);
     gfx.fillRoundedRect(x - 34, y - 11, 68, 22, 4);
     gfx.fillStyle(tint, 0.9);
@@ -1159,14 +1194,32 @@ export class GameScene extends Phaser.Scene {
       room.distance, mazeRects
     );
 
-    for (const item of items) {
+    // Skip anything the player already took on a previous day. The item index is
+    // stable (generation is deterministic from room.seed) so it doubles as the
+    // per-item id we record on pickup.
+    const cellKey = this.cellKey(room.floor, room.gridX, room.gridY);
+    items.forEach((item, index) => {
+      if (isItemConsumed(this.roomState, cellKey, index)) return;
       const sprite = this.itemGroup.create(item.x, item.y, `item_${item.type}`);
       sprite.setScale(1.6);
       sprite.refreshBody();
       sprite.setDepth(5);
       sprite.setData('itemType', item.type);
       sprite.setData('itemValue', item.value);
-    }
+      sprite.setData('itemCellKey', cellKey);
+      sprite.setData('itemIndex', index);
+    });
+  }
+
+  // Record a room-generated item as taken so it never respawns on a later day.
+  // Enemy loot drops carry no itemIndex and are intentionally not persisted --
+  // they are ephemeral, re-rolled with each day's fresh enemies.
+  recordItemConsumed(itemSprite) {
+    const cellKey = itemSprite.getData('itemCellKey');
+    const index = itemSprite.getData('itemIndex');
+    if (cellKey === undefined || index === undefined) return;
+    markItemConsumed(this.roomState, cellKey, index);
+    this.registry.set('roomState', this.roomState);
   }
 
   onItemPickup(player, itemSprite) {
@@ -1178,6 +1231,7 @@ export class GameScene extends Phaser.Scene {
       this.combatState = applyHeal(this.combatState, MEDKIT_HEAL_AMOUNT);
       this.playSound('medkit_pickup');
       this.cameras.main.flash(100, 0, 255, 0);
+      this.recordItemConsumed(itemSprite);
       itemSprite.destroy();
       return;
     }
@@ -1199,6 +1253,7 @@ export class GameScene extends Phaser.Scene {
     } else {
       this.playSound('item_pickup');
     }
+    this.recordItemConsumed(itemSprite);
     itemSprite.destroy();
   }
 
@@ -1382,9 +1437,12 @@ export class GameScene extends Phaser.Scene {
 
   activateRoomEnemies(room, keepOut = []) {
     const furniture = this.roomFurniture.get(room.id) || [];
+    // Enemy spawns re-roll each day off a day-mixed seed (everything else keyed
+    // on room.seed stays stable), so a room a player cleared yesterday refills
+    // with a different threat today -- a cleared room is never permanently safe.
     const spawnPoints = generateRoomEnemies(
       room.x, room.y, room.width, room.height,
-      WALL_THICKNESS, room.seed, furniture, room.id, room.distance, keepOut
+      WALL_THICKNESS, daySpawnSeed(room.seed, this.runCount), furniture, room.id, room.distance, keepOut
     );
 
     for (const spawn of spawnPoints) {
@@ -1419,6 +1477,23 @@ export class GameScene extends Phaser.Scene {
         targetDoorway: null,
         soundCooldown: 1000 + Math.random() * 3000,
       });
+    }
+  }
+
+  // Re-draw the bodies left by enemies killed here on earlier days. Decorative
+  // only -- static images at the floor depth, tinted/toppled like a fresh corpse,
+  // with no physics or AI. The pile is capped per room (see roomState.CORPSE_CAP).
+  activateRoomCorpses(room) {
+    if (room.id === 0) return;
+    const cellKey = this.cellKey(room.floor, room.gridX, room.gridY);
+    for (const corpse of getCorpses(this.roomState, cellKey)) {
+      const stats = this.getEnemyStats(corpse.type, room.distance);
+      const sprite = this.add.image(corpse.x, corpse.y, stats.textureKey);
+      sprite.setDisplaySize(stats.displaySize, stats.displaySize);
+      sprite.setTint(CORPSE_TINT);
+      sprite.setAlpha(CORPSE_ALPHA);
+      sprite.setAngle(corpse.angle);
+      sprite.setDepth(CORPSE_DEPTH);
     }
   }
 
@@ -2082,6 +2157,13 @@ export class GameScene extends Phaser.Scene {
       enemySprite.setDepth(CORPSE_DEPTH);
 
       const enemyRoom = this.roomsById.get(enemyState.currentRoomId);
+      if (enemyRoom) {
+        const corpseCellKey = this.cellKey(enemyRoom.floor, enemyRoom.gridX, enemyRoom.gridY);
+        addCorpse(this.roomState, corpseCellKey, {
+          x: enemySprite.x, y: enemySprite.y, type: enemyState.type, angle: CORPSE_ANGLE,
+        });
+        this.registry.set('roomState', this.roomState);
+      }
       const roomDist = enemyRoom ? enemyRoom.distance : 0;
       const drop = rollEnemyDrop(enemyState.type, roomDist, Math.random);
       if (drop) {

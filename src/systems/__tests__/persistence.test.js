@@ -48,6 +48,7 @@ describe('saveGame and loadGame round-trip', () => {
       unlockedLocations: ['store'],
       activeLocation: 'store',
       worldSeed: null,
+      roomState: { lastDayProcessed: -1, cells: {} },
     });
   });
 
@@ -61,6 +62,44 @@ describe('saveGame and loadGame round-trip', () => {
 
     expect(loaded.shopState.gold).toBe(0);
     expect(loaded.runCount).toBe(0);
+  });
+});
+
+describe('per-room state persistence', () => {
+  it('round-trips consumed items, dead bodies, and light state across save/load', () => {
+    const shopState = { gold: 0, upgrades: { battery: 0, flashlight: 0, health: 0, speed: 0 } };
+    const roomState = {
+      lastDayProcessed: 4,
+      cells: {
+        '0:1,1': {
+          items: [0, 2],
+          corpses: [{ x: 10, y: 20, type: 'basic', angle: 90 }],
+          lampOn: false,
+          switchOn: true,
+        },
+      },
+    };
+
+    saveGame(shopState, 3, [], ['store'], 'store', 12345, roomState);
+    const loaded = loadGame();
+
+    expect(loaded.roomState).toEqual(roomState);
+  });
+
+  it('loads a legacy save that predates room state with an empty room state', () => {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({
+      version: 4,
+      shopState: { gold: 5, upgrades: { battery: 0, flashlight: 0, health: 0, speed: 0 } },
+      runCount: 2,
+      collectedLore: [],
+      unlockedLocations: ['store'],
+      activeLocation: 'store',
+      worldSeed: 7,
+    }));
+
+    const loaded = loadGame();
+
+    expect(loaded.roomState).toEqual({ lastDayProcessed: -1, cells: {} });
   });
 });
 
