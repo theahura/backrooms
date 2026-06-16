@@ -7,6 +7,14 @@ import {
   getUpgradeValue,
   getUpgradeCost,
   UPGRADES,
+  normalizeShopState,
+  canBuyAmmo,
+  buyAmmo,
+  canBuyBattery,
+  buyBattery,
+  clearConsumables,
+  AMMO_COST,
+  BATTERY_COST,
 } from '../shop.js';
 
 describe('createShopState', () => {
@@ -309,6 +317,98 @@ describe('minimap upgrade', () => {
   it('returns 0 at level 0 and 1 at level 1 via getUpgradeValue', () => {
     expect(getUpgradeValue('minimap', 0)).toBe(0);
     expect(getUpgradeValue('minimap', 1)).toBe(1);
+  });
+});
+
+describe('normalizeShopState', () => {
+  it('backfills missing upgrade ids without disturbing existing ones', () => {
+    const legacy = { gold: 500, upgrades: { battery: 2 } };
+    const norm = normalizeShopState(legacy);
+    expect(norm.gold).toBe(500);
+    expect(norm.upgrades.battery).toBe(2);
+    expect(norm.upgrades.startingPistol).toBe(0);
+  });
+
+  it('produces a state the consumable API can operate on (legacy save with no consumables)', () => {
+    const legacy = { gold: 9999, upgrades: { startingPistol: 1 } };
+    const norm = normalizeShopState(legacy);
+    expect(canBuyAmmo(norm)).toBe(true);
+    expect(canBuyBattery(norm)).toBe(true);
+  });
+});
+
+describe('buying ammo (refills all guns next run)', () => {
+  it('cannot be bought when the player owns no starting gun', () => {
+    const state = addGold(createShopState(), 9999);
+    expect(canBuyAmmo(state)).toBe(false);
+  });
+
+  it('can be bought once a starting gun is owned and affordable', () => {
+    let state = addGold(createShopState(), AMMO_COST);
+    state = { ...state, upgrades: { ...state.upgrades, startingPistol: 1 } };
+    expect(canBuyAmmo(state)).toBe(true);
+  });
+
+  it('is enabled by owning any starting gun, not only the pistol', () => {
+    let state = addGold(createShopState(), AMMO_COST);
+    state = { ...state, upgrades: { ...state.upgrades, startingRifle: 1 } };
+    expect(canBuyAmmo(state)).toBe(true);
+  });
+
+  it('deducts the ammo cost and blocks re-buying within the same visit', () => {
+    let state = addGold(createShopState(), AMMO_COST + 100);
+    state = { ...state, upgrades: { ...state.upgrades, startingPistol: 1 } };
+    state = buyAmmo(state);
+    expect(state.gold).toBe(100);
+    expect(canBuyAmmo(state)).toBe(false);
+  });
+
+  it('cannot be bought without enough gold', () => {
+    let state = addGold(createShopState(), AMMO_COST - 1);
+    state = { ...state, upgrades: { ...state.upgrades, startingPistol: 1 } };
+    expect(canBuyAmmo(state)).toBe(false);
+  });
+});
+
+describe('buying batteries (spare batteries for next run)', () => {
+  it('deducts the battery cost and increments the queued battery count', () => {
+    let state = addGold(createShopState(), BATTERY_COST * 2);
+    state = buyBattery(state);
+    expect(state.gold).toBe(BATTERY_COST);
+    expect(state.consumables.batteries).toBe(1);
+  });
+
+  it('cannot queue more batteries than the backpack can hold', () => {
+    const cap = getUpgradeValue('backpack', 0);
+    let state = addGold(createShopState(), BATTERY_COST * 100);
+    for (let i = 0; i < cap; i++) state = buyBattery(state);
+    expect(state.consumables.batteries).toBe(cap);
+    expect(canBuyBattery(state)).toBe(false);
+  });
+
+  it('cannot be bought without enough gold', () => {
+    const state = addGold(createShopState(), BATTERY_COST - 1);
+    expect(canBuyBattery(state)).toBe(false);
+  });
+});
+
+describe('clearConsumables', () => {
+  it('resets queued ammo and batteries so a purchase applies only once', () => {
+    let state = addGold(createShopState(), 9999);
+    state = { ...state, upgrades: { ...state.upgrades, startingPistol: 1 } };
+    state = buyAmmo(state);
+    state = buyBattery(state);
+    const cleared = clearConsumables(state);
+    expect(cleared.consumables.batteries).toBe(0);
+    expect(canBuyAmmo(addGold(cleared, 9999))).toBe(true);
+  });
+
+  it('preserves gold and upgrades', () => {
+    let state = addGold(createShopState(), 9999);
+    state = purchaseUpgrade(state, 'battery');
+    const cleared = clearConsumables(state);
+    expect(cleared.gold).toBe(state.gold);
+    expect(cleared.upgrades.battery).toBe(1);
   });
 });
 

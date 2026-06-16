@@ -9,6 +9,8 @@ import {
   consumeAmmo,
   addAmmo,
   generateLevelWeapons,
+  weaponPickupOutcome,
+  refillAllAmmo,
 } from '../weapons.js';
 
 describe('createWeaponState (weaponless start)', () => {
@@ -276,5 +278,100 @@ describe('generateLevelWeapons', () => {
     expect(allWeaponIds.has('pistol')).toBe(true);
     expect(allWeaponIds.has('shotgun')).toBe(true);
     expect(allWeaponIds.has('rifle')).toBe(true);
+  });
+});
+
+describe('weaponPickupOutcome', () => {
+  const pistol = WEAPON_TYPES.find(w => w.id === 'pistol');
+  const shotgun = WEAPON_TYPES.find(w => w.id === 'shotgun');
+  const rifle = WEAPON_TYPES.find(w => w.id === 'rifle');
+
+  it('returns "equip" when an empty slot is open and the weapon is not owned', () => {
+    const state = createWeaponState({ startingPistol: true });
+    expect(weaponPickupOutcome(state, shotgun)).toBe('equip');
+  });
+
+  it('returns "ammo" when the weapon is already owned and below max ammo', () => {
+    const state = createWeaponState({ startingPistol: true });
+    expect(weaponPickupOutcome(state, pistol)).toBe('ammo');
+  });
+
+  it('returns "full" when the weapon is owned and already at max ammo', () => {
+    const state = createWeaponState({ startingPistol: true });
+    const maxed = { ...state, ammo: [pistol.maxAmmo, 0] };
+    expect(weaponPickupOutcome(maxed, pistol)).toBe('full');
+  });
+
+  it('returns "swap" when both slots are full of different weapons', () => {
+    const state = { slots: [pistol, shotgun], activeSlot: 0, ammo: [15, 6] };
+    expect(weaponPickupOutcome(state, rifle)).toBe('swap');
+  });
+
+  it('returns "ammo" for an owned duplicate even when both slots are full', () => {
+    const state = { slots: [pistol, shotgun], activeSlot: 0, ammo: [5, 6] };
+    expect(weaponPickupOutcome(state, pistol)).toBe('ammo');
+  });
+
+  it('returns "full" for an owned maxed duplicate even when both slots are full', () => {
+    const state = { slots: [pistol, shotgun], activeSlot: 0, ammo: [pistol.maxAmmo, 6] };
+    expect(weaponPickupOutcome(state, pistol)).toBe('full');
+  });
+});
+
+describe('pickupWeapon (duplicate weapon becomes ammo)', () => {
+  const pistol = WEAPON_TYPES.find(w => w.id === 'pistol');
+  const shotgun = WEAPON_TYPES.find(w => w.id === 'shotgun');
+
+  it('adds a magazine to the owned slot instead of taking a second slot', () => {
+    const state = { slots: [pistol, null], activeSlot: 0, ammo: [5, 0] };
+    const result = pickupWeapon(state, pistol);
+    expect(result.state.slots[1]).toBe(null);
+    expect(result.state.ammo[0]).toBe(5 + pistol.startAmmo);
+    expect(result.droppedWeapon).toBe(null);
+    expect(result.addedAmmo).toBe(true);
+  });
+
+  it('caps the duplicate ammo at maxAmmo', () => {
+    const state = { slots: [pistol, null], activeSlot: 0, ammo: [pistol.maxAmmo - 2, 0] };
+    const result = pickupWeapon(state, pistol);
+    expect(result.state.ammo[0]).toBe(pistol.maxAmmo);
+  });
+
+  it('tops up the slot holding the duplicate, not the active slot', () => {
+    const state = { slots: [shotgun, pistol], activeSlot: 0, ammo: [6, 5] };
+    const result = pickupWeapon(state, pistol);
+    expect(result.state.ammo[1]).toBe(5 + pistol.startAmmo);
+    expect(result.state.ammo[0]).toBe(6);
+  });
+
+  it('uses the carried ammo override when a duplicate drop is grabbed', () => {
+    const state = { slots: [pistol, null], activeSlot: 0, ammo: [5, 0] };
+    const result = pickupWeapon(state, pistol, 10);
+    expect(result.state.ammo[0]).toBe(15);
+  });
+});
+
+describe('refillAllAmmo', () => {
+  const pistol = WEAPON_TYPES.find(w => w.id === 'pistol');
+  const shotgun = WEAPON_TYPES.find(w => w.id === 'shotgun');
+
+  it('refills every equipped weapon to its max ammo', () => {
+    const state = { slots: [pistol, shotgun], activeSlot: 0, ammo: [1, 1] };
+    const next = refillAllAmmo(state);
+    expect(next.ammo[0]).toBe(pistol.maxAmmo);
+    expect(next.ammo[1]).toBe(shotgun.maxAmmo);
+  });
+
+  it('leaves an empty slot at zero', () => {
+    const state = { slots: [pistol, null], activeSlot: 0, ammo: [1, 0] };
+    const next = refillAllAmmo(state);
+    expect(next.ammo[0]).toBe(pistol.maxAmmo);
+    expect(next.ammo[1]).toBe(0);
+  });
+
+  it('returns an unchanged loadout when unarmed', () => {
+    const state = createWeaponState();
+    const next = refillAllAmmo(state);
+    expect(next.ammo).toEqual([0, 0]);
   });
 });

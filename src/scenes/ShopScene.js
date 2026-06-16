@@ -7,6 +7,13 @@ import {
   getUpgradeCost,
   getUpgradeValue,
   UPGRADES,
+  normalizeShopState,
+  canBuyAmmo,
+  buyAmmo,
+  canBuyBattery,
+  buyBattery,
+  AMMO_COST,
+  BATTERY_COST,
 } from '../systems/shop.js';
 import { saveGame } from '../systems/persistence.js';
 import { getLocation } from '../systems/locations.js';
@@ -31,9 +38,7 @@ export class ShopScene extends Phaser.Scene {
   init(data) {
     const treasureEarned = data?.treasureEarned ?? 0;
     const newLocation = data?.newLocation ?? null;
-    let shopState = this.registry.get('shopState') || createShopState();
-    const defaults = createShopState().upgrades;
-    shopState = { ...shopState, upgrades: { ...defaults, ...shopState.upgrades } };
+    let shopState = normalizeShopState(this.registry.get('shopState') || createShopState());
     shopState = addGold(shopState, treasureEarned);
     this.registry.set('shopState', shopState);
 
@@ -95,8 +100,8 @@ export class ShopScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     this.upgradeRows = [];
-    const startY = 140;
-    const rowHeight = 42;
+    const startY = 124;
+    const rowHeight = 38;
 
     for (let i = 0; i < UPGRADES.length; i++) {
       const upgrade = UPGRADES[i];
@@ -105,7 +110,37 @@ export class ShopScene extends Phaser.Scene {
       this.upgradeRows.push(row);
     }
 
-    const locationY = startY + UPGRADES.length * rowHeight + 20;
+    // Per-run consumables (re-bought each run, applied at the start of the next
+    // run). Not part of UPGRADES -- they are counts/flags, not levelled upgrades.
+    this.consumableRows = [];
+    const consumables = [
+      {
+        id: 'ammo',
+        name: 'Ammo',
+        description: 'Start next run with every carried gun fully loaded',
+        cost: AMMO_COST,
+        iconKey: 'shop_icon_weaponDamage',
+        canBuy: (s) => canBuyAmmo(s),
+        buy: (s) => buyAmmo(s),
+        status: (s) => (s.consumables.ammo ? 'QUEUED' : ''),
+      },
+      {
+        id: 'battery',
+        name: 'Batteries',
+        description: 'Start next run with spare batteries',
+        cost: BATTERY_COST,
+        iconKey: 'shop_icon_battery',
+        canBuy: (s) => canBuyBattery(s),
+        buy: (s) => buyBattery(s),
+        status: (s) => (s.consumables.batteries > 0 ? `x${s.consumables.batteries}` : ''),
+      },
+    ];
+    for (let i = 0; i < consumables.length; i++) {
+      const y = startY + (UPGRADES.length + i) * rowHeight;
+      this.consumableRows.push(this.createConsumableRow(consumables[i], y));
+    }
+
+    const locationY = startY + (UPGRADES.length + consumables.length) * rowHeight + 18;
     if (this.unlockedLocations.length > 1) {
       this.locationText = this.add.text(512, locationY, '', {
         fontSize: '16px',
@@ -302,6 +337,65 @@ export class ShopScene extends Phaser.Scene {
     return { upgrade, nameText, descText, levelText, costText, buyBtn };
   }
 
+  createConsumableRow(config, y) {
+    if (config.iconKey && this.textures.exists(config.iconKey)) {
+      this.add.image(72, y + 14, config.iconKey).setDisplaySize(34, 34);
+    }
+
+    const nameText = this.add.text(100, y, config.name, {
+      fontSize: '18px',
+      color: '#cccccc',
+      fontFamily: 'monospace',
+    });
+
+    const descText = this.add.text(100, y + 20, config.description, {
+      fontSize: '11px',
+      color: '#888888',
+      fontFamily: 'monospace',
+    });
+
+    const statusText = this.add.text(500, y, '', {
+      fontSize: '16px',
+      color: '#aaaaaa',
+      fontFamily: 'monospace',
+    });
+
+    const costText = this.add.text(650, y, '', {
+      fontSize: '16px',
+      color: '#ffd700',
+      fontFamily: 'monospace',
+    });
+
+    const buyBtn = this.add.text(820, y, '[ BUY ]', {
+      fontSize: '16px',
+      color: '#44cc44',
+      fontFamily: 'monospace',
+    });
+    this.enlargeHitArea(buyBtn, 20, 16);
+
+    buyBtn.on('pointerover', () => {
+      if (config.canBuy(this.shopState)) buyBtn.setColor('#88ff88');
+    });
+    buyBtn.on('pointerout', () => this.refreshConsumableButton(config, buyBtn));
+    buyBtn.on('pointerdown', () => {
+      if (config.canBuy(this.shopState)) {
+        this.shopState = config.buy(this.shopState);
+        this.registry.set('shopState', this.shopState);
+        saveGame(this.shopState, this.registry.get('runCount') ?? 0, this.registry.get('collectedLore') ?? [], this.unlockedLocations, this.activeLocation, this.registry.get('worldSeed') ?? null, this.registry.get('roomState'), this.registry.get('weaponInventory'));
+        this.refreshDisplay();
+        this.playSound('shop_purchase');
+      } else {
+        this.playSound('shop_denied');
+      }
+    });
+
+    return { config, nameText, descText, statusText, costText, buyBtn };
+  }
+
+  refreshConsumableButton(config, buyBtn) {
+    buyBtn.setColor(config.canBuy(this.shopState) ? '#44cc44' : '#555555');
+  }
+
   cycleLocation(direction) {
     const idx = this.unlockedLocations.indexOf(this.activeLocation);
     const newIdx = (idx + direction + this.unlockedLocations.length) % this.unlockedLocations.length;
@@ -343,6 +437,12 @@ export class ShopScene extends Phaser.Scene {
         row.costText.setColor('#44cc44');
         row.buyBtn.setVisible(false);
       }
+    }
+
+    for (const row of this.consumableRows) {
+      row.statusText.setText(row.config.status(this.shopState));
+      row.costText.setText(`$${row.config.cost}`);
+      this.refreshConsumableButton(row.config, row.buyBtn);
     }
   }
 

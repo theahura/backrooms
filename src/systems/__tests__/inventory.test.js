@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createInventoryState, pickupItem, useBattery, canPickupItem } from '../inventory.js';
+import { createInventoryState, pickupItem, useBattery, canPickupItem, grantBatteries } from '../inventory.js';
 
 describe('createInventoryState', () => {
   it('starts with 0 batteries, 0 treasure value, and default capacity', () => {
@@ -100,5 +100,45 @@ describe('inventory capacity', () => {
 
     const result = useBattery(state);
     expect(canPickupItem(result.state)).toBe(true);
+  });
+});
+
+describe('grantBatteries', () => {
+  it('adds the requested batteries and fills that many slots', () => {
+    const state = createInventoryState(8);
+    const next = grantBatteries(state, 3);
+    expect(next.batteries).toBe(3);
+    expect(next.itemCount).toBe(3);
+  });
+
+  it('never grants more batteries than the backpack can hold', () => {
+    const state = createInventoryState(2);
+    const next = grantBatteries(state, 5);
+    expect(next.batteries).toBe(2);
+    expect(next.itemCount).toBe(2);
+  });
+
+  it('is a no-op when granting zero', () => {
+    const state = createInventoryState(8);
+    const next = grantBatteries(state, 0);
+    expect(next.batteries).toBe(0);
+    expect(next.itemCount).toBe(0);
+  });
+
+  it('adds to a partially-filled pack rather than overwriting it', () => {
+    let state = createInventoryState(8);
+    state = pickupItem(state, { type: 'copper_coin', value: 10 });
+    const next = grantBatteries(state, 3);
+    expect(next.batteries).toBe(3);
+    expect(next.itemCount).toBe(4);
+  });
+
+  it('grants nothing when the pack is already full', () => {
+    let state = createInventoryState(2);
+    state = pickupItem(state, { type: 'battery', value: 0 });
+    state = pickupItem(state, { type: 'copper_coin', value: 10 });
+    const next = grantBatteries(state, 3);
+    expect(next.batteries).toBe(1);
+    expect(next.itemCount).toBe(2);
   });
 });

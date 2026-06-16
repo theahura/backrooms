@@ -30,3 +30,15 @@ export function useBattery(state) {
     state: { ...state, batteries: state.batteries - 1, itemCount: Math.max(0, state.itemCount - 1) },
   };
 }
+
+// Seed spare batteries into a fresh run's inventory (from a shop purchase),
+// never overflowing the backpack capacity.
+export function grantBatteries(state, n) {
+  const room = Math.max(0, state.maxItems - state.itemCount);
+  const granted = Math.min(n, room);
+  return {
+    ...state,
+    batteries: state.batteries + granted,
+    itemCount: state.itemCount + granted,
+  };
+}

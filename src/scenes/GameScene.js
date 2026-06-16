@@ -16,12 +16,12 @@ import { createCombatState, applyDamage, applyHeal, updateCombat, getHealthFract
 import { createFlashlightState, toggleFlashlight, setFlashlightHiding, isFlashlightLit, updateBatteryWithFlashlight } from '../systems/flashlight.js';
 import { calculateBulletVelocity, calculateShotgunSpread, canFire, updateFireCooldown, isBulletExpired, getBulletVelocityFromAngle, SPITTER_PROJECTILE_SPEED, SPITTER_PROJECTILE_RANGE } from '../systems/shooting.js';
 import { getMoveVelocity, resolveAimAngle, resolveFireIntent, resolveMoveVelocity, detectTouchPrimary, computeTouchLayout } from '../systems/touchControls.js';
-import { WEAPON_TYPES, createWeaponState, switchWeapon, pickupWeapon, getActiveWeapon, getEffectiveStats, generateRoomWeapon, hasAmmo, consumeAmmo, addAmmo, AMMO_PER_PICKUP, serializeWeaponState, deserializeWeaponState, fillStartingWeapons } from '../systems/weapons.js';
+import { WEAPON_TYPES, createWeaponState, switchWeapon, pickupWeapon, getActiveWeapon, getEffectiveStats, generateRoomWeapon, hasAmmo, consumeAmmo, addAmmo, AMMO_PER_PICKUP, serializeWeaponState, deserializeWeaponState, fillStartingWeapons, weaponPickupOutcome, refillAllAmmo } from '../systems/weapons.js';
 import { getEnemyHP, getEnemyDamage } from '../systems/scaling.js';
 import { createBatteryState, getBatteryFraction, getFlashlightConeAngle, shouldFlicker, rechargeBattery, getBatteryHint, BATTERY_RECHARGE_AMOUNT, BATTERY_RECHARGE_PER_MS } from '../systems/battery.js';
 import { generateRoomItems, ITEM_TYPES } from '../systems/items.js';
-import { createInventoryState, pickupItem, useBattery, canPickupItem } from '../systems/inventory.js';
-import { getUpgradeValue, createShopState } from '../systems/shop.js';
+import { createInventoryState, pickupItem, useBattery, canPickupItem, grantBatteries } from '../systems/inventory.js';
+import { getUpgradeValue, createShopState, normalizeShopState, clearConsumables } from '../systems/shop.js';
 import { toggleDoor, getDoorCenter, findNearestDoor, DOOR_INTERACT_RANGE } from '../systems/doors.js';
 import { toggleSwitch, findNearestSwitch, getLitRoomIds, isPointInRoom, computeSwitchPosition, chooseSwitchWall, SWITCH_INTERACT_RANGE } from '../systems/lightswitch.js';
 import { createHidingState, enterHiding, exitHiding, findNearestHideable, HIDE_INTERACT_RANGE, HIDING_SPEED_MULTIPLIER } from '../systems/hiding.js';
@@ -80,6 +80,9 @@ const AMBIENT_SCATTER_COUNT = 4;
 const AMBIENT_SEED_OFFSET = 54321;
 // Player ground-contact point relative to its center (48px display) for y-sort.
 const PLAYER_FOOT_Y_OFFSET = 18;
+// How close the player must be to a floor weapon for it to be auto-grabbed (or,
+// for a destructive swap, to surface the manual interact prompt).
+const WEAPON_PICKUP_RANGE = 80;
 // Breathing room carved out of maze walls around a room's centered stair, so
 // the stair square is never embedded in (or flush against) an internal wall.
 const STAIR_KEEPOUT_PAD = 16;
@@ -144,9 +147,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   init() {
-    const shopState = this.registry.get('shopState');
-    const defaultLevels = createShopState().upgrades;
-    const levels = shopState ? { ...defaultLevels, ...shopState.upgrades } : defaultLevels;
+    const shopState = normalizeShopState(this.registry.get('shopState') || createShopState());
+    const levels = shopState.upgrades;
     this.maxCharge = getUpgradeValue('battery', levels.battery);
     this.flashlightAngle = getUpgradeValue('flashlight', levels.flashlight);
     this.maxHp = getUpgradeValue('health', levels.health);
@@ -173,6 +175,21 @@ export class GameScene extends Phaser.Scene {
     };
     const carriedWeapons = deserializeWeaponState(this.registry.get('weaponInventory'));
     this.weaponState = fillStartingWeapons(carriedWeapons || createWeaponState(), startingWeaponOpts);
+
+    // Spend any shop-bought consumables on this run: the "Ammo" purchase tops
+    // every carried gun up to full; spare batteries are seeded into the
+    // inventory when it is created in create(). Both are then cleared so a
+    // purchase is spent exactly once.
+    if (shopState.consumables.ammo) {
+      this.weaponState = refillAllAmmo(this.weaponState);
+      // Persist the paid refill at once: the consumable flag is cleared and
+      // saved just below, so the loadout it modified must be saved too -- else
+      // quitting mid-run pockets the gold but loses the ammo.
+      this.registry.set('weaponInventory', serializeWeaponState(this.weaponState));
+    }
+    this.startingBatteries = shopState.consumables.batteries;
+    const clearedShop = clearConsumables(shopState);
+    this.registry.set('shopState', clearedShop);
     this.updateWeaponStats();
 
     const runCount = this.registry.get('runCount') ?? 0;
@@ -204,7 +221,7 @@ export class GameScene extends Phaser.Scene {
     }
     this.registry.set('roomState', this.roomState);
 
-    saveGame(shopState || createShopState(), runCount + 1, [...this.collectedLore], this.unlockedLocations, this.activeLocation, worldSeed, this.roomState, this.registry.get('weaponInventory'));
+    saveGame(clearedShop, runCount + 1, [...this.collectedLore], this.unlockedLocations, this.activeLocation, worldSeed, this.roomState, this.registry.get('weaponInventory'));
   }
 
   updateWeaponStats() {
@@ -251,6 +268,9 @@ export class GameScene extends Phaser.Scene {
     this.combatState = createCombatState(this.maxHp);
     this.batteryState = createBatteryState(this.maxCharge);
     this.inventoryState = createInventoryState(this.maxItems);
+    if (this.startingBatteries) {
+      this.inventoryState = grantBatteries(this.inventoryState, this.startingBatteries);
+    }
     this.fireCooldown = 0;
     this.playerAngle = 0;
     this.dayEnding = false;
@@ -1154,6 +1174,27 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  // Automatically grab any nearby floor weapon that is strictly beneficial: a
+  // free slot is equipped, a duplicate of a carried gun is converted to ammo. A
+  // weapon that would force a destructive swap is left for a manual press (see
+  // updateInteractPrompt), which also avoids picking a just-dropped gun back up.
+  autoPickupWeapons() {
+    if (this.combatState.isDead || this.dayEnding || this.isTeleporting) return;
+    if (this.hidingState.isHiding) return;
+    // Snapshot the list: onWeaponPickup mutates weaponPickupSprites.
+    for (const wpnSprite of [...this.weaponPickupSprites]) {
+      if (!wpnSprite.active) continue;
+      const dist = Math.hypot(this.player.x - wpnSprite.x, this.player.y - wpnSprite.y);
+      if (dist > WEAPON_PICKUP_RANGE) continue;
+      const weaponType = WEAPON_TYPES.find(w => w.id === wpnSprite.getData('weaponId'));
+      if (!weaponType) continue;
+      const outcome = weaponPickupOutcome(this.weaponState, weaponType);
+      if (outcome === 'equip' || outcome === 'ammo') {
+        this.onWeaponPickup(wpnSprite);
+      }
+    }
+  }
+
   updateInteractPrompt() {
     if (this.hidingState.isHiding) {
       this.interactText.setVisible(false);
@@ -1198,18 +1239,21 @@ export class GameScene extends Phaser.Scene {
       });
     }
 
-    const WEAPON_PICKUP_RANGE = 80;
     for (const wpnSprite of this.weaponPickupSprites) {
       if (!wpnSprite.active) continue;
       const dist = Math.hypot(this.player.x - wpnSprite.x, this.player.y - wpnSprite.y);
-      if (dist <= WEAPON_PICKUP_RANGE) {
-        candidates.push({
-          type: 'weapon',
-          item: wpnSprite,
-          pos: { x: wpnSprite.x, y: wpnSprite.y },
-          dist,
-        });
-      }
+      if (dist > WEAPON_PICKUP_RANGE) continue;
+      // Beneficial pickups (free slot, or a duplicate that becomes ammo) are
+      // auto-grabbed in update(); only a destructive swap of a second different
+      // gun still asks for a manual press.
+      const weaponType = WEAPON_TYPES.find(w => w.id === wpnSprite.getData('weaponId'));
+      if (!weaponType || weaponPickupOutcome(this.weaponState, weaponType) !== 'swap') continue;
+      candidates.push({
+        type: 'weapon',
+        item: wpnSprite,
+        pos: { x: wpnSprite.x, y: wpnSprite.y },
+        dist,
+      });
     }
 
     candidates.sort((a, b) => a.dist - b.dist);
@@ -1279,24 +1323,25 @@ export class GameScene extends Phaser.Scene {
       itemSprite.destroy();
       return;
     }
-    if (!canPickupItem(this.inventoryState)) return;
-    if (itemType === 'ammo' && !getActiveWeapon(this.weaponState)) return;
     if (itemType === 'ammo') {
+      // Ammo never occupies inventory space and is not gated by backpack
+      // capacity -- it refills the active weapon directly.
       const weapon = getActiveWeapon(this.weaponState);
+      if (!weapon) return;
       if (this.weaponState.ammo[this.weaponState.activeSlot] >= weapon.maxAmmo) return;
+      const amount = AMMO_PER_PICKUP[weapon.id] || 10;
+      this.weaponState = addAmmo(this.weaponState, amount);
+      this.playSound('ammo_pickup');
+      this.recordItemConsumed(itemSprite);
+      itemSprite.destroy();
+      return;
     }
+    if (!canPickupItem(this.inventoryState)) return;
     this.inventoryState = pickupItem(this.inventoryState, {
       type: itemType,
       value: itemSprite.getData('itemValue'),
     });
-    if (itemType === 'ammo') {
-      const weapon = getActiveWeapon(this.weaponState);
-      const amount = AMMO_PER_PICKUP[weapon.id] || 10;
-      this.weaponState = addAmmo(this.weaponState, amount);
-      this.playSound('ammo_pickup');
-    } else {
-      this.playSound('item_pickup');
-    }
+    this.playSound('item_pickup');
     this.recordItemConsumed(itemSprite);
     itemSprite.destroy();
   }
@@ -2871,7 +2916,7 @@ export class GameScene extends Phaser.Scene {
     const result = pickupWeapon(this.weaponState, weaponType, savedAmmo);
     this.weaponState = result.state;
     this.updateWeaponStats();
-    this.playSound('item_pickup');
+    this.playSound(result.addedAmmo ? 'ammo_pickup' : 'item_pickup');
 
     // Record the floor's generated weapon as taken so it never respawns. Swap
     // drops carry no weaponFloor, so dropping/regrabbing never marks a floor.
@@ -3220,6 +3265,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
+    this.autoPickupWeapons();
     this.updateInteractPrompt();
     this.updateTouchButtons();
 
