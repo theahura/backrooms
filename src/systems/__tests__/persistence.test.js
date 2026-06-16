@@ -48,7 +48,7 @@ describe('saveGame and loadGame round-trip', () => {
       unlockedLocations: ['store'],
       activeLocation: 'store',
       worldSeed: null,
-      roomState: { lastDayProcessed: -1, cells: {} },
+      roomState: { lastDayProcessed: -1, weaponFloors: [], cells: {} },
     });
   });
 
@@ -70,6 +70,7 @@ describe('per-room state persistence', () => {
     const shopState = { gold: 0, upgrades: { battery: 0, flashlight: 0, health: 0, speed: 0 } };
     const roomState = {
       lastDayProcessed: 4,
+      weaponFloors: [0, 2],
       cells: {
         '0:1,1': {
           items: [0, 2],
@@ -99,7 +100,7 @@ describe('per-room state persistence', () => {
 
     const loaded = loadGame();
 
-    expect(loaded.roomState).toEqual({ lastDayProcessed: -1, cells: {} });
+    expect(loaded.roomState).toEqual({ lastDayProcessed: -1, weaponFloors: [], cells: {} });
   });
 });
 

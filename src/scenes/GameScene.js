@@ -26,7 +26,7 @@ import { toggleDoor, getDoorCenter, findNearestDoor, DOOR_INTERACT_RANGE } from 
 import { toggleSwitch, findNearestSwitch, getLitRoomIds, isPointInRoom, computeSwitchPosition, chooseSwitchWall, SWITCH_INTERACT_RANGE } from '../systems/lightswitch.js';
 import { createHidingState, enterHiding, exitHiding, findNearestHideable, HIDE_INTERACT_RANGE, HIDING_SPEED_MULTIPLIER } from '../systems/hiding.js';
 import { saveGame, resolveWorldSeed } from '../systems/persistence.js';
-import { createRoomState, isItemConsumed, markItemConsumed, addCorpse, getCorpses, trackLamp, isLampOn, trackSwitch, setSwitchOn, isSwitchOn, flipLights, daySpawnSeed } from '../systems/roomState.js';
+import { createRoomState, isItemConsumed, markItemConsumed, isWeaponFloorTaken, markWeaponFloorTaken, addCorpse, getCorpses, trackLamp, isLampOn, trackSwitch, setSwitchOn, isSwitchOn, flipLights, daySpawnSeed } from '../systems/roomState.js';
 import { createExplorationState, updateExploration, getWindowedMinimapData, getCurrentRoom, MINIMAP_COLORS, MINIMAP_WINDOW_CELLS } from '../systems/exploration.js';
 import { generateCrackPoints, nextRiftCrossing } from '../systems/startroom.js';
 import { getLocation, getLocationLayout, getLocationExitPosition } from '../systems/locations.js';
@@ -1524,6 +1524,10 @@ export class GameScene extends Phaser.Scene {
   activateRoomWeapon(room, mazeRects = []) {
     if (room.id === 0) return;
     if (this.weaponedFloors.has(room.floor)) return;
+    // A floor's weapon is taken-forever: once the player grabbed it on any day it
+    // never respawns. (Keyed by floor because the pickup is gated per-floor, not
+    // tied to a specific cell.)
+    if (isWeaponFloorTaken(this.roomState, room.floor)) return;
 
     const furniture = this.roomFurniture.get(room.id) || [];
     const wpnData = generateRoomWeapon(
@@ -1537,6 +1541,7 @@ export class GameScene extends Phaser.Scene {
     sprite.setScale(1.5);
     sprite.setDepth(5);
     sprite.setData('weaponId', wpnData.weaponId);
+    sprite.setData('weaponFloor', room.floor);
     this.weaponPickupSprites.push(sprite);
   }
 
@@ -2803,6 +2808,14 @@ export class GameScene extends Phaser.Scene {
     this.weaponState = result.state;
     this.updateWeaponStats();
     this.playSound('item_pickup');
+
+    // Record the floor's generated weapon as taken so it never respawns. Swap
+    // drops carry no weaponFloor, so dropping/regrabbing never marks a floor.
+    const weaponFloor = wpnSprite.getData('weaponFloor');
+    if (weaponFloor !== undefined) {
+      markWeaponFloorTaken(this.roomState, weaponFloor);
+      this.registry.set('roomState', this.roomState);
+    }
 
     wpnSprite.setActive(false);
     wpnSprite.setVisible(false);

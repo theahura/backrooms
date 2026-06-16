@@ -3,6 +3,8 @@ import {
   createRoomState,
   markItemConsumed,
   isItemConsumed,
+  markWeaponFloorTaken,
+  isWeaponFloorTaken,
   addCorpse,
   getCorpses,
   CORPSE_CAP,
@@ -56,6 +58,22 @@ describe('persistent item consumption (anti-farm)', () => {
     const state = createRoomState();
     const regenerated = generateRoomItems(...ROOM, seed, [], 1, 5, []);
     expect(survivingItems(regenerated, state, '0:9,9')).toEqual(items);
+  });
+});
+
+describe('persistent weapon pickups (no daily respawn)', () => {
+  it('marks a floor weapon as taken so it does not return, leaving other floors alone', () => {
+    const state = createRoomState();
+    expect(isWeaponFloorTaken(state, 0)).toBe(false);
+
+    markWeaponFloorTaken(state, 0);
+
+    expect(isWeaponFloorTaken(state, 0)).toBe(true);
+    expect(isWeaponFloorTaken(state, 1)).toBe(false);
+
+    // Marking again is harmless -- the floor stays taken.
+    markWeaponFloorTaken(state, 0);
+    expect(isWeaponFloorTaken(state, 0)).toBe(true);
   });
 });
 
