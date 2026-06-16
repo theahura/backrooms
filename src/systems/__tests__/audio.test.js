@@ -14,6 +14,10 @@ import {
   ENEMY_SOUND_RANGE,
   ENEMY_SOUND_COOLDOWN_MIN,
   ENEMY_SOUND_COOLDOWN_MAX,
+  computeIntensity,
+  getDroneParams,
+  getShotVariation,
+  SHOT_DETUNE_MAX,
 } from '../audio.js';
 
 describe('getFootstepInterval', () => {
@@ -244,5 +248,144 @@ describe('getRiftCrackleVolume', () => {
     for (let i = 1; i < volumes.length; i++) {
       expect(volumes[i]).toBeGreaterThan(volumes[i - 1]);
     }
+  });
+});
+
+describe('computeIntensity', () => {
+  const calm = {
+    nearestEnemyDist: Infinity,
+    chasingCount: 0,
+    riftDist: null,
+    inSafeRoom: true,
+    healthFraction: 1,
+    waveCount: 0,
+  };
+
+  it('is near zero when the player is calm and safe', () => {
+    expect(computeIntensity(calm)).toBeLessThan(0.05);
+  });
+
+  it('always returns a value within [0, 1]', () => {
+    const extreme = {
+      nearestEnemyDist: 0,
+      chasingCount: 5,
+      riftDist: 0,
+      inSafeRoom: false,
+      healthFraction: 0,
+      waveCount: 100,
+    };
+    const v = computeIntensity(extreme);
+    expect(v).toBeGreaterThanOrEqual(0);
+    expect(v).toBeLessThanOrEqual(1);
+  });
+
+  it('rises as the nearest enemy gets closer', () => {
+    const far = computeIntensity({ ...calm, inSafeRoom: false, nearestEnemyDist: 380 });
+    const mid = computeIntensity({ ...calm, inSafeRoom: false, nearestEnemyDist: 200 });
+    const near = computeIntensity({ ...calm, inSafeRoom: false, nearestEnemyDist: 30 });
+    expect(mid).toBeGreaterThan(far);
+    expect(near).toBeGreaterThan(mid);
+  });
+
+  it('is higher for a chasing enemy than a lurking one at the same distance', () => {
+    const lurking = computeIntensity({ ...calm, inSafeRoom: false, nearestEnemyDist: 200, chasingCount: 0 });
+    const chasing = computeIntensity({ ...calm, inSafeRoom: false, nearestEnemyDist: 200, chasingCount: 1 });
+    expect(chasing).toBeGreaterThan(lurking);
+  });
+
+  it('rises as player health drops', () => {
+    const healthy = computeIntensity({ ...calm, inSafeRoom: false, healthFraction: 1 });
+    const hurt = computeIntensity({ ...calm, inSafeRoom: false, healthFraction: 0.2 });
+    expect(hurt).toBeGreaterThan(healthy);
+  });
+
+  it('rises as the player nears the rift', () => {
+    const farFromRift = computeIntensity({ ...calm, inSafeRoom: false, riftDist: 400 });
+    const atRift = computeIntensity({ ...calm, inSafeRoom: false, riftDist: 20 });
+    expect(atRift).toBeGreaterThan(farFromRift);
+  });
+
+  it('escalates with accumulated danger waves', () => {
+    const early = computeIntensity({ ...calm, inSafeRoom: false, waveCount: 0 });
+    const late = computeIntensity({ ...calm, inSafeRoom: false, waveCount: 4 });
+    expect(late).toBeGreaterThan(early);
+  });
+
+  it('pins intensity near maximum for a point-blank chasing enemy regardless of slow pressure', () => {
+    const calmBackground = computeIntensity({
+      ...calm, inSafeRoom: false, nearestEnemyDist: 5, chasingCount: 1, healthFraction: 1, waveCount: 0,
+    });
+    const heavyBackground = computeIntensity({
+      ...calm, inSafeRoom: false, nearestEnemyDist: 5, chasingCount: 1, healthFraction: 0.1, waveCount: 8,
+    });
+    expect(calmBackground).toBeGreaterThan(0.95);
+    expect(heavyBackground).toBeGreaterThan(0.95);
+  });
+
+  it('is dampened when the player is in a safe lit room', () => {
+    const exposed = computeIntensity({ ...calm, inSafeRoom: false, nearestEnemyDist: 150, chasingCount: 1 });
+    const sheltered = computeIntensity({ ...calm, inSafeRoom: true, nearestEnemyDist: 150, chasingCount: 1 });
+    expect(sheltered).toBeLessThan(exposed);
+  });
+
+  it('treats missing signals as a calm default', () => {
+    expect(computeIntensity({})).toBeLessThan(0.05);
+  });
+});
+
+describe('getDroneParams', () => {
+  it('opens the filter cutoff as intensity rises', () => {
+    expect(getDroneParams(1).cutoff).toBeGreaterThan(getDroneParams(0).cutoff);
+  });
+
+  it('keeps the dread layer silent when calm and audible when intense', () => {
+    expect(getDroneParams(0).dreadGain).toBe(0);
+    expect(getDroneParams(1).dreadGain).toBeGreaterThan(0);
+  });
+
+  it('quickens the heartbeat as intensity rises', () => {
+    expect(getDroneParams(1).heartbeatRate).toBeGreaterThan(getDroneParams(0).heartbeatRate);
+  });
+
+  it('keeps all outputs within sane bounds across the full intensity range', () => {
+    for (let i = 0; i <= 10; i++) {
+      const p = getDroneParams(i / 10);
+      expect(p.cutoff).toBeGreaterThan(0);
+      expect(p.cutoff).toBeLessThanOrEqual(20000);
+      expect(p.dreadGain).toBeGreaterThanOrEqual(0);
+      expect(p.dreadGain).toBeLessThanOrEqual(1);
+      expect(p.heartbeatRate).toBeGreaterThan(0);
+    }
+  });
+
+  it('clamps out-of-range intensity instead of extrapolating', () => {
+    expect(getDroneParams(5).cutoff).toBe(getDroneParams(1).cutoff);
+    expect(getDroneParams(-5).cutoff).toBe(getDroneParams(0).cutoff);
+  });
+});
+
+describe('getShotVariation', () => {
+  it('keeps detune within the allowed range', () => {
+    for (let s = 0; s < 100; s++) {
+      expect(Math.abs(getShotVariation(s).detune)).toBeLessThanOrEqual(SHOT_DETUNE_MAX);
+    }
+  });
+
+  it('keeps the volume scale within a subtle range', () => {
+    for (let s = 0; s < 100; s++) {
+      const v = getShotVariation(s);
+      expect(v.volumeScale).toBeGreaterThanOrEqual(0.8);
+      expect(v.volumeScale).toBeLessThanOrEqual(1.0);
+    }
+  });
+
+  it('produces varied detune across successive shots', () => {
+    const detunes = new Set();
+    for (let s = 0; s < 50; s++) detunes.add(getShotVariation(s).detune);
+    expect(detunes.size).toBeGreaterThan(5);
+  });
+
+  it('is deterministic for the same seed', () => {
+    expect(getShotVariation(7)).toEqual(getShotVariation(7));
   });
 });

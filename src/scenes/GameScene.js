@@ -33,7 +33,7 @@ import { getLocation, getLocationLayout, getLocationExitPosition } from '../syst
 import { generateRoomLore } from '../systems/lore.js';
 import { buildRoomGraph, getRoomDistance, getDoorwayCenter, DOORWAY_SEEK_CHANCE, ROOM_TRANSITION_COOLDOWN, MAX_ROOM_DISTANCE, MAX_ROOM_ENEMIES } from '../systems/pathfinding.js';
 import { createDangerState, updateDangerTime, shouldSpawnWave, advanceWave, getWaveComposition, getSpawnRoom } from '../systems/danger.js';
-import { SOUND_CONFIGS, getFootstepInterval, getAmbientSoundDelay, getEnemySoundEvent, getEnemyDeathSound, getEnemyFireSound, getDistanceVolume, getRiftCrackleVolume, ENEMY_SOUND_RANGE } from '../systems/audio.js';
+import { SOUND_CONFIGS, getFootstepInterval, getAmbientSoundDelay, getEnemySoundEvent, getEnemyDeathSound, getEnemyFireSound, getDistanceVolume, getRiftCrackleVolume, ENEMY_SOUND_RANGE, computeIntensity, getShotVariation } from '../systems/audio.js';
 import { generateAllSounds, createAmbientDrone, playAmbientSound, createRiftCrackle } from '../systems/audioEngine.js';
 import { getAlertedEnemies, GUNSHOT_ALERT_COOLDOWN } from '../systems/gunfireNoise.js';
 import { createRunStats, recordKill, updateTime, updateMaxFloor } from '../systems/runStats.js';
@@ -479,6 +479,12 @@ export class GameScene extends Phaser.Scene {
     this.batteryWarningTimer = 0;
     this.ambientDrone = null;
     this.ambientTimer = null;
+    this._shotCounter = 0;
+    // Live threat signals, refreshed each frame by updateEnemies and consumed
+    // by updateAmbientIntensity to drive the adaptive drone.
+    this.nearestEnemyDist = Infinity;
+    this.chasingCount = 0;
+    this.inSafeRoom = false;
 
     if (!this.sound || !this.sound.context) return;
 
@@ -531,6 +537,25 @@ export class GameScene extends Phaser.Scene {
     this.riftCrackle.setVolume(getRiftCrackleVolume(dist) * ambientVol);
   }
 
+  updateAmbientIntensity() {
+    if (!this.ambientDrone || !this.ambientDrone.setIntensity) return;
+    let riftDist = null;
+    if (this.riftRect) {
+      const cx = this.riftRect.x + this.riftRect.width / 2;
+      const cy = this.riftRect.y + this.riftRect.height / 2;
+      riftDist = Math.hypot(this.player.x - cx, this.player.y - cy);
+    }
+    const intensity = computeIntensity({
+      nearestEnemyDist: this.nearestEnemyDist,
+      chasingCount: this.chasingCount,
+      riftDist,
+      inSafeRoom: this.inSafeRoom,
+      healthFraction: getHealthFraction(this.combatState),
+      waveCount: this.dangerState ? this.dangerState.waveCount : 0,
+    });
+    this.ambientDrone.setIntensity(intensity);
+  }
+
   scheduleAmbientSound() {
     const delay = getAmbientSoundDelay(this.time ? this.time.now : 0);
     this.ambientTimer = this.time.addEvent({
@@ -549,8 +574,15 @@ export class GameScene extends Phaser.Scene {
     if (!this.audioReady) return;
     const vol = getEffectiveVolume(this.audioSettings.masterVolume, this.audioSettings.sfxVolume);
     if (vol <= 0) return;
+    const config = SOUND_CONFIGS[key];
+    const opts = { volume: vol };
+    if (config && config.vary) {
+      const v = getShotVariation(this._shotCounter++);
+      opts.detune = v.detune;
+      opts.volume = vol * v.volumeScale;
+    }
     try {
-      this.sound.play(key, { volume: vol });
+      this.sound.play(key, opts);
     } catch (_) {}
   }
 
@@ -562,8 +594,14 @@ export class GameScene extends Phaser.Scene {
     if (volume <= 0) return;
     const sfxVol = getEffectiveVolume(this.audioSettings.masterVolume, this.audioSettings.sfxVolume);
     if (sfxVol <= 0) return;
+    const opts = { volume: volume * sfxVol };
+    if (config && config.vary) {
+      const v = getShotVariation(this._shotCounter++);
+      opts.detune = v.detune;
+      opts.volume = volume * sfxVol * v.volumeScale;
+    }
     try {
-      this.sound.play(key, { volume: volume * sfxVol });
+      this.sound.play(key, opts);
     } catch (_) {}
   }
 
@@ -2289,6 +2327,11 @@ export class GameScene extends Phaser.Scene {
       roomEnemyCounts.set(rid, (roomEnemyCounts.get(rid) || 0) + 1);
     }
 
+    // Track the nearest active (non-frozen) enemy and how many are pursuing the
+    // player; both feed the adaptive ambient drone via updateAmbientIntensity.
+    let nearestEnemyDist = Infinity;
+    let chasingCount = 0;
+
     for (const es of this.enemyStates) {
       es.x = es.sprite.x;
       es.y = es.sprite.y;
@@ -2307,6 +2350,11 @@ export class GameScene extends Phaser.Scene {
         else es.sprite.play(getAnimKeyForState(es.type, 'idle'), true);
         continue;
       }
+
+      const pdx = es.x - playerPos.x;
+      const pdy = es.y - playerPos.y;
+      const pdist = Math.sqrt(pdx * pdx + pdy * pdy);
+      if (pdist < nearestEnemyDist) nearestEnemyDist = pdist;
 
       const enemyRoomId = es.currentRoomId;
 
@@ -2354,6 +2402,7 @@ export class GameScene extends Phaser.Scene {
       }
 
       es.state = updated.state;
+      if (es.state === 'chase' || es.state === 'attack') chasingCount++;
       es.velocityX = updated.velocityX;
       es.velocityY = updated.velocityY;
       es.wanderTimer = updated.wanderTimer;
@@ -2387,6 +2436,10 @@ export class GameScene extends Phaser.Scene {
         es.sprite.play(getAnimKeyForState(es.type, es.state), true);
       }
     }
+
+    this.nearestEnemyDist = nearestEnemyDist;
+    this.chasingCount = chasingCount;
+    this.inSafeRoom = isInSafeRoom;
   }
 
   // Set a character sprite to the directional frame for `angle` (8-way snap with
@@ -3202,6 +3255,7 @@ export class GameScene extends Phaser.Scene {
 
     if (this.audioReady) {
       this.updateRiftCrackle();
+      this.updateAmbientIntensity();
 
       const speed = Math.sqrt(this.player.body.velocity.x ** 2 + this.player.body.velocity.y ** 2);
       const interval = getFootstepInterval(speed);
