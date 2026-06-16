@@ -7,9 +7,67 @@ import {
   getActiveWeapon,
   getEffectiveStats,
   generateRoomWeapon,
+  serializeWeaponState,
+  deserializeWeaponState,
+  fillStartingWeapons,
 } from '../weapons.js';
 import { calculateShotgunSpread } from '../shooting.js';
 import { generateMazeWalls } from '../maze.js';
+
+const byId = (id) => WEAPON_TYPES.find((w) => w.id === id);
+
+describe('carrying a loadout across days (serialize/deserialize)', () => {
+  it('restores the same weapons, ammo, and active slot after a save/load', () => {
+    let state = createWeaponState({ startingPistol: true });
+    state = pickupWeapon(state, byId('shotgun')).state; // shotgun into the empty slot
+    state = { ...state, activeSlot: 1, ammo: [9, 3] };
+
+    const restored = deserializeWeaponState(serializeWeaponState(state));
+
+    expect(restored.slots.map((w) => w && w.id)).toEqual(['pistol', 'shotgun']);
+    expect(restored.ammo).toEqual([9, 3]);
+    expect(restored.activeSlot).toBe(1);
+  });
+
+  it('rehydrates the live weapon definition, not a stored copy', () => {
+    const state = createWeaponState({ startingRifle: true });
+    const restored = deserializeWeaponState(serializeWeaponState(state));
+    expect(restored.slots[0]).toEqual(byId('rifle'));
+  });
+
+  it('falls back to nothing when there is no saved loadout', () => {
+    expect(deserializeWeaponState(null)).toBeNull();
+    expect(deserializeWeaponState({})).toBeNull();
+  });
+
+  it('drops a slot whose weapon no longer exists in the game', () => {
+    const restored = deserializeWeaponState({ slots: ['pistol', 'railgun'], activeSlot: 0, ammo: [5, 9] });
+    expect(restored.slots[0].id).toBe('pistol');
+    expect(restored.slots[1]).toBeNull();
+  });
+});
+
+describe('fillStartingWeapons (guaranteed fallback weapons)', () => {
+  it('fills an empty slot with an owned starting weapon, leaving the found gun intact', () => {
+    const state = { slots: [byId('shotgun'), null], activeSlot: 0, ammo: [4, 0] };
+    const filled = fillStartingWeapons(state, { startingPistol: true });
+    expect(filled.slots.map((w) => w && w.id)).toEqual(['shotgun', 'pistol']);
+    expect(filled.ammo[0]).toBe(4); // found gun's ammo untouched
+  });
+
+  it('does not duplicate a starting weapon the player already carries', () => {
+    const state = { slots: [byId('pistol'), null], activeSlot: 0, ammo: [3, 0] };
+    const filled = fillStartingWeapons(state, { startingPistol: true });
+    expect(filled.slots.map((w) => w && w.id)).toEqual(['pistol', null]);
+    expect(filled.ammo[0]).toBe(3);
+  });
+
+  it('leaves two found guns alone when there is no room for a starting weapon', () => {
+    const state = { slots: [byId('rifle'), byId('shotgun')], activeSlot: 0, ammo: [10, 5] };
+    const filled = fillStartingWeapons(state, { startingPistol: true });
+    expect(filled.slots.map((w) => w.id)).toEqual(['rifle', 'shotgun']);
+  });
+});
 
 describe('createWeaponState', () => {
   it('starts with both slots empty by default', () => {

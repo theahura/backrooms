@@ -16,7 +16,7 @@ import { createCombatState, applyDamage, applyHeal, updateCombat, getHealthFract
 import { createFlashlightState, toggleFlashlight, setFlashlightHiding, isFlashlightLit, updateBatteryWithFlashlight } from '../systems/flashlight.js';
 import { calculateBulletVelocity, calculateShotgunSpread, canFire, updateFireCooldown, isBulletExpired, getBulletVelocityFromAngle, SPITTER_PROJECTILE_SPEED, SPITTER_PROJECTILE_RANGE } from '../systems/shooting.js';
 import { getMoveVelocity, resolveAimAngle, resolveFireIntent, resolveMoveVelocity, detectTouchPrimary, computeTouchLayout } from '../systems/touchControls.js';
-import { WEAPON_TYPES, createWeaponState, switchWeapon, pickupWeapon, getActiveWeapon, getEffectiveStats, generateRoomWeapon, hasAmmo, consumeAmmo, addAmmo, AMMO_PER_PICKUP } from '../systems/weapons.js';
+import { WEAPON_TYPES, createWeaponState, switchWeapon, pickupWeapon, getActiveWeapon, getEffectiveStats, generateRoomWeapon, hasAmmo, consumeAmmo, addAmmo, AMMO_PER_PICKUP, serializeWeaponState, deserializeWeaponState, fillStartingWeapons } from '../systems/weapons.js';
 import { getEnemyHP, getEnemyDamage } from '../systems/scaling.js';
 import { createBatteryState, getBatteryFraction, getFlashlightConeAngle, shouldFlicker, rechargeBattery, getBatteryHint, BATTERY_RECHARGE_AMOUNT, BATTERY_RECHARGE_PER_MS } from '../systems/battery.js';
 import { generateRoomItems, ITEM_TYPES } from '../systems/items.js';
@@ -162,11 +162,17 @@ export class GameScene extends Phaser.Scene {
     const hasStartingRifle = (levels.startingRifle || 0) > 0;
     this.hasMinimap = (levels.minimap || 0) > 0;
     this.hasRechargeBattery = (levels.rechargeBattery || 0) > 0;
-    this.weaponState = createWeaponState({
+    // Found guns carried over from a survived day are restored; any empty slot is
+    // then backfilled with the player's owned starting weapons (a guaranteed
+    // minimum loadout). After a death the saved loadout was cleared, so this falls
+    // back to just the starting weapons.
+    const startingWeaponOpts = {
       startingPistol: hasStartingPistol,
       startingShotgun: hasStartingShotgun,
       startingRifle: hasStartingRifle,
-    });
+    };
+    const carriedWeapons = deserializeWeaponState(this.registry.get('weaponInventory'));
+    this.weaponState = fillStartingWeapons(carriedWeapons || createWeaponState(), startingWeaponOpts);
     this.updateWeaponStats();
 
     const runCount = this.registry.get('runCount') ?? 0;
@@ -198,7 +204,7 @@ export class GameScene extends Phaser.Scene {
     }
     this.registry.set('roomState', this.roomState);
 
-    saveGame(shopState || createShopState(), runCount + 1, [...this.collectedLore], this.unlockedLocations, this.activeLocation, worldSeed, this.roomState);
+    saveGame(shopState || createShopState(), runCount + 1, [...this.collectedLore], this.unlockedLocations, this.activeLocation, worldSeed, this.roomState, this.registry.get('weaponInventory'));
   }
 
   updateWeaponStats() {
@@ -2050,6 +2056,8 @@ export class GameScene extends Phaser.Scene {
     this.playSound('day_complete');
     this.stopAmbientAudio();
     this.dayEnding = true;
+    // Surviving the day carries the current loadout (guns + ammo) into tomorrow.
+    this.registry.set('weaponInventory', serializeWeaponState(this.weaponState));
     this.player.body.stop();
     this.player.body.enable = false;
     this.cameras.main.fadeOut(1000, 0, 0, 0);
@@ -2224,6 +2232,9 @@ export class GameScene extends Phaser.Scene {
   onPlayerDeath() {
     this.playSound('player_death');
     this.stopAmbientAudio();
+    // Dying drops everything you were carrying -- next day reverts to the
+    // shop-bought starting weapons.
+    this.registry.set('weaponInventory', null);
     this.player.body.stop();
     this.player.body.enable = false;
     this.cameras.main.fadeOut(500, 0, 0, 0);

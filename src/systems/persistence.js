@@ -1,7 +1,7 @@
 import { createRoomState } from './roomState.js';
 
 export const SAVE_KEY = 'backrooms_save';
-export const SAVE_VERSION = 5;
+export const SAVE_VERSION = 6;
 
 // Positive 31-bit ceiling for a world seed. Staying below 2^31 keeps the base
 // seed a positive value after the `| 0` truncation in mulberry32/hashU32 and
@@ -26,9 +26,9 @@ export function resolveWorldSeed(savedSeed, rng = Math.random) {
   return Number.isInteger(savedSeed) && savedSeed > 0 ? savedSeed : generateWorldSeed(rng);
 }
 
-export function saveGame(shopState, runCount, collectedLore = [], unlockedLocations = ['store'], activeLocation = 'store', worldSeed = null, roomState = createRoomState()) {
+export function saveGame(shopState, runCount, collectedLore = [], unlockedLocations = ['store'], activeLocation = 'store', worldSeed = null, roomState = createRoomState(), weaponInventory = null) {
   try {
-    const data = { version: SAVE_VERSION, shopState, runCount, collectedLore, unlockedLocations, activeLocation, worldSeed, roomState };
+    const data = { version: SAVE_VERSION, shopState, runCount, collectedLore, unlockedLocations, activeLocation, worldSeed, roomState, weaponInventory };
     localStorage.setItem(SAVE_KEY, JSON.stringify(data));
   } catch (e) {
   }
@@ -49,6 +49,7 @@ export function loadGame() {
       activeLocation: data.activeLocation ?? 'store',
       worldSeed: data.worldSeed ?? null,
       roomState: data.roomState ?? createRoomState(),
+      weaponInventory: data.weaponInventory ?? null,
     };
   } catch (e) {
     return null;

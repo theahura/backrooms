@@ -71,6 +71,7 @@ if (saved) {
   game.registry.set('activeLocation', saved.activeLocation);
   game.registry.set('worldSeed', saved.worldSeed);
   game.registry.set('roomState', saved.roomState);
+  game.registry.set('weaponInventory', saved.weaponInventory);
 }
 
 game.registry.set('audioSettings', loadSettings());
@@ -79,7 +80,7 @@ function saveCurrentState() {
   const shopState = game.registry.get('shopState');
   const runCount = game.registry.get('runCount') ?? 0;
   if (shopState) {
-    saveGame(shopState, runCount, game.registry.get('collectedLore') ?? [], game.registry.get('unlockedLocations') ?? ['store'], game.registry.get('activeLocation') ?? 'store', game.registry.get('worldSeed') ?? null, game.registry.get('roomState'));
+    saveGame(shopState, runCount, game.registry.get('collectedLore') ?? [], game.registry.get('unlockedLocations') ?? ['store'], game.registry.get('activeLocation') ?? 'store', game.registry.get('worldSeed') ?? null, game.registry.get('roomState'), game.registry.get('weaponInventory'));
   }
 }
 

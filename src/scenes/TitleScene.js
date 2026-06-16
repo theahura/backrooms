@@ -119,6 +119,9 @@ export class TitleScene extends Phaser.Scene {
     // Clear persisted per-room state (looted items, bodies, light on/off) so a
     // new game starts in a pristine, fully-stocked, fully-lit world.
     this.registry.set('roomState', null);
+    // Drop any carried-over weapon loadout so a new game starts with only the
+    // (also-reset) shop-bought starting weapons.
+    this.registry.set('weaponInventory', null);
   }
 
   onMenuSelect(key) {
