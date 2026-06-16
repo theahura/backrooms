@@ -71,6 +71,54 @@ export function createWeaponState(options = {}) {
   };
 }
 
+// Pare a live loadout down to weapon ids + ammo for the save. Storing ids (not
+// the full weapon objects) keeps saved loadouts from carrying stale stats if a
+// weapon's definition changes -- they rehydrate from WEAPON_TYPES on load.
+export function serializeWeaponState(state) {
+  return {
+    slots: state.slots.map((w) => (w ? w.id : null)),
+    activeSlot: state.activeSlot,
+    ammo: [...state.ammo],
+  };
+}
+
+// Rebuild a loadout from serialized ids, pulling current weapon definitions.
+// Unknown ids become empty slots; absent/malformed data returns null so callers
+// fall back to the starting loadout.
+export function deserializeWeaponState(data) {
+  if (!data || !Array.isArray(data.slots)) return null;
+  const slots = [0, 1].map((i) => {
+    const id = data.slots[i];
+    return id ? (WEAPON_TYPES.find((w) => w.id === id) || null) : null;
+  });
+  const ammo = [0, 1].map((i) => (Number.isFinite(data.ammo?.[i]) ? data.ammo[i] : 0));
+  const activeSlot = data.activeSlot === 1 && slots[1] ? 1 : 0;
+  return { slots, activeSlot, ammo };
+}
+
+// Guarantee the player's owned starting-weapon upgrades are present: fill any
+// empty slot (rifle > shotgun > pistol priority, matching createWeaponState)
+// with an owned starting weapon not already carried. Never overwrites a carried
+// weapon, never duplicates, and respects the two-slot cap.
+export function fillStartingWeapons(state, options = {}) {
+  const wanted = [];
+  if (options.startingRifle) wanted.push('rifle');
+  if (options.startingShotgun) wanted.push('shotgun');
+  if (options.startingPistol) wanted.push('pistol');
+
+  const slots = [...state.slots];
+  const ammo = [...state.ammo];
+  for (const id of wanted) {
+    if (slots.some((w) => w && w.id === id)) continue;
+    const empty = slots[0] === null ? 0 : slots[1] === null ? 1 : -1;
+    if (empty < 0) break;
+    const weapon = WEAPON_TYPES.find((w) => w.id === id);
+    slots[empty] = weapon;
+    ammo[empty] = weapon.startAmmo;
+  }
+  return { ...state, slots, ammo };
+}
+
 export function switchWeapon(state) {
   const otherSlot = state.activeSlot === 0 ? 1 : 0;
   if (state.slots[otherSlot] === null) return state;

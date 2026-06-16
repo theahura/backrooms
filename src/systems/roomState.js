@@ -21,7 +21,7 @@ export const LIGHT_ON_CHANCE = 0.2;
 const SPAWN_DAY_SALT = 7;
 
 export function createRoomState() {
-  return { lastDayProcessed: -1, cells: {} };
+  return { lastDayProcessed: -1, weaponFloors: [], cells: {} };
 }
 
 function ensureCell(state, cellKey) {
@@ -44,6 +44,21 @@ export function markItemConsumed(state, cellKey, index) {
   const cell = ensureCell(state, cellKey);
   if (!cell.items) cell.items = [];
   if (!cell.items.includes(index)) cell.items.push(index);
+  return state;
+}
+
+// --- Weapons: one floor weapon, taken-forever --------------------------------
+
+// A floor has at most one generated weapon pickup (gated per-floor, placed in
+// whichever room the player reaches first), so taken-state is keyed by floor
+// number rather than cell -- once taken it never respawns on a later day.
+export function isWeaponFloorTaken(state, floor) {
+  return Array.isArray(state.weaponFloors) && state.weaponFloors.includes(floor);
+}
+
+export function markWeaponFloorTaken(state, floor) {
+  if (!state.weaponFloors) state.weaponFloors = [];
+  if (!state.weaponFloors.includes(floor)) state.weaponFloors.push(floor);
   return state;
 }
 
