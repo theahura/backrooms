@@ -119,6 +119,37 @@ export const ART_MANIFEST = [
   { id: 'furniture_payphone', prompt: prop('A wall payphone on a short metal stand with a coin box, keypad and hanging handset'), width: 88, height: 192, crop: true, keys: ['furniture_payphone'] },
   { id: 'furniture_shopping_cart', prompt: prop('An abandoned metal wire shopping cart seen from the front, the wide wire basket facing the viewer, wider than it is tall, about hip height, slightly rusted'), width: 150, height: 110, crop: true, keys: ['furniture_shopping_cart'] },
 
+  // Second wave of 2.5D upright props (front elevation). Same convention as
+  // above: keys are furniture_<type>, sizes are the generated resolution that is
+  // cropped and scaled to the standee in-game. Types with several images per kind
+  // (trash can, mannequin) carry furniture_<type>_<i> keys -- see propVariantKey.
+  // Mall.
+  { id: 'furniture_mall_directory', prompt: prop('A tall backlit shopping-mall directory kiosk, a slab on a stand with a glowing YOU ARE HERE store map panel behind scratched plexiglass, no readable text just colored blocks and lines'), width: 110, height: 270, crop: true, keys: ['furniture_mall_directory'] },
+  { id: 'furniture_mall_bench', prompt: prop('A long low public mall bench with wooden slats and dark metal end frames, empty, wider than it is tall, about knee-to-hip height'), width: 220, height: 110, crop: true, keys: ['furniture_mall_bench'] },
+  { id: 'furniture_trash_can_0', prompt: prop('A dented stainless-steel trash can with a domed swing lid, empty and closed, about hip height'), width: 100, height: 190, crop: true, keys: ['furniture_trash_can_0'] },
+  { id: 'furniture_trash_can_1', prompt: prop('A dented stainless-steel trash can overflowing with crumpled paper and garbage spilling over the rim, about hip height'), width: 100, height: 190, crop: true, keys: ['furniture_trash_can_1'] },
+  { id: 'furniture_trash_can_2', prompt: prop('A battered stainless-steel trash can with its domed swing lid knocked askew and half off, a little trash poking out, about hip height'), width: 100, height: 190, crop: true, keys: ['furniture_trash_can_2'] },
+  { id: 'furniture_mannequin_0', prompt: prop('A faceless matte pale-grey retail store mannequin standing upright with both arms straight down at its sides, smooth featureless head, bare unclothed body on a slim pole base'), width: 96, height: 280, crop: true, keys: ['furniture_mannequin_0'] },
+  { id: 'furniture_mannequin_1', prompt: prop('A faceless matte pale-grey retail store mannequin with one arm raised and bent at the elbow in a frozen gesture, smooth featureless head, bare body on a slim pole base'), width: 96, height: 280, crop: true, keys: ['furniture_mannequin_1'] },
+  { id: 'furniture_mannequin_2', prompt: prop('A headless matte pale-grey retail store mannequin torso leaning slightly forward with one shoulder dropped, bare body on a slim pole base'), width: 96, height: 280, crop: true, keys: ['furniture_mannequin_2'] },
+  // Hospital.
+  { id: 'furniture_wheelchair', prompt: prop('An empty hospital wheelchair seen from the front, chrome frame, dark vinyl seat and back, large rear wheels, footrests, slightly worn'), width: 150, height: 220, crop: true, keys: ['furniture_wheelchair'] },
+  { id: 'furniture_iv_stand', prompt: prop('A tall thin chrome hospital IV drip stand on small castor wheels, an empty clear drip bag and hooks at the top, taller than a person'), width: 80, height: 300, crop: true, keys: ['furniture_iv_stand'] },
+  { id: 'furniture_hospital_chairs', prompt: prop('A short row of three linked hospital waiting-room chairs, sickly teal vinyl seats on a chrome tube frame, empty, wider than tall'), width: 220, height: 190, crop: true, keys: ['furniture_hospital_chairs'] },
+  { id: 'furniture_supply_cart', prompt: prop('A rolling hospital supply crash cart, a grey metal cabinet of drawers on castor wheels with a handle, clinical and a bit grimy'), width: 130, height: 210, crop: true, keys: ['furniture_supply_cart'] },
+  // Hotel.
+  { id: 'furniture_reception_desk', prompt: prop('A derelict hotel reception front desk seen from the front, dark wood panelling with a worn countertop, a small call bell and a grid of empty key cubbies behind, wider than tall'), width: 260, height: 190, crop: true, keys: ['furniture_reception_desk'] },
+  { id: 'furniture_ice_machine', prompt: prop('A tall beige hotel ice and vending machine with a dispenser flap and a faint internal glow, scuffed institutional plastic, about person height'), width: 140, height: 270, crop: true, keys: ['furniture_ice_machine'] },
+  { id: 'furniture_luggage_cart', prompt: prop('An empty brass bellhop luggage trolley cart on four black caster wheels, a low flat carpeted deck at the bottom with a single tall thin upright pole railing at the back and one horizontal hanging bar across the top, clearly a wheeled hotel luggage cart and NOT a door or archway'), width: 170, height: 220, crop: true, keys: ['furniture_luggage_cart'] },
+  // Office.
+  { id: 'furniture_filing_cabinet', prompt: prop('A tall grey metal four-drawer office filing cabinet, one drawer hanging open, dented and scuffed, about chest height'), width: 110, height: 250, crop: true, keys: ['furniture_filing_cabinet'] },
+  { id: 'furniture_office_chair', prompt: prop('A black office swivel desk chair seen from the front, padded seat and back on a five-star wheeled base, slightly worn'), width: 150, height: 210, crop: true, keys: ['furniture_office_chair'] },
+  { id: 'furniture_cubicle_partition', prompt: prop('A free-standing grey-beige fabric office cubicle partition wall panel on small feet, blank and featureless, wider than tall, about head height'), width: 250, height: 230, crop: true, keys: ['furniture_cubicle_partition'] },
+  // Warehouse.
+  { id: 'furniture_pallet_rack', prompt: prop('A tall orange and blue industrial steel pallet storage rack, two levels half-stocked with shrink-wrapped cardboard boxes, seen from the front, taller than a person'), width: 230, height: 260, crop: true, keys: ['furniture_pallet_rack'] },
+  { id: 'furniture_forklift', prompt: prop('An idle yellow warehouse forklift seen from the front, twin lifting forks lowered to the ground, a roll cage over the seat, grimy and industrial'), width: 200, height: 250, crop: true, keys: ['furniture_forklift'] },
+  { id: 'furniture_oil_barrel', prompt: prop('A rusted steel 55-gallon oil drum barrel standing upright, dented with a worn ribbed body, about hip-to-waist height'), width: 120, height: 200, crop: true, keys: ['furniture_oil_barrel'] },
+
   // Weapon pickups.
   { id: 'pickup_pistol', prompt: sprite('A handgun pistol weapon lying on the ground seen from directly straight above'), width: 28, height: 20, keys: ['pickup_pistol'] },
   { id: 'pickup_shotgun', prompt: sprite('A pump shotgun weapon lying on the ground seen from directly straight above'), width: 32, height: 20, keys: ['pickup_shotgun'] },

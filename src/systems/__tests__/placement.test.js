@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { getRoomAt, hasStairDown } from '../worldgen.js';
 import { generateMazeWalls, doorEntryZones, getRoomType } from '../maze.js';
-import { generateRoomFurniture } from '../furniture.js';
+import { generateRoomFurniture, planScene } from '../furniture.js';
 import { generateRoomEnemies } from '../enemy.js';
 import { getRoomVibe } from '../roomVibes.js';
 import { getZoneAt } from '../zones.js';
@@ -14,6 +14,9 @@ import { mulberry32 } from '../random.js';
 // "hiding places, stairs, and doors will often spawn inside walls" bug.
 const WALL_THICKNESS = 16;
 const STAIR_KEEPOUT_PAD = 16;
+// Mirror GameScene's ambient-scatter constants.
+const AMBIENT_SCATTER_COUNT = 4;
+const AMBIENT_SEED_OFFSET = 54321;
 
 const overlaps = (a, b) =>
   a.x < b.x + b.width &&
@@ -21,21 +24,34 @@ const overlaps = (a, b) =>
   a.y < b.y + b.height &&
   a.y + a.height > b.y;
 
-// Mirror of GameScene.activateRoom's obstacle assembly for a floor-0 room.
+// Mirror of GameScene.activateRoom's obstacle assembly for a floor-0 room: a
+// coherent scene dropped into a clearing (the clearing is a maze keep-out so the
+// maze opens into it), plus a little small-prop ambient scatter in the maze gaps.
 function placeRoom(seed, gx, gy) {
   const room = getRoomAt(seed, gx, gy);
   const entrance = gx === 0 && gy === 0;
   const hasStair = !entrance && hasStairDown(seed, gx, gy);
   const stairKeep = hasStair ? [stairKeepOut(room, STAIR_SIZE, STAIR_MARGIN, STAIR_KEEPOUT_PAD)] : [];
   const landingKeep = hasStair ? [stairLandingKeepOut(room)] : [];
-  const mazeRects = !entrance
-    ? generateMazeWalls(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed, room.doors, [...stairKeep, ...landingKeep])
-    : [];
-  const furnitureObstacles = [...mazeRects, ...doorEntryZones(room, WALL_THICKNESS), ...landingKeep];
   const vibe = getRoomVibe(getZoneAt(seed, gx, gy), room.seed);
-  const furniture = entrance
-    ? []
-    : generateRoomFurniture(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed, vibe.furniture, furnitureObstacles);
+  const doorZones = doorEntryZones(room, WALL_THICKNESS);
+  const reserved = [...doorZones, ...stairKeep, ...landingKeep];
+  const scene = entrance
+    ? { items: [], clearing: null }
+    : planScene(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed, vibe.furniture.scenes, reserved);
+  const mazeRects = !entrance
+    ? generateMazeWalls(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed, room.doors,
+        [...stairKeep, ...landingKeep, ...(scene.clearing ? [scene.clearing] : [])])
+    : [];
+  let furniture = [];
+  if (!entrance) {
+    const ambientObstacles = [...mazeRects, ...doorZones, ...stairKeep, ...landingKeep, ...scene.items,
+      ...(scene.clearing ? [scene.clearing] : [])];
+    const ambient = generateRoomFurniture(room.x, room.y, room.width, room.height, WALL_THICKNESS,
+      room.seed + AMBIENT_SEED_OFFSET, { clusters: [], singletons: vibe.furniture.ambient },
+      ambientObstacles, AMBIENT_SCATTER_COUNT);
+    furniture = [...scene.items, ...ambient];
+  }
   return { room, mazeRects, furniture, hasStair, stairKeep, landingKeep };
 }
 

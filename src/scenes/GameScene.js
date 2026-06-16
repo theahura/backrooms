@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { calculateVelocity } from '../systems/movement.js';
-import { generateRoomFurniture, FURNITURE_TYPES, blocksBullets, opaqueBounds, visibleFurnitureRect, billboardDepth, shouldPropDrawOverPlayer } from '../systems/furniture.js';
+import { generateRoomFurniture, planScene, FURNITURE_TYPES, blocksBullets, opaqueBounds, visibleFurnitureRect, billboardDepth, shouldPropDrawOverPlayer, propVariantKey } from '../systems/furniture.js';
+import { sampleBrightness, brightnessToGray } from '../systems/lighting.js';
 import { generateMazeWalls, wallRectSegments, wallRectOccluders, doorEntryZones } from '../systems/maze.js';
 import { getRoomVibe } from '../systems/roomVibes.js';
 import { getZoneAt } from '../systems/zones.js';
@@ -61,6 +62,17 @@ const WALL_TEX_DEPTH = 2;
 // above the player so it occludes them; otherwise it sits in its billboard band.
 const PLAYER_DEPTH = 200;
 const BILLBOARD_OVER_PLAYER_DEPTH = PLAYER_DEPTH + 1;
+// Upright props render ABOVE the darkness overlay (depth 100), so each is tinted
+// per-frame by the light at its base instead of being revealed by the floor mask.
+// An unlit prop is darkened to this fraction of its art so it reads as a faint
+// silhouette matching the ~5%-bright darkened floor (the darkness is 0.95 opaque)
+// rather than a pure-black cutout.
+const BILLBOARD_MIN_LIGHT = 0.05;
+// A furnished room is one coherent scene in a clearing plus a few small ambient
+// props lightly littering the surrounding maze (hero props never scatter). The
+// offset decorrelates ambient placement from the scene's own RNG.
+const AMBIENT_SCATTER_COUNT = 4;
+const AMBIENT_SEED_OFFSET = 54321;
 // Player ground-contact point relative to its center (48px display) for y-sort.
 const PLAYER_FOOT_Y_OFFSET = 18;
 // Breathing room carved out of maze walls around a room's centered stair, so
@@ -256,11 +268,19 @@ export class GameScene extends Phaser.Scene {
     this.createWeaponPickups();
     this.createStairInfra();
 
-    // Generate + activate the entrance and everything within 2 door-hops.
-    this.ensureRoomsAround(0, 0, 0);
+    // Activate the entrance room and create the player BEFORE activating the
+    // surrounding rooms. A neighbour room with a stair registers a player-vs-stair
+    // overlap in activateRoom (activateRoomStairs), so the player must already
+    // exist; otherwise that overlap is created with an undefined object and Arcade
+    // physics dereferences it every step (the intermittent "reading 'isParent'"
+    // crash, seen only when an initially-activated room happens to have a stair).
+    this.activateRoom(this.genRoom(0, 0, 0));
     this.entranceRoom = this.roomsById.get(0);
-
     this.createPlayer();
+
+    // Now generate + activate everything within 2 door-hops (the entrance is
+    // already active, so ensureRoomsAround skips it).
+    this.ensureRoomsAround(0, 0, 0);
     this.createBullets();
     this.createEnemyBullets();
     this.createExitZone();
@@ -380,12 +400,36 @@ export class GameScene extends Phaser.Scene {
       ? [stairKeepOut(room, STAIR_SIZE, STAIR_MARGIN, STAIR_KEEPOUT_PAD)]
       : [];
     const landingKeep = hasStair ? [stairLandingKeepOut(room)] : [];
-    const mazeRects = room.id !== 0
-      ? generateMazeWalls(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed, room.doors, [...stairKeep, ...landingKeep])
-      : [];
-    const furnitureObstacles = [...mazeRects, ...doorEntryZones(room, WALL_THICKNESS), ...landingKeep];
 
-    this.createRoomFurniture(this.furnitureGfx, room, theme, furnitureObstacles);
+    // A room is furnished as ONE coherent SCENE (a reception lobby, a ward, a
+    // racking aisle) dropped into a CLEARING, plus a little small-prop ambient
+    // scatter. The clearing is handed to the maze as a keep-out so the maze opens
+    // INTO the set piece -- you wind through bare maze and emerge into it. Hero
+    // props only ever appear inside a scene, never scattered alone.
+    const doorZones = doorEntryZones(room, WALL_THICKNESS);
+    const reserved = [...doorZones, ...stairKeep, ...landingKeep];
+    const scene = room.id !== 0
+      ? planScene(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed, theme.furniture.scenes, reserved)
+      : { items: [], clearing: null };
+
+    const mazeRects = room.id !== 0
+      ? generateMazeWalls(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed, room.doors,
+          [...stairKeep, ...landingKeep, ...(scene.clearing ? [scene.clearing] : [])])
+      : [];
+
+    let furniture;
+    if (room.id === 0) {
+      furniture = getLocationLayout(this.activeLocation, room.x, room.y, room.width, room.height, WALL_THICKNESS);
+    } else {
+      const ambientObstacles = [...mazeRects, ...doorZones, ...stairKeep, ...landingKeep, ...scene.items,
+        ...(scene.clearing ? [scene.clearing] : [])];
+      const ambient = generateRoomFurniture(room.x, room.y, room.width, room.height, WALL_THICKNESS,
+        room.seed + AMBIENT_SEED_OFFSET, { clusters: [], singletons: theme.furniture.ambient },
+        ambientObstacles, AMBIENT_SCATTER_COUNT);
+      furniture = [...scene.items, ...ambient];
+    }
+
+    this.createRoomFurniture(this.furnitureGfx, room, furniture);
     if (room.id !== 0) {
       this.renderRoomMaze(this.roomGfx, mazeRects, theme);
     }
@@ -686,19 +730,18 @@ export class GameScene extends Phaser.Scene {
     addVerticalWall(room.x + WALL_THICKNESS / 2, room.y, room.height, westDoors, WALL_THICKNESS);
   }
 
-  createRoomFurniture(gfx, room, vibe, obstacles = []) {
-    const furniture = room.id === 0
-      ? getLocationLayout(this.activeLocation, room.x, room.y, room.width, room.height, WALL_THICKNESS)
-      : generateRoomFurniture(room.x, room.y, room.width, room.height, WALL_THICKNESS, room.seed, vibe.furniture, obstacles);
+  createRoomFurniture(gfx, room, furniture) {
     this.roomFurniture.set(room.id, furniture);
 
     for (const item of furniture) {
-      const spriteKey = `furniture_${item.type}`;
       // The collision body and light occluder track the VISIBLE art, not the
       // padded logical rect. For a PNG the visible art fills only part of the
       // texture (transparent margins); the procedural fallback fills the whole
       // rect, so its visible rect is the full rect.
       const def = FURNITURE_TYPES[item.type];
+      // Variant props (trash cans, mannequins) deterministically pick one of
+      // their N images from position; non-variant types resolve to furniture_<type>.
+      const spriteKey = propVariantKey(item.type, item.x, item.y, def && def.variants);
       // Collision body / light occluder track the VISIBLE art for flat top-down
       // furniture; for upright billboards they track the small floor FOOTPRINT
       // (item rect) instead, so a tall standee never becomes a tall wall.
@@ -718,6 +761,10 @@ export class GameScene extends Phaser.Scene {
         sprite.setDisplaySize(def.spriteWidth, def.spriteHeight);
         const baseDepth = billboardDepth(baseY, room.floor * FLOOR_Y_OFFSET);
         sprite.setDepth(baseDepth);
+        // Start dark; updateBillboardLighting brightens it next frame if lit, so a
+        // freshly spawned prop never flashes full-bright before the first pass.
+        const g0 = brightnessToGray(0, BILLBOARD_MIN_LIGHT);
+        sprite.setTint(Phaser.Display.Color.GetColor(g0, g0, g0));
         this.billboardProps.push({ sprite, cx, baseY, spriteWidth: def.spriteWidth, spriteHeight: def.spriteHeight, baseDepth });
         // Clip the standee where it would rise past the room's interior so a tall
         // prop against the north wall never pokes through into the next room. The
@@ -2810,6 +2857,7 @@ export class GameScene extends Phaser.Scene {
     this.darkGraphics.fillStyle(0x000000, 0.95);
     this.darkGraphics.fillRect(view.x - pad, view.y - pad, view.width + pad * 2, view.height + pad * 2);
 
+    const litRoomRects = [];
     const litRoomIds = getLitRoomIds(this.switchStates);
     if (!litRoomIds.includes(0)) litRoomIds.push(0);
     for (const roomId of litRoomIds) {
@@ -2819,6 +2867,7 @@ export class GameScene extends Phaser.Scene {
       this.maskGraphics.fillRect(room.x, room.y, room.width, room.height);
       this.lightGraphics.fillStyle(0xffffcc, 0.05);
       this.lightGraphics.fillRect(room.x, room.y, room.width, room.height);
+      litRoomRects.push({ x: room.x, y: room.y, width: room.width, height: room.height });
     }
 
     // No light leaks through the rift in either direction -- the backrooms
@@ -2836,8 +2885,8 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Automatic ceiling lamps light a local pool regardless of the flashlight or
-    // battery, so they are drawn BEFORE the flashlight early-return. Cull to the
-    // viewport; other floors sit far away in world-Y and fall outside it.
+    // battery. Cull to the viewport; other floors sit far away in world-Y.
+    const lamps = [];
     for (const lamp of this.lampStates) {
       if (lamp.x + lamp.radius < view.x || lamp.x - lamp.radius > view.x + view.width ||
           lamp.y + lamp.radius < view.y || lamp.y - lamp.radius > view.y + view.height) continue;
@@ -2846,49 +2895,68 @@ export class GameScene extends Phaser.Scene {
         LAMP_GLOW_STEPS, 0xffffff, LAMP_MASK_RING_ALPHA * b);
       this.drawRadialGlow(this.lightGraphics, lamp.x, lamp.y, lamp.radius,
         LAMP_GLOW_STEPS, lamp.tint, LAMP_LIGHT_RING_ALPHA * b);
+      lamps.push({ x: lamp.x, y: lamp.y, radius: lamp.radius, brightness: b });
     }
 
-    if (!isFlashlightLit(this.flashlightState)) return;
+    // The flashlight reveals a cone + near-field pool only while lit and not
+    // mid-flicker. These are CAPTURED rather than early-returned so the per-prop
+    // lighting below always runs -- a prop in a lit room or lamp pool must light
+    // even when the flashlight is off.
+    let conePolygon = null;
+    let nearField = null;
+    if (isFlashlightLit(this.flashlightState)) {
+      const coneAngle = getFlashlightConeAngle(this.batteryState, this.flashlightAngle);
+      if (coneAngle > 0 && !shouldFlicker(this.batteryState, time)) {
+        const aim = this.playerAngle || 0;
+        const origin = {
+          x: this.player.x + Math.cos(aim) * FLASHLIGHT_MUZZLE_OFFSET,
+          y: this.player.y + Math.sin(aim) * FLASHLIGHT_MUZZLE_OFFSET,
+        };
+        // Maze walls only contribute their far faces (back-face culling), so the
+        // cone reaches across each wall band to light its near face -- walls read
+        // as solid bands of thickness instead of infinitely-thin shadow lines.
+        const occluders = [
+          ...filterSegmentsNear(origin, FLASHLIGHT_RANGE, this.wallSegments),
+          ...filterRectsNear(origin, FLASHLIGHT_RANGE, this.mazeWallRects).flatMap(r => wallRectOccluders(r, origin)),
+          ...filterRectsNear(origin, FLASHLIGHT_RANGE, this.furnitureOccluderRects).flatMap(r => wallRectOccluders(r, origin)),
+        ];
+        const polygon = getFlashlightPolygon(origin, aim, coneAngle, occluders, FLASHLIGHT_RANGE);
 
-    const coneAngle = getFlashlightConeAngle(this.batteryState, this.flashlightAngle);
-    if (coneAngle <= 0 || shouldFlicker(this.batteryState, time)) return;
+        if (polygon.length >= 3) {
+          this.maskGraphics.fillStyle(0xffffff);
+          this.drawPolygon(this.maskGraphics, polygon);
+          this.lightGraphics.fillStyle(0xffffcc, 0.05);
+          this.drawPolygon(this.lightGraphics, polygon);
+          conePolygon = polygon;
+        }
 
-    const aim = this.playerAngle || 0;
-    const origin = {
-      x: this.player.x + Math.cos(aim) * FLASHLIGHT_MUZZLE_OFFSET,
-      y: this.player.y + Math.sin(aim) * FLASHLIGHT_MUZZLE_OFFSET,
-    };
-    // Maze walls only contribute their far faces (back-face culling), so the
-    // cone reaches across each wall band to light its near face -- walls read
-    // as solid bands of thickness instead of infinitely-thin shadow lines.
-    const occluders = [
-      ...filterSegmentsNear(origin, FLASHLIGHT_RANGE, this.wallSegments),
-      ...filterRectsNear(origin, FLASHLIGHT_RANGE, this.mazeWallRects).flatMap(r => wallRectOccluders(r, origin)),
-      ...filterRectsNear(origin, FLASHLIGHT_RANGE, this.furnitureOccluderRects).flatMap(r => wallRectOccluders(r, origin)),
-    ];
-    const polygon = getFlashlightPolygon(
-      origin,
-      aim,
-      coneAngle,
-      occluders,
-      FLASHLIGHT_RANGE
-    );
-
-    if (polygon.length >= 3) {
-      this.maskGraphics.fillStyle(0xffffff);
-      this.drawPolygon(this.maskGraphics, polygon);
-
-      this.lightGraphics.fillStyle(0xffffcc, 0.05);
-      this.drawPolygon(this.lightGraphics, polygon);
+        // Diffuse near-field pool centred on the player so the beam doesn't read
+        // as a hard point at the cone apex. Drawn unoccluded, on top of the cone.
+        this.drawRadialGlow(this.maskGraphics, this.player.x, this.player.y,
+          FLASHLIGHT_NEARFIELD_RADIUS, FLASHLIGHT_NEARFIELD_STEPS, 0xffffff, 0.09);
+        this.drawRadialGlow(this.lightGraphics, this.player.x, this.player.y,
+          FLASHLIGHT_NEARFIELD_RADIUS, FLASHLIGHT_NEARFIELD_STEPS, 0xffffcc, 0.003);
+        nearField = { x: this.player.x, y: this.player.y, radius: FLASHLIGHT_NEARFIELD_RADIUS };
+      }
     }
 
-    // Diffuse near-field pool centred on the player so the beam doesn't read as a
-    // hard point at the cone apex. Drawn unoccluded (small radius), on top of the
-    // cone, in both the reveal mask and the warm light tint.
-    this.drawRadialGlow(this.maskGraphics, this.player.x, this.player.y,
-      FLASHLIGHT_NEARFIELD_RADIUS, FLASHLIGHT_NEARFIELD_STEPS, 0xffffff, 0.09);
-    this.drawRadialGlow(this.lightGraphics, this.player.x, this.player.y,
-      FLASHLIGHT_NEARFIELD_RADIUS, FLASHLIGHT_NEARFIELD_STEPS, 0xffffcc, 0.003);
+    this.updateBillboardLighting({ litRoomRects, cone: conePolygon, nearField, lamps }, view);
+  }
+
+  // Tint each on-screen upright prop by the light sampled at its base, so a lit
+  // prop's whole front face brightens (like a maze pillar) and an unlit one fades
+  // into the dark. Props render ABOVE the darkness overlay, so this tint -- not
+  // the floor reveal mask -- is what makes them read as lit or dark.
+  updateBillboardLighting(field, view) {
+    if (!this.billboardProps || !this.billboardProps.length) return;
+    const pad = 64;
+    for (const prop of this.billboardProps) {
+      if (prop.cx + prop.spriteWidth < view.x - pad || prop.cx - prop.spriteWidth > view.x + view.width + pad ||
+          prop.baseY < view.y - pad || prop.baseY - prop.spriteHeight > view.y + view.height + pad) continue;
+      const b = sampleBrightness(prop.cx, prop.baseY, field);
+      const g = brightnessToGray(b, BILLBOARD_MIN_LIGHT);
+      prop.sprite.setTint(Phaser.Display.Color.GetColor(g, g, g));
+    }
   }
 
   updateBullets() {
