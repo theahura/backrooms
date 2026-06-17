@@ -118,12 +118,81 @@ export const UPGRADES = [
   },
 ];
 
+// Per-run consumables bought in the shop and applied at the start of the next
+// run (then cleared): a single ammo refill for every carried gun, and a stack
+// of spare batteries. Priced cheap relative to the permanent upgrades.
+export const AMMO_COST = 50;
+export const BATTERY_COST = 75;
+
+const STARTING_GUN_UPGRADES = ['startingPistol', 'startingShotgun', 'startingRifle'];
+
+function defaultConsumables() {
+  return { ammo: false, batteries: 0 };
+}
+
 export function createShopState() {
   const upgrades = {};
   for (const upgrade of UPGRADES) {
     upgrades[upgrade.id] = 0;
   }
-  return { gold: 0, upgrades };
+  return { gold: 0, upgrades, consumables: defaultConsumables() };
+}
+
+// Backfill any upgrade ids and the consumables block absent from an older save,
+// so newly-added shop content is usable without a save migration.
+export function normalizeShopState(state) {
+  const defaults = createShopState();
+  const consumables = state.consumables || {};
+  return {
+    ...state,
+    gold: state.gold ?? 0,
+    upgrades: { ...defaults.upgrades, ...(state.upgrades || {}) },
+    consumables: {
+      ammo: consumables.ammo ?? false,
+      batteries: consumables.batteries ?? 0,
+    },
+  };
+}
+
+function ownsStartingGun(state) {
+  return STARTING_GUN_UPGRADES.some((id) => (state.upgrades[id] || 0) > 0);
+}
+
+function batteryCap(state) {
+  return getUpgradeValue('backpack', state.upgrades.backpack || 0);
+}
+
+export function canBuyAmmo(state) {
+  if (state.consumables.ammo) return false;
+  if (!ownsStartingGun(state)) return false;
+  return state.gold >= AMMO_COST;
+}
+
+export function buyAmmo(state) {
+  if (!canBuyAmmo(state)) return state;
+  return {
+    ...state,
+    gold: state.gold - AMMO_COST,
+    consumables: { ...state.consumables, ammo: true },
+  };
+}
+
+export function canBuyBattery(state) {
+  if (state.consumables.batteries >= batteryCap(state)) return false;
+  return state.gold >= BATTERY_COST;
+}
+
+export function buyBattery(state) {
+  if (!canBuyBattery(state)) return state;
+  return {
+    ...state,
+    gold: state.gold - BATTERY_COST,
+    consumables: { ...state.consumables, batteries: state.consumables.batteries + 1 },
+  };
+}
+
+export function clearConsumables(state) {
+  return { ...state, consumables: defaultConsumables() };
 }
 
 export function addGold(state, amount) {

@@ -125,8 +125,34 @@ export function switchWeapon(state) {
   return { ...state, activeSlot: otherSlot };
 }
 
+// Classify what grabbing `weaponType` off the floor should do given the current
+// loadout: 'equip' a free slot, dump it as 'ammo' into an already-owned copy,
+// skip it ('full') because that copy is already maxed, or 'swap' it for the
+// second weapon when both slots hold different guns.
+export function weaponPickupOutcome(state, weaponType) {
+  const ownedSlot = state.slots.findIndex((w) => w && w.id === weaponType.id);
+  if (ownedSlot >= 0) {
+    return state.ammo[ownedSlot] >= weaponType.maxAmmo ? 'full' : 'ammo';
+  }
+  return state.slots.includes(null) ? 'equip' : 'swap';
+}
+
 export function pickupWeapon(state, weaponType, initialAmmo) {
   const ammoToSet = initialAmmo !== undefined ? initialAmmo : weaponType.startAmmo;
+
+  // A duplicate of a carried weapon is not a second copy -- its magazine is
+  // poured into the slot already holding that weapon (capped at maxAmmo).
+  const ownedSlot = state.slots.findIndex((w) => w && w.id === weaponType.id);
+  if (ownedSlot >= 0) {
+    const newAmmo = [...state.ammo];
+    newAmmo[ownedSlot] = Math.min(newAmmo[ownedSlot] + ammoToSet, weaponType.maxAmmo);
+    return {
+      state: { ...state, ammo: newAmmo },
+      droppedWeapon: null,
+      addedAmmo: true,
+    };
+  }
+
   const firstEmpty = state.slots[0] === null ? 0 : state.slots[1] === null ? 1 : -1;
 
   if (firstEmpty >= 0) {
@@ -137,6 +163,7 @@ export function pickupWeapon(state, weaponType, initialAmmo) {
     return {
       state: { ...state, slots: newSlots, ammo: newAmmo },
       droppedWeapon: null,
+      addedAmmo: false,
     };
   }
 
@@ -147,7 +174,15 @@ export function pickupWeapon(state, weaponType, initialAmmo) {
   return {
     state: { ...state, slots: newSlots, ammo: newAmmo },
     droppedWeapon: { ...dropped, ammo: droppedAmmo },
+    addedAmmo: false,
   };
+}
+
+// Top every equipped weapon up to its max ammo (empty slots untouched). Used to
+// apply a shop "Ammo" purchase at the start of a run.
+export function refillAllAmmo(state) {
+  const ammo = state.slots.map((w, i) => (w ? w.maxAmmo : state.ammo[i]));
+  return { ...state, ammo };
 }
 
 export function getActiveWeapon(state) {
