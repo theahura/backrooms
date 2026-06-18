@@ -1650,7 +1650,14 @@ export class GameScene extends Phaser.Scene {
     bullet.setData('originY', fromY);
   }
 
-  onEnemyBulletHitPlayer(bullet) {
+  onEnemyBulletHitPlayer(objA, objB) {
+    // Phaser's sprite-vs-group overlap invokes the callback with the single
+    // sprite (the player) FIRST and the group member (the bullet) second,
+    // regardless of the order they were passed to add.overlap(). Resolve the
+    // bullet explicitly so we deactivate the BULLET, never the player --
+    // calling setVisible(false) on the player here was the real "player
+    // disappears when shot" bug (it hid the player on every spitter hit).
+    const bullet = objA === this.player ? objB : objA;
     bullet.setActive(false);
     bullet.setVisible(false);
     bullet.body.stop();

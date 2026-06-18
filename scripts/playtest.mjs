@@ -449,25 +449,30 @@ if (rechargeCheck.skipped) {
   if (gate > 0.0001) log('FAIL: battery recharged while off WITHOUT the upgrade (gate broken)');
 }
 
-// Spec Known bug: "being shot makes the player fully disappear." The old damage
-// feedback was a FULL-OPACITY camera flash (cameras.main.flash(_, 255,0,0)) that
-// overlaid the whole view in solid red, erasing the player. The fix replaces it
-// with a capped-alpha red tint (depth below the player). Drive the REAL damage
-// handler and assert: the hit lands, the capped damage tint fires, NO full-screen
-// camera flash runs, and the player sprite stays visible. Non-vacuous: hpDropped
-// proves a real hit occurred.
+// Spec Known bug: "being shot makes the player fully disappear." The actual root
+// cause was an argument-order mismatch: the enemy-bullet-vs-player overlap calls
+// onEnemyBulletHitPlayer with the player sprite FIRST and the bullet SECOND (how
+// Phaser orders a sprite-vs-group overlap), but the handler treated its first arg
+// as the bullet and called setVisible(false)/setActive(false) on it -- hiding the
+// PLAYER on every spitter hit. We drive the handler EXACTLY as Phaser does
+// (player first, real-ish bullet second) and assert the player is still visible
+// and active afterwards. NOTE: invoking with a lone stub bullet (the old guard)
+// could never catch this -- the bug acts on the FIRST arg, so the stub has to be
+// the second arg and the player the first. Also asserts the hit lands, the capped
+// damage tint fires, and NO full-screen camera flash runs.
 const shotCheck = await gameEval(page, () => {
   const s = window.__game.scene.getScene('GameScene');
   if (!s || !s.player) return { skipped: 'no game scene' };
   const hpBefore = s.combatState.hp;
   s.combatState.damageCooldown = 0;
-  s.onEnemyBulletHitPlayer({ setActive() {}, setVisible() {}, body: { stop() {} } });
+  const bullet = { setActive() {}, setVisible() {}, body: { stop() {} } };
+  s.onEnemyBulletHitPlayer(s.player, bullet);
   const fx = s.cameras.main.flashEffect;
   return {
     hpDropped: s.combatState.hp < hpBefore,
     damageTintActive: s.damageFlashRemaining > 0,
     cameraFlashRunning: fx ? fx.isRunning : false,
-    playerVisible: s.player.visible && s.player.alpha >= 0.85,
+    playerVisible: s.player.visible && s.player.active && s.player.alpha >= 0.85,
   };
 });
 if (shotCheck.skipped) {
